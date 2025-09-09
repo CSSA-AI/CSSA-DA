@@ -6,5 +6,5 @@ class BaseReranker(ABC):
         pass
 
     @abstractmethod
-    def rerank(self, query: str, articles: List[Tuple[int, float, Article]]) -> List[Article]:
+    def rerank(self, query: str, articles: List[Tuple[int, float, Article]], top_k: int = 3) -> List[Article]:
         pass

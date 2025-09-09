@@ -6,5 +6,5 @@ class BaseRetriever(ABC):
         pass
     
     @abstractmethod
-    def search(self, query: str, top_k: int) -> List[Tuple[int, float, Article]]:
+    def search(self, query: str, top_k: int = 5) -> List[Tuple[int, float, Article]]:
         pass
