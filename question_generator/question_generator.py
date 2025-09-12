@@ -64,27 +64,32 @@ class QuestionGenerator:
             return []
     
     def _create_question_prompt(self, title: str, content: str) -> str:
-        """Create a prompt for question generation."""
+        """Create a universal prompt for question generation (any content type)."""
+        content_patterns = self._detect_content_patterns(content)
         return f"""
-请为以下留学相关文章生成{Config.QUESTIONS_PER_ARTICLE}个高质量的中文问题。
+请基于下面这篇文章，为真实读者写出{Config.QUESTIONS_PER_ARTICLE}个"自然、口语化、可由本文回答"的问题。
 
 文章标题：{title}
 
 文章内容：
 {content}
 
-要求：
-1. 问题必须用简体中文
-2. 问题应该涵盖不同难度层次（基础、中级、高级）
-3. 问题类型应该多样化：
-   - 事实性问题（关于具体数据、费用、要求等）
-   - 比较性问题（对比不同选项、地区、学校等）
-   - 实用性问题（如何申请、准备、操作等）
-   - 分析性问题（为什么、影响、趋势等）
-4. 问题应该具体、明确，避免过于宽泛
-5. 问题应该对读者有实际价值
+写作指引（重要）：
+1) 语气与风格：
+   - 像人在咨询时会问的自然问题，不要机械或模板化。
+   - 用简洁口语表达。
+2) 泛化但可回答：
+   - 问题应适用于类似场景（便于后续RAG检索），尽量避免直接写出文章中的专有名词。
+   - 问题应独立完整，不依赖"这篇文章/这个产品"等指代，但保证问题仍能由本文内容作答。
+3) 信息取材：
+   - 紧扣文章中可落地的信息：流程/材料/条件/分数/费用构成/时限/差异点/注意事项/常见误区/操作步骤等。
+   - 问题中应包含文章的主要主体（如大学名称、专业名称、地区名称等），但避免过于具体的细节。
+4) 形式要求：
+   - 每个问题一行，不要编号，不要解释或前后缀。
+   - 每个问题尽量不超过30个字，直截了当。
+   - 严禁复述标题，也不要出现"这篇文章/本文/核心要点是什么"之类句式。
 
-请直接返回问题列表，每个问题一行，不要添加编号或其他格式。
+仅输出问题列表，每行一个问题，不要其他内容。
 """
     
     def _parse_questions(self, questions_text: str) -> List[str]:
@@ -101,6 +106,45 @@ class QuestionGenerator:
                 questions.append(line)
         
         return questions
+    
+    def _detect_content_patterns(self, content: str) -> List[str]:
+        """Detect broad content patterns for universal question generation."""
+        content_lower = content.lower()
+        patterns = []
+        
+        # Informational patterns
+        if any(word in content_lower for word in ['介绍', '说明', '指南', '教程', '如何', '怎么']):
+            patterns.append('informational')
+        
+        # Comparative patterns
+        if any(word in content_lower for word in ['对比', '比较', '选择', '差异', '优势', '劣势']):
+            patterns.append('comparative')
+        
+        # Process patterns
+        if any(word in content_lower for word in ['步骤', '流程', '方法', '操作', '申请', '办理']):
+            patterns.append('process')
+        
+        # Cost patterns
+        if any(word in content_lower for word in ['价格', '费用', '成本', '花费', '学费', '生活费']):
+            patterns.append('cost')
+        
+        # Requirements patterns
+        if any(word in content_lower for word in ['条件', '要求', '资格', '标准', '门槛', '限制']):
+            patterns.append('requirements')
+        
+        # Features patterns
+        if any(word in content_lower for word in ['特点', '功能', '优势', '特色', '亮点', '卖点']):
+            patterns.append('features')
+        
+        # Lifestyle patterns
+        if any(word in content_lower for word in ['生活', '娱乐', '美食', '旅游', '购物', '体验']):
+            patterns.append('lifestyle')
+        
+        # Personal patterns
+        if any(word in content_lower for word in ['感受', '建议', '推荐', '评价', '体验', '心得']):
+            patterns.append('personal')
+        
+        return patterns
     
     def generate_questions_for_articles(self, articles: List[Dict[str, Any]]) -> Dict[int, List[str]]:
         """Generate questions for multiple articles."""

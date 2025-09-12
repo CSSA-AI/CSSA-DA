@@ -15,13 +15,13 @@ class Config:
     
     # API Configuration
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-    OPENAI_MODEL = "gpt-4.1"
+    OPENAI_MODEL = "gpt-4.1-nano"
     
     # File paths
     DATA_DIR = Path("data")
     
     # Question generation settings
-    QUESTIONS_PER_ARTICLE = 3  # Number of questions to generate per article
+    QUESTIONS_PER_ARTICLE = 10  # Number of questions to generate per article
     MAX_TOKENS = 1000  # Maximum tokens for question generation
     TEMPERATURE = 0.7  # Creativity level for question generation
     
