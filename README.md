@@ -14,6 +14,7 @@
 
 ### Repo Layout:
 
+```plaintext
 rag-chatbot/
 ├─ apps/
 │  ├─ api/                         # 后端 Web 服务（FastAPI/Flask）
@@ -126,3 +127,4 @@ rag-chatbot/
 ├─ Makefile                        # 常用命令入口（make dev / make test / make index）
 ├─ README.md
 └─ package.json / pyproject.toml   # 根级管理（前端/后端并存时都在 root）
+```
