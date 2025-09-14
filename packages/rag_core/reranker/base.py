@@ -1,6 +1,7 @@
 from packages.rag_core.utils.article import Article
 from abc import ABC, abstractmethod
 from typing import Tuple, List
+
 class BaseReranker(ABC):
     def __init__(self):
         pass
