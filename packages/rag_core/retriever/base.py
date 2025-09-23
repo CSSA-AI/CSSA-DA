@@ -2,7 +2,8 @@ from packages.rag_core.utils.article import Article
 from abc import ABC, abstractmethod
 from typing import Tuple, List
 class BaseRetriever(ABC):
-    def __init__(self):
+    def __init__(self, input_list: List[Article]):
+        self.articles = input_list
         pass
     
     @abstractmethod
