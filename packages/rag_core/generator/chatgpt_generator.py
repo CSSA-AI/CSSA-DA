@@ -186,6 +186,38 @@ class ChatGPTGenerator(BaseGenerator):
         *,
         session_id: str = "default",
         on_usage: Optional[Callable[[Dict], None]] = None,
+    ):
+        """
+        逐字/逐块流式生成。yield 出文本增量；末尾触发 on_usage。
+        """
+        context_str = _format_context_from_articles(articles)
+        inputs = {"question": query, "context": context_str}
+
+        usage_cb = UsageCallback()
+        stream = self.chain_with_mem.stream(
+            inputs,
+            config={
+                "configurable": {"session_id": session_id},
+                "callbacks": [usage_cb],
+            },
+        )
+        full = []
+        for piece in stream:
+            full.append(piece)
+            yield piece
+
+        if on_usage:
+            on_usage(usage_cb.usage)
+    
+
+    # 可选：如果后续需要“返回一次性完整答案字符串输出”，可以用这个接口：
+    def generate2(
+        self,
+        query: str,
+        articles: List[Article],
+        *,
+        session_id: str = "default",
+        on_usage: Optional[Callable[[Dict], None]] = None,
     ) -> str:
         """
         返回一次性完整答案字符串。保持旧 prompt/context 逻辑，并自动注入对话记忆。
@@ -210,39 +242,8 @@ class ChatGPTGenerator(BaseGenerator):
 
         return resp_text
 
-    # 可选：如果后续需要“逐字流式输出”，可以用这个接口：
-    def stream_generate(
-        self,
-        query: str,
-        articles: List[Article],
-        *,
-        session_id: str = "default",
-        on_usage: Optional[Callable[[Dict], None]] = None,
-    ):
-        """
-        逐字/逐块流式生成。yield 出文本增量；末尾触发 on_usage。
-        """
-        context_str = _format_context_from_articles(articles)
-        inputs = {"question": query, "context": context_str}
 
-        usage_cb = UsageCallback()
-        stream = self.chain_with_mem.stream(
-            inputs,
-            config={
-                "configurable": {"session_id": session_id},
-                "callbacks": [usage_cb],
-            },
-        )
-        full = []
-        for piece in stream:
-            full.append(piece)
-            yield piece
-
-        if on_usage:
-            on_usage(usage_cb.usage)
-        # 想返回完整文本可以： return "".join(full)
-
-    # —— 方便测试/调试的历史操作（可选） ——
+    # —— 方便测试/调试的历史操作 ——
     def get_history_messages(self, session_id: str):
         return self.history_store.get_history(session_id).messages
 
