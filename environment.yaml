@@ -32,3 +32,5 @@ dependencies:
     - trafilatura
     - langdetect
     - hanzidentifier
+    - bs4
+    - requests

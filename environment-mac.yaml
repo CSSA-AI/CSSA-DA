@@ -1,6 +1,7 @@
 name: cssa-ai
 channels:
   - conda-forge
+  - pytorch   # add pytorch channel for reliable PyTorch/torchvision/torchaudio builds
   - defaults
 dependencies:
   - python=3.11.12
@@ -14,14 +15,16 @@ dependencies:
   - nltk
   - gensim
   - ipython
-  - transformers
-  - faiss-cpu>=1.7.4
   - tqdm
+  - faiss-cpu>=1.7.4
+  - pytorch
+  - torchvision
+  - torchaudio
+  # If you are on CPU-only, uncomment this line (Linux/Windows):
+  # - cpuonly
+  # On Apple Silicon you can omit cpuonly; PyTorch uses MPS automatically if available.
   - pip
   - pip:
-      - torch
-      - torchaudio
-      - torchvision
       - sentence_transformers
       - accelerate==1.6.0
       - rank-bm25==0.2.2
@@ -31,3 +34,5 @@ dependencies:
       - trafilatura
       - langdetect
       - hanzidentifier
+      - bs4
+      - requests
