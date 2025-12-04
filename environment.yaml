@@ -34,3 +34,5 @@ dependencies:
     - hanzidentifier
     - bs4
     - requests
+    - openai
+    - python-dotenv
