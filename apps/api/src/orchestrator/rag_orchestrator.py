@@ -13,7 +13,7 @@ class RAGOrchestrator():
         print(f"Successfully retrieved {len(retrieve_result)} articles.")
         reranker_result = self.reranker.rerank(query=query, articles=retrieve_result)
         print(f"Successfully reranked and left {len(reranker_result)} articles.")
-        generate_result = self.generator.generate(query = query, articles=reranker_result)
+        generate_result = self.generator.generate_text(query = query, articles=reranker_result)
         print("Successfully generated response.")
         return generate_result
         

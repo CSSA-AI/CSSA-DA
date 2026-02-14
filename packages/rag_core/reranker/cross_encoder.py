@@ -18,7 +18,7 @@ class CrossEncoderReranker(BaseReranker):
         if not articles:
             return []
         
-        pairs = [(query, art[2].raw_text) for art in articles]
+        pairs = [(query, art[2].text) for art in articles]
         scores = self.model.predict(pairs)
         sorted_articles = sorted(zip(articles, scores), key=lambda x: x[1], reverse=True)
         return [art[0][2] for art in sorted_articles[:top_k]]
