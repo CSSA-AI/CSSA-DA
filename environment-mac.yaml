@@ -1,38 +1,67 @@
 name: cssa-ai
 channels:
   - conda-forge
-  - pytorch   # add pytorch channel for reliable PyTorch/torchvision/torchaudio builds
+  - pytorch
   - defaults
 dependencies:
   - python=3.11.12
-  - mypy
-  - matplotlib
+  - pip
+  # 基础科学计算
   - numpy
   - pandas
+  - scikit-learn
+  - matplotlib
+  - tqdm
+  # 开发工具
+  - mypy
   - ipykernel
   - jupyter
-  - scikit-learn
-  - nltk
-  - gensim
   - ipython
-  - tqdm
+  # 向量检索核心
   - faiss-cpu>=1.7.4
+  # 深度学习基础
   - pytorch
   - torchvision
   - torchaudio
-  # If you are on CPU-only, uncomment this line (Linux/Windows):
-  # - cpuonly
-  # On Apple Silicon you can omit cpuonly; PyTorch uses MPS automatically if available.
-  - pip
+  # 文本处理
+  - nltk
+  - gensim
+
   - pip:
-      - sentence_transformers
-      - accelerate==1.6.0
-      - rank-bm25==0.2.2
-      - discopy
-      - langchain-community
-      - langchain-text-splitters
-      - trafilatura
-      - langdetect
-      - hanzidentifier
-      - bs4
-      - requests
+      # --- RAG 核心组件 ---
+      - sentence_transformers    # Embedding 模型
+      - rank-bm25==0.2.2         # 关键词检索 (BM25)
+      - accelerate==1.6.0        # 模型加速
+      - peft                     # [新增] 你的 Reranker 代码用到了 LoRA 微调加载
+      
+      # --- LangChain 全家桶 ---
+      - langchain                # 基础框架
+      - langchain-community      # 社区组件
+      - langchain-core           # 核心接口
+      - langchain-openai         # [新增] 你的 ChatGPTGenerator 必须用这个
+      - langchain-text-splitters # 文本切片
+      - tiktoken                 # [新增] 你的 Generator 用来计算 Token 数量
+
+      # --- 后端 API (Platform Squad 必需) ---
+      - fastapi                  # [新增] 构建 REST API
+      - uvicorn[standard]        # [新增] API 服务器
+      - python-multipart         # [新增] 支持文件上传接口
+      - pydantic                 # 数据验证
+      - pydantic-settings        # [新增] 管理 .env 配置
+
+      # --- 数据库 (Postgres + pgvector) ---
+      - sqlalchemy               # [新增] ORM 框架
+      - asyncpg                  # [新增] 异步 Postgres 驱动 (FastAPI 标配)
+      - psycopg2-binary          # 同步驱动 (备用)
+      - pgvector                 # [新增] 向量数据库插件支持
+
+      # --- 爬虫与数据清洗 (Data Squad 必需) ---
+      - trafilatura              # 网页正文提取
+      - beautifulsoup4           # HTML 解析 (即 bs4)
+      - requests                 # HTTP 请求
+      - langdetect               # 语言检测
+      - hanzidentifier           # 繁简识别
+
+      # --- Demo 演示 ---
+      - streamlit                # [新增] 刚才给你的 Demo 脚本需要这个
+      - python-dotenv            # [新增] 加载 .env 文件中的 API KEY

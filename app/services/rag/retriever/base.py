@@ -1,4 +1,5 @@
 from app.schemas.article import Article
+from app.schemas.search_result import SearchResult
 from abc import ABC, abstractmethod
 from typing import Tuple, List
 class BaseRetriever(ABC):
@@ -8,5 +9,5 @@ class BaseRetriever(ABC):
         pass
     
     @abstractmethod
-    def search(self, query: str, top_k: int = 5) -> List[Tuple[int, float, Article]]:
+    def search(self, query: str, top_k: int = 5) -> List[SearchResult]:
         pass

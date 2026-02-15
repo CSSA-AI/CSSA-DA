@@ -12,6 +12,7 @@ from typing import List, Tuple, Optional
 from sentence_transformers import SentenceTransformer
 
 from app.schemas.article import Article
+from app.schemas.search_result import SearchResult
 from app.services.rag.retriever.base import BaseRetriever
 
 
@@ -69,7 +70,7 @@ class FAISSRetriever(BaseRetriever):
         ).astype("float32")
         return vec
 
-    def search(self, query: str, top_k: int = 5) -> List[Tuple[int, float, Article]]:
+    def search(self, query: str, top_k: int = 10) -> List[Tuple[int, float, Article]]:
         """Retrieve top-k articles given a query string."""
         if not self._is_built:
             self._encode_articles()
@@ -81,7 +82,8 @@ class FAISSRetriever(BaseRetriever):
         results = []
         for i, score in zip(indices[0], scores[0]):
             article = self.id_mapping[i]
-            results.append((int(i), float(score), article))
+            result = SearchResult(article=article, score=score, rank=i)
+            results.append(result)
         return results
 
     def save_all(self, embed_path, index_path, idmap_path):

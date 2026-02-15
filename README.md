@@ -11,120 +11,101 @@
 1. 使用github作为代码传输方式，进行修改前先创建一个以自己名字命名的branch，创建新的file后进行修改，尽量不要修改已经在main里的文件，会导致conflict。完成当前任务后通过commit -> push -> pull request来合并入main。
 2. 保持代码 clean 和 readable，不强制要求oop。
 
+### Github使用规范：
+1. 本项目采用github进行version control
+2. branch命名规则：
+
+    a. feature/... → 新功能 (feature/retriever/devin)
+
+    b. bugfix/... → bug修复 (bugfix/null-pointer/devin)
+
+    c. hotfix/... → 紧急热补丁 (hotfix/security-patch/devin)
+
+    d. release/... → 准备更新 (release/v2.1.0/devin)
+
+    e. chore/... → 整理，config等非功能性实现 (chore/update-policy/devin)
+
+3. 对于持续时间较长的branch，强烈建议频繁 
 
 ### Repo Layout:
 
 ```plaintext
-rag-chatbot/
-├─ apps/
-│  ├─ api/                         # 后端 Web 服务（FastAPI/Flask）
-│  │  ├─ src/
-│  │  │  ├─ app/
-│  │  │  │  ├─ main.py            # 入口（挂载路由、中间件）
-│  │  │  │  ├─ routers/
-│  │  │  │  │  ├─ chat.py         # /chat 流程编排入口（粘合代码就在这里）
-│  │  │  │  │  ├─ health.py
-│  │  │  │  ├─ deps.py            # 依赖注入（DB、向量库、缓存）
-│  │  │  │  ├─ settings.py        # Pydantic 设置，读取 .env / configs/*
-│  │  │  ├─ domain/
-│  │  │  │  ├─ schemas.py         # Pydantic 模型（Message, Document, Hit, Answer...）
-│  │  │  │  ├─ events.py          # 事件/日志结构（可用于审计）
-│  │  │  └─ orchestrator/
-│  │  │     └─ rag_orchestrator.py# 串联 retriever → reranker → generator
-│  │  └─ tests/
-│  │     ├─ unit/
-│  │     └─ integration/
-│  └─ web/                         # 前端（Next.js/React）
-│     ├─ src/
-│     │  ├─ pages/ or app/
-│     │  ├─ components/
-│     │  └─ lib/
-│     └─ package.json
+rag-chatbot-backend/
+├── .github/                        # [DevOps] CI/CD 流水线
+│   └── workflows/
+│       ├── test.yml                # 自动测试 (Pytest)
+│       └── lint.yml                # 代码规范检查 (Ruff/Black)
 │
-├─ packages/
-│  ├─ rag_core/                    # 可复用的 RAG 核心（Python 包, src-layout）
-│  │  ├─ src/rag_core/
-│  │  │  ├─ retriever/
-│  │  │  │  ├─ base.py            # 协议/接口：RetrieverProtocol
-│  │  │  │  ├─ bm25.py
-│  │  │  │  ├─ faiss_cosine.py
-│  │  │  │  └─ qdrant.py
-│  │  │  ├─ reranker/
-│  │  │  │  ├─ base.py            # RerankerProtocol（cross-encoder 等）
-│  │  │  │  └─ ms_marco_ce.py
-│  │  │  ├─ generator/
-│  │  │  │  ├─ base.py            # GeneratorProtocol（LLM 调用）
-│  │  │  │  └─ openai_chat.py
-│  │  │  ├─ pipeline/             # 离线流水线（chunk/embedding/index）
-│  │  │  │  ├─ chunkers.py
-│  │  │  │  ├─ embedder.py
-│  │  │  │  ├─ indexer.py
-│  │  │  │  └─ schemas.py         # 原始文档/切块/向量的通用 DTO
-│  │  │  ├─ storage/              # 数据库/对象存储/缓存抽象
-│  │  │  │  ├─ postgres.py
-│  │  │  │  ├─ supabase.py
-│  │  │  │  ├─ s3.py
-│  │  │  │  └─ redis.py
-│  │  │  ├─ eval/                 # 检索/重排/端到端评测
-│  │  │  │  ├─ metrics.py         # Recall@k, MRR, nDCG, F1...
-│  │  │  │  └─ runner.py
-│  │  │  ├─ utils/                # 通用工具（日志、重试、并行、时间）
-│  │  │  │─ tests/
-│  │  │  └─ config/               # 默认配置（可被 apps 覆盖）
-│  │  └─ pyproject.toml
-│  └─ shared_types/               # 「共享类型」的单一事实源
-│     ├─ openapi/                 # 由 API 导出的 OpenAPI（生成 TS 类型）
-│     ├─ ts/                      # 生成的 TypeScript 类型（frontend 引用）
-│     └─ py/                      # Pydantic/TypedDict（backend & pipelines 引用）
+├── app/                            # [核心代码库]
+│   ├── __init__.py
+│   │
+│   ├── api/                        # [C组 - Platform Squad] 接口层
+│   │   ├── __init__.py
+│   │   ├── deps.py                 # 依赖注入 (提供 DB Session, User, RAG Pipeline)
+│   │   └── v1/
+│   │       ├── endpoints/
+│   │       │   ├── chat.py         # WebSocket/SSE 聊天接口 (调用 RAG Pipeline)
+│   │       │   ├── wechat.py       # 微信生态接口 (Token 验证, 消息解密)
+│   │       │   └── admin.py        # 内部管理接口 (手动触发爬虫等)
+│   │       └── router.py           # 路由汇总
+│   │
+│   ├── core/                       # [C组] 基础设施层
+│   │   ├── config.py               # 环境变量配置 (Pydantic Settings)
+│   │   ├── database.py             # 数据库连接 (Async Engine)
+│   │   ├── security.py             # JWT / OAuth2 工具
+│   │   └── logger.py               # 全局日志配置
+│   │
+│   ├── models/                     # [全员] 数据库模型 (SQLAlchemy)
+│   │   ├── base.py
+│   │   ├── article.py              # Article 和 ArticleChunk (向量字段在这里)
+│   │   └── chat_log.py             # 聊天记录表
+│   │
+│   ├── schemas/                    # [全员] 数据交互契约 (Pydantic)
+│   │   ├── article.py              # 定义爬虫数据的结构
+│   │   ├── chat.py                 # 定义前端 Request/Response 结构
+│   │   └── common.py               # 通用结构 (分页等)
+│   │
+│   ├── services/                   # [核心业务逻辑]
+│   │   ├── __init__.py
+│   │   │
+│   │   ├── ingestion/              # [A组 - Data Squad] 数据管道
+│   │   │   ├── crawler.py          # 爬虫逻辑
+│   │   │   ├── cleaner.py          # 数据清洗
+│   │   │   ├── splitter.py         # 文本切片
+│   │   │   └── manager.py          # 入库总控 (Ingestion Manager)
+│   │   │
+│   │   └── rag/                    # [B组 - AI Squad] RAG 引擎
+│   │       ├── interfaces.py       # [关键] 定义 Retriever/Reranker/Generator 的抽象基类
+│   │       ├── pipeline.py         # [关键] RAG Orchestrator (把组件拼起来)
+│   │       ├── components/         # 具体实现类
+│   │       │   ├── retriever.py    # PostgresRetriever
+│   │       │   ├── reranker.py     # CohereReranker / BgeReranker
+│   │       │   └── generator.py    # OpenAI / Claude Generator
+│   │       └── utils.py            # AI 专用工具 (Token计算, Prompt构建)
+│   │
+│   └── main.py                     # FastAPI 启动入口
 │
-├─ services/
-│  ├─ ingest/                      # 爬虫/Harvester（Trafilatura/Playwright/自定义）
-│  │  ├─ jobs/
-│  │  ├─ loaders/                 # HTML/PDF/API/自定义源
-│  │  └─ cli.py                   # `python -m services.ingest ...`
-│  ├─ indexer/                     # 触发切块→向量化→建索引（批处理/队列）
-│  │  └─ cli.py
-│  └─ worker/                      # 异步任务（Celery/RQ）
+├── alembic/                        # [C组] 数据库迁移脚本
+│   └── versions/
+├── alembic.ini
 │
-├─ data/                           # 数据分层（不入 Git 或用 DVC 管理）
-│  ├─ raw/
-│  ├─ interim/
-│  ├─ processed/
-│  └─ indexes/                     # FAISS/Qdrant dump
+├── data/                           # 本地开发数据 (不提交到 Git)
+│   └── prompts/                    # [B组] Prompt 模板 (.txt / .yaml)
+│       ├── system_prompt.txt
+│       └── user_prompt_template.txt
 │
-├─ configs/                        # 分环境配置（Hydra/纯 YAML 皆可）
-│  ├─ base/
-│  │  ├─ app.yaml                  # API 层参数（分页、限流、CORS）
-│  │  ├─ rag.yaml                  # RAG 流水线参数（k, chunk_size, overlap...）
-│  │  ├─ retriever.yaml            # 模型/索引路径/向量库连接
-│  │  ├─ reranker.yaml
-│  │  ├─ generator.yaml
-│  │  └─ storage.yaml              # Postgres/Supabase/Redis/S3
-│  ├─ dev/
-│  └─ prod/
+├── scripts/                        # [A组] 离线任务脚本
+│   ├── run_ingestion.py            # 手动跑爬虫
+│   └── seed_db.py                  # 初始化数据库
 │
-├─ infra/
-│  ├─ docker/
-│  │  ├─ api.Dockerfile
-│  │  ├─ worker.Dockerfile
-│  │  └─ web.Dockerfile
-│  ├─ docker-compose.dev.yml       # 本地一键起（API+Web+DB+Qdrant/PG/Redis）
-│  ├─ k8s/                         # 生产/预发部署（Deployment/Service/Ingress）
-│  └─ terraform/                   # 云上基础设施（可选）
+├── tests/                          # [全员] 测试用例
+│   ├── unit/                       # 单元测试 (Mock DB)
+│   └── integration/                # 集成测试 (真实 DB)
 │
-├─ scripts/                        # 开发者脚本（格式化、生成类型、导入数据）
-│  ├─ gen_types.sh                 # OpenAPI → TS/Python 类型同步
-│  ├─ seed_demo.sh                 # 演示数据
-│  └─ precommit.sh
-│
-├─ notebooks/                      # 实验/可视化（EDA、评测、消融）
-├─ tests/
-│  ├─ e2e/                         # 端到端对话/检索回归测试
-│  └─ load/                        # 简单压测脚本
-├─ docs/                           # 架构图/ADR/运行手册/API 文档
-├─ .env.example                    # 环境变量模板（见下）
-├─ .pre-commit-config.yaml
-├─ Makefile                        # 常用命令入口（make dev / make test / make index）
-├─ README.md
-└─ package.json / pyproject.toml   # 根级管理（前端/后端并存时都在 root）
+├── .env.example                    # 环境变量模板
+├── .gitignore
+├── docker-compose.yml              # 本地开发环境 (Postgres + App)
+├── Dockerfile                      # 生产环境镜像构建
+├── Makefile                        # 常用命令封装 (make run, make test)
+└── pyproject.toml / requirements.txt
 ```

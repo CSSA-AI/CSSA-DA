@@ -4,6 +4,7 @@ channels:
   - defaults
 dependencies:
   - python=3.11.12
+  - git
   - mypy
   - matplotlib
   - numpy
@@ -25,14 +26,36 @@ dependencies:
     - torchvision
     - sentence_transformers
     - accelerate==1.6.0
+    - peft
     - rank-bm25==0.2.2
     - discopy
+
+    - langchain
     - langchain-community
     - langchain-text-splitters
+    - langchain-openai        # [关键] 你的 ChatGPTGenerator 需要这个
+    - tiktoken                # [关键] 计算 Token 数量
+    - openai
+
     - trafilatura
     - langdetect
     - hanzidentifier
     - bs4
     - requests
-    - openai
-    - python-dotenv
+
+    # === 4. 后端 API (Platform Squad) ===
+    - fastapi                 # 写接口必备
+    - uvicorn[standard]       # 跑服务必备
+    - python-multipart        # 上传文件
+    - pydantic
+    - pydantic-settings       # 读取 .env
+
+    # === 5. 数据库 (Postgres) ===
+    - sqlalchemy              # ORM
+    - asyncpg                 # 异步驱动
+    - psycopg2-binary         # 同步驱动 (备用)
+    - pgvector                # 向量插件支持
+
+    # === 7. Demo 展示 ===
+    - streamlit               # [关键] 跑 Demo 必备
+    - python-dotenv           # 加载环境变量

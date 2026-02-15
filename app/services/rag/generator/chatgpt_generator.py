@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 from .base import BaseGenerator
 from app.schemas.article import Article
+from app.schemas.search_result import SearchResult
 
 # LangChain 现代用法
 from langchain_openai import ChatOpenAI
@@ -38,7 +39,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # ========== 工具函数：Token 估算 / 截断 / Prompt 预览 ==========
 def _estimate_tokens(text: str, model: str = "gpt-5-nano") -> int:
-    """优先用 tiktoken 估算；若不可用则用“约4字符≈1 token”的近似。"""
+    """优先用 tiktoken 估算; 若不可用则用“约4字符≈1 token”的近似。"""
     try:
         import tiktoken
         try:
@@ -220,7 +221,7 @@ def _norm(s: str | None) -> str:
 
 
 def _format_context_from_articles(
-    articles: List[Article],
+    search_results: List[SearchResult],
     *,
     max_answer_tokens: int = 800,    # 防止上下文过长（按 token）
     max_question_tokens: int = 60,
@@ -235,12 +236,13 @@ def _format_context_from_articles(
     - 链接: link
     会做 None 防护与 token 截断。
     """
-    if not articles:
+    if not search_results:
         return ""
 
     blocks: list[str] = []
 
-    for art in articles:
+    for result in search_results:
+        art = result.article
         # Q
         q = None
         if isinstance(art.questions, list) and art.questions:
@@ -342,7 +344,7 @@ class ChatGPTGenerator(BaseGenerator):
     def generate(
         self,
         query: str,
-        articles: List[Article],
+        search_results: List[SearchResult],
         *,
         session_id: str = "default",
         on_usage: Optional[Callable[[Dict], None]] = None,
@@ -352,7 +354,7 @@ class ChatGPTGenerator(BaseGenerator):
         逐字/逐块流式生成。yield 出文本增量；末尾（finally）触发 on_usage。
         """
         context_str = _format_context_from_articles(
-            articles,
+            search_results,
             max_answer_tokens=800,
             max_question_tokens=60,
             model_for_token=self.model_name,
@@ -384,7 +386,7 @@ class ChatGPTGenerator(BaseGenerator):
     def generate_text(
         self,
         query: str,
-        articles: List[Article],
+        search_results: List[SearchResult],
         *,
         session_id: str = "default",
         on_usage: Optional[Callable[[Dict], None]] = None,
@@ -397,7 +399,7 @@ class ChatGPTGenerator(BaseGenerator):
           - on_usage：回调，形如 lambda usage_dict: ...
         """
         context_str = _format_context_from_articles(
-            articles,
+            search_results,
             max_answer_tokens=800,
             max_question_tokens=60,
             model_for_token=self.model_name,
