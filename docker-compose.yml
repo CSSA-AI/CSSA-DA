@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  # 数据库：全队通用
+  postgres:
+    image: ankane/pgvector:v0.5.1
+    container_name: rag_postgres_db
+    restart: always
+    environment:
+      POSTGRES_USER: rag_user
+      POSTGRES_PASSWORD: rag_password
+      POSTGRES_DB: rag_vectordb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # CPU 工作节点 (给 Mac 和无显卡组员)
+  worker-cpu:
+    build: 
+      context: .
+      dockerfile: Dockerfile.cpu
+    container_name: rag_worker_cpu
+    profiles: ["cpu"]
+    depends_on:
+      - postgres
+    volumes:
+      - .:/app
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://rag_user:rag_password@postgres:5432/rag_vectordb
+
+  # GPU 工作节点 (给带 Nvidia 显卡的组员)
+  worker-gpu:
+    build: 
+      context: .
+      dockerfile: Dockerfile.gpu
+    container_name: rag_worker_gpu
+    profiles: ["gpu"]
+    depends_on:
+      - postgres
+    volumes:
+      - .:/app
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://rag_user:rag_password@postgres:5432/rag_vectordb
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  pgdata:
