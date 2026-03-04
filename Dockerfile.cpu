@@ -1,0 +1,22 @@
+# Dockerfile.cpu
+FROM continuumio/miniconda3:latest
+
+WORKDIR /app
+
+# 安装必要的系统组件 (给 psycopg2 编译用)
+RUN apt-get update && apt-get install -y gcc g++ libpq-dev && rm -rf /var/lib/apt/lists/*
+
+# 复制 CPU 配置文件
+COPY environment_cpu.yml .
+
+# 创建 Conda 环境
+RUN conda env create -f environment_cpu.yml
+
+
+ENV PATH=/opt/conda/envs/cssa-ai/bin:$PATH
+
+# 复制你的所有代码
+COPY . .
+
+# 保持容器运行
+CMD ["tail", "-f", "/dev/null"]

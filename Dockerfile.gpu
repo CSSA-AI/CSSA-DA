@@ -1,0 +1,32 @@
+# Dockerfile.gpu
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+
+WORKDIR /app
+
+# 设置非交互模式，避免安装时卡在时区选择
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 安装必要的系统组件和 Miniconda
+RUN apt-get update && apt-get install -y wget bzip2 ca-certificates gcc g++ libpq-dev git && \
+    rm -rf /var/lib/apt/lists/* && \
+    wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh && \
+    /bin/bash ~/miniconda.sh -b -p /opt/conda && \
+    rm ~/miniconda.sh
+
+# 1️⃣ 第一个 ENV：把基础 Conda 命令激活 (必须有)
+ENV PATH=/opt/conda/bin:$PATH
+
+# 复制 GPU 配置文件
+COPY environment_gpu.yml .
+
+# 创建 Conda 环境
+RUN conda env create -f environment_gpu.yml
+
+# 2️⃣ 第二个 ENV：把 cssa-ai 业务环境强行置顶 (神级操作)
+ENV PATH=/opt/conda/envs/cssa-ai/bin:$PATH
+
+# 复制你的所有代码
+COPY . .
+
+# 3️⃣ 极简收尾：只保留 CMD，让容器永远运行 (SHELL 和 ENTRYPOINT 已被删除)
+CMD ["tail", "-f", "/dev/null"]
