@@ -12,14 +12,11 @@ COPY environment_cpu.yml .
 # 创建 Conda 环境
 RUN conda env create -f environment_cpu.yml
 
-# 关键：告诉 Docker 后续的命令都在 cssa-ai 这个虚拟环境里执行
-SHELL ["conda", "run", "-n", "cssa-ai", "/bin/bash", "-c"]
+
+ENV PATH=/opt/conda/envs/cssa-ai/bin:$PATH
 
 # 复制你的所有代码
 COPY . .
-
-# 设置入口点：每次运行容器里的命令时，自动激活 Conda 环境
-ENTRYPOINT ["conda", "run", "--no-capture-output", "-n", "cssa-ai"]
 
 # 保持容器运行
 CMD ["tail", "-f", "/dev/null"]

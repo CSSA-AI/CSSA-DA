@@ -5,13 +5,13 @@
 ## 1. 🟢 启动与关闭 (每天第一步)
 
 # 启动环境 (Mac / 无显卡)
-docker-compose --profile cpu up -d
+docker compose --profile cpu up -d
 
 # 启动环境 (带 Nvidia 显卡)
-docker-compose --profile gpu up -d
+docker compose --profile gpu up -d
 
 # 下班关闭环境
-docker-compose down
+docker compose down
 
 ---
 
