@@ -24,6 +24,9 @@ services:
     profiles: ["cpu"]
     depends_on:
       - postgres
+    ports:
+      - 8000:8000
+      - 8501:8501
     volumes:
       - .:/app
     environment:
@@ -38,6 +41,9 @@ services:
     profiles: ["gpu"]
     depends_on:
       - postgres
+    ports:
+      - 8000:8000
+      - 8501:8501
     volumes:
       - .:/app
     environment:

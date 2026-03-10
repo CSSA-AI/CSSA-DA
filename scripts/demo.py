@@ -44,10 +44,10 @@ def init_rag_system():
 
     # 3. 初始化组件
     # A. Retriever
-    retriever = FAISSRetriever(input_list=all_articles, model_name="paraphrase-multilingual-MiniLM-L12-v2")
+    retriever = FAISSRetriever(input_list=all_articles, model_name="BAAI/bge-m3")
     
     # B. Reranker
-    reranker = CrossEncoderReranker(model_name="cross-encoder/ms-marco-MiniLM-L12-v2")
+    reranker = CrossEncoderReranker(model_name="BAAI/bge-reranker-v2-m3")
     
     # C. Generator
     generator = ChatGPTGenerator(model_name="gpt-4o-mini") 
