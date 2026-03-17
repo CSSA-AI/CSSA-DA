@@ -1,111 +1,197 @@
-### 环境安装
-1. 使用anaconda作为环境管理方式
-2. 打开terminal（打开 anaconda prompt 如果你是Windows用户）
-3. Navigate到CSSA-DA文件夹
-3. 运行conda env create -f environment.yaml
-4. 运行conda activate cssa-ai来激活当前环境（或者直接在vscode中选择）
-5. 后续更新环境运行conda env update -f environment.yaml --prune
+# CSSA-DA: RAG Chatbot for International Students
 
+A Retrieval-Augmented Generation (RAG) chatbot designed for Chinese students and scholars studying in Australia. The system answers questions about education, university requirements, visa processes, and student life by retrieving relevant articles and generating contextual responses via ChatGPT.
 
-### 项目注意：
-1. 使用github作为代码传输方式，进行修改前先创建一个以自己名字命名的branch，创建新的file后进行修改，尽量不要修改已经在main里的文件，会导致conflict。完成当前任务后通过commit -> push -> pull request来合并入main。
-2. 保持代码 clean 和 readable，不强制要求oop。
+---
 
-### Github使用规范：
-1. 本项目采用github进行version control
-2. branch命名规则：
+## Architecture
 
-    a. feature/... → 新功能 (feature/retriever/devin)
-
-    b. bugfix/... → bug修复 (bugfix/null-pointer/devin)
-
-    c. hotfix/... → 紧急热补丁 (hotfix/security-patch/devin)
-
-    d. release/... → 准备更新 (release/v2.1.0/devin)
-
-    e. chore/... → 整理，config等非功能性实现 (chore/update-policy/devin)
-
-3. 对于持续时间较长的branch，强烈建议频繁 
-
-### Repo Layout:
-
-```plaintext
-rag-chatbot-backend/
-├── .github/                        # [DevOps] CI/CD 流水线
-│   └── workflows/
-│       ├── test.yml                # 自动测试 (Pytest)
-│       └── lint.yml                # 代码规范检查 (Ruff/Black)
-│
-├── app/                            # [核心代码库]
-│   ├── __init__.py
-│   │
-│   ├── api/                        # [C组 - Platform Squad] 接口层
-│   │   ├── __init__.py
-│   │   ├── deps.py                 # 依赖注入 (提供 DB Session, User, RAG Pipeline)
-│   │   └── v1/
-│   │       ├── endpoints/
-│   │       │   ├── chat.py         # WebSocket/SSE 聊天接口 (调用 RAG Pipeline)
-│   │       │   ├── wechat.py       # 微信生态接口 (Token 验证, 消息解密)
-│   │       │   └── admin.py        # 内部管理接口 (手动触发爬虫等)
-│   │       └── router.py           # 路由汇总
-│   │
-│   ├── core/                       # [C组] 基础设施层
-│   │   ├── config.py               # 环境变量配置 (Pydantic Settings)
-│   │   ├── database.py             # 数据库连接 (Async Engine)
-│   │   ├── security.py             # JWT / OAuth2 工具
-│   │   └── logger.py               # 全局日志配置
-│   │
-│   ├── models/                     # [全员] 数据库模型 (SQLAlchemy)
-│   │   ├── base.py
-│   │   ├── article.py              # Article 和 ArticleChunk (向量字段在这里)
-│   │   └── chat_log.py             # 聊天记录表
-│   │
-│   ├── schemas/                    # [全员] 数据交互契约 (Pydantic)
-│   │   ├── article.py              # 定义爬虫数据的结构
-│   │   ├── chat.py                 # 定义前端 Request/Response 结构
-│   │   └── common.py               # 通用结构 (分页等)
-│   │
-│   ├── services/                   # [核心业务逻辑]
-│   │   ├── __init__.py
-│   │   │
-│   │   ├── ingestion/              # [A组 - Data Squad] 数据管道
-│   │   │   ├── crawler.py          # 爬虫逻辑
-│   │   │   ├── cleaner.py          # 数据清洗
-│   │   │   ├── splitter.py         # 文本切片
-│   │   │   └── manager.py          # 入库总控 (Ingestion Manager)
-│   │   │
-│   │   └── rag/                    # [B组 - AI Squad] RAG 引擎
-│   │       ├── interfaces.py       # [关键] 定义 Retriever/Reranker/Generator 的抽象基类
-│   │       ├── pipeline.py         # [关键] RAG Orchestrator (把组件拼起来)
-│   │       ├── components/         # 具体实现类
-│   │       │   ├── retriever.py    # PostgresRetriever
-│   │       │   ├── reranker.py     # CohereReranker / BgeReranker
-│   │       │   └── generator.py    # OpenAI / Claude Generator
-│   │       └── utils.py            # AI 专用工具 (Token计算, Prompt构建)
-│   │
-│   └── main.py                     # FastAPI 启动入口
-│
-├── alembic/                        # [C组] 数据库迁移脚本
-│   └── versions/
-├── alembic.ini
-│
-├── data/                           # 本地开发数据 (不提交到 Git)
-│   └── prompts/                    # [B组] Prompt 模板 (.txt / .yaml)
-│       ├── system_prompt.txt
-│       └── user_prompt_template.txt
-│
-├── scripts/                        # [A组] 离线任务脚本
-│   ├── run_ingestion.py            # 手动跑爬虫
-│   └── seed_db.py                  # 初始化数据库
-│
-├── tests/                          # [全员] 测试用例
-│   ├── unit/                       # 单元测试 (Mock DB)
-│   └── integration/                # 集成测试 (真实 DB)
-│
-├── .env.example                    # 环境变量模板
-├── .gitignore
-├── docker-compose.yml              # 本地开发环境 (Postgres + App)
-├── Dockerfile                      # 生产环境镜像构建
-├── Makefile                        # 常用命令封装 (make run, make test)
-└── pyproject.toml / requirements.txt
 ```
+User Query
+    │
+    ▼
+[Retriever]   ──  FAISS semantic search over article question embeddings
+    │
+    ▼
+[Reranker]    ──  CrossEncoder re-ranking (LoRA fine-tuning supported)
+    │
+    ▼
+[Generator]   ──  ChatGPT with LangChain, token-capped conversation history
+    │
+    ▼
+Answer + Source Articles
+```
+
+The pipeline is orchestrated in [app/services/rag/orchestrator.py](app/services/rag/orchestrator.py) and exposed via a Streamlit demo at [scripts/demo.py](scripts/demo.py).
+
+---
+
+## Repo Layout
+
+```
+CSSA-DA/
+├── app/
+│   ├── main.py                              # FastAPI entry point (placeholder)
+│   ├── api/
+│   │   └── deps.py                          # Dependency injection (DB session, RAG pipeline)
+│   ├── core/
+│   │   └── config.py                        # Pydantic settings (placeholder)
+│   ├── models/                              # SQLAlchemy DB models (planned)
+│   │   ├── article.py
+│   │   └── chat_log.py
+│   ├── schemas/
+│   │   ├── article.py                       # Article Pydantic schema
+│   │   └── search_result.py                 # RAG output schema (article + score + rank)
+│   └── services/
+│       ├── question_generator/              # GPT-powered question generation for articles
+│       │   ├── question_generator.py        # Main generation logic (OpenAI batch API)
+│       │   ├── file_processor.py
+│       │   ├── config.py
+│       │   └── main.py
+│       └── rag/                             # Core RAG pipeline
+│           ├── orchestrator.py              # Wires retriever → reranker → generator
+│           ├── retriever/
+│           │   ├── base.py                  # Abstract base class
+│           │   └── faiss_retriever.py       # FAISS + SentenceTransformer semantic search
+│           ├── reranker/
+│           │   ├── base.py                  # Abstract base class
+│           │   ├── cross_encoder.py         # CrossEncoder with optional LoRA adapter
+│           │   ├── qa_dataset.py            # QA dataset for reranker training
+│           │   └── train_lora.py            # LoRA fine-tuning script
+│           ├── generator/
+│           │   ├── base.py                  # Abstract base class
+│           │   └── chatgpt_generator.py     # LangChain ChatOpenAI with streaming + history
+│           ├── eval/                        # Evaluation module (WIP)
+│           └── tests/
+│               ├── test_faiss_retriever.py
+│               └── test_orchertrator.py
+│
+├── scripts/
+│   ├── demo.py                              # Streamlit web demo
+│   ├── merge_json.py                        # Merge multiple JSON data files
+│   ├── run_question_generator.py            # CLI launcher for question generation
+│   └── chunking/                            # Web scrapers and chunking notebooks
+│       ├── aoji_harvester.py                # AOJI website scraper
+│       ├── YI_XIANG_HAO_JU.ipynb
+│       ├── YUN_XIAO_EDU_AU.ipynb
+│       └── myoffer_harvester.ipynb
+│
+├── data/                                    # Local data files (not committed to git)
+│   ├── demo_data.json                       # Merged article dataset used by demo
+│   ├── qa_clean_data.json                   # Cleaned QA pairs for training
+│   ├── qa_faiss_index_bert.index            # Saved FAISS index (BERT embeddings)
+│   ├── qa_faiss_index_trans.index           # Saved FAISS index (transformer embeddings)
+│   └── ...                                  # Raw scraped JSONs per source
+│
+├── tests/
+│   └── test_db.py
+│
+├── Dockerfile.cpu                           # CPU Docker image
+├── Dockerfile.gpu                           # GPU Docker image
+├── docker-compose.yml                       # PostgreSQL + pgvector + app services
+├── environment_cpu.yml                      # Conda environment (CPU)
+├── environment_gpu.yml                      # Conda environment (GPU)
+├── branch-policy.md                         # Git branching conventions
+└── docker-command.md                        # Docker usage reference
+```
+
+---
+
+## Setup
+
+### 1. Conda (recommended)
+
+```bash
+# CPU
+conda env create -f environment_cpu.yml
+conda activate cssa-ai
+
+# GPU
+conda env create -f environment_gpu.yml
+conda activate cssa-ai
+```
+
+To update an existing environment:
+```bash
+conda env update -f environment_cpu.yml --prune
+```
+
+### 2. Environment Variables
+
+Copy `.env.example` to `.env` and fill in:
+
+```
+OPENAI_API_KEY=sk-...
+```
+
+### 3. Docker
+
+```bash
+docker-compose up
+```
+
+See [docker-command.md](docker-command.md) for detailed Docker usage.
+
+---
+
+## Running the Demo
+
+```bash
+streamlit run scripts/demo.py
+```
+
+This launches a chat UI at `http://localhost:8501` with streaming responses and source attribution.
+
+---
+
+## Key Components
+
+### Retriever ([app/services/rag/retriever/faiss_retriever.py](app/services/rag/retriever/faiss_retriever.py))
+- Encodes article questions using SentenceTransformers
+- Stores and searches embeddings with FAISS
+- Returns ranked `SearchResult` objects (article + similarity score)
+
+### Reranker ([app/services/rag/reranker/cross_encoder.py](app/services/rag/reranker/cross_encoder.py))
+- Re-scores retrieved results using a CrossEncoder model
+- Supports loading a LoRA adapter for domain-specific fine-tuning
+- Training script: [app/services/rag/reranker/train_lora.py](app/services/rag/reranker/train_lora.py)
+
+### Generator ([app/services/rag/generator/chatgpt_generator.py](app/services/rag/generator/chatgpt_generator.py))
+- LangChain `ChatOpenAI` integration with token-capped conversation history
+- Formats retrieved articles as context, truncating to stay within token limits
+- Supports streaming (`Iterable[str]`) and tracks token usage per call
+
+### Question Generator ([app/services/question_generator/](app/services/question_generator/))
+- Uses GPT to generate natural Chinese questions for each article (used to build the FAISS search index)
+- Detects content patterns (cost, requirements, process, comparison, etc.) to generate relevant question types
+- Configurable via [app/services/question_generator/config.py](app/services/question_generator/config.py)
+
+---
+
+## Data Schema
+
+**Article** (`app/schemas/article.py`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Unique identifier |
+| `text` | str | Article body |
+| `questions` | List[str] | GPT-generated questions (used for retrieval) |
+| `source` | str | Origin website |
+| `author` | str | Author name |
+| `post_date` | date | Publication date |
+| `language` | str | Content language |
+| `tags` | List[str] | Topic tags |
+| `link` | str | Original URL |
+
+---
+
+## Team Structure
+
+| Squad | Responsibilities |
+|-------|-----------------|
+| **A — Data** | Web scrapers, data cleaning, text chunking |
+| **B — AI** | RAG pipeline, reranker, generator, prompt engineering |
+| **C — Platform** | FastAPI layer, database, security, DevOps |
+
+See [branch-policy.md](branch-policy.md) for branching conventions (`feature/`, `bugfix/`, `hotfix/`, `release/`, `chore/`).
