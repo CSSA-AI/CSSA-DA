@@ -50,7 +50,7 @@ git push -f origin feature/retriever/devin
 - **Squash and merge**（适用于多个开发者提交）
 - 或 **Rebase and merge**（保持线性历史）
 
-合并后可以选择删除已完成的个人分支。
+合并后建议删除已完成的个人分支。
 
 ## 3. 分支命名示例
 ```
