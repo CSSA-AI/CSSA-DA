@@ -21,7 +21,7 @@ from .base import BaseGenerator
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
 
-# LangChain 现代用法
+# LangChain 现代(LCEL Runnable)用法
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser

@@ -98,7 +98,9 @@ if prompt := st.chat_input("请输入你的问题 (例如: 墨大CS硕士雅思�
         
         # === 核心调用 ===
         # 使用 session_id 区分不同用户，这里 Demo 简单用 default
-        answer, sources = rag_orchestrator.run(query=prompt, session_id="demo_user")
+        result = rag_orchestrator.run(prompt)
+        answer = result["answer"]
+        sources = result["reranked_results"]
         
         duration = time.time() - start_time
         
