@@ -10,7 +10,7 @@ class CrossEncoderReranker(BaseReranker):
 
     def __init__(self, model_name, adapter_path=None):
         super().__init__()
-        self.model = CrossEncoder(model_name)
+        self.model = CrossEncoder(model_name, device="cpu")
         # 给底层 HF 模型加载 LoRA adapter
         if adapter_path:
             self.model.model = PeftModel.from_pretrained(self.model.model, adapter_path)

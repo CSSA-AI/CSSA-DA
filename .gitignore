@@ -1,5 +1,14 @@
-*.DS_Store
+# Python
+__pycache__/
 *.pyc
-*.pickle
-__pycache__
-.env
+
+# venv
+.venv/
+
+# models / cache
+.cache/
+*.bin
+*.safetensors
+
+# data（如果不需要提交）
+data/
