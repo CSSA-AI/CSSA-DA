@@ -7,7 +7,7 @@ model = SentenceTransformer("all-MiniLM-L6-v2")
 
 # 2. 连接数据库
 conn = psycopg2.connect(
-    host="localhost",
+    host="postgres",
     port=5432,
     dbname="rag_vectordb",
     user="rag_user",
