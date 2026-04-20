@@ -11,9 +11,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from app.schemas.article import Article
 
 # 引入你的后端组件
-from app.services.rag.orchestrator import RAGOrchestrator
-from app.services.rag.retriever.faiss_retriever import FAISSRetriever
-from app.services.rag.reranker.cross_encoder import CrossEncoderReranker
+from app.services.rag.Langchain_orchestrator import LCRAGOrchestrator
+from app.services.rag.retriever.Langchain_faiss_retriever import FAISSRetriever
+from app.services.rag.reranker.Langchain_cross_encoder import CrossEncoderReranker
 from app.services.rag.generator.chatgpt_generator import ChatGPTGenerator
 
 # 设置页面配置
@@ -53,7 +53,7 @@ def init_rag_system():
     generator = ChatGPTGenerator(model_name="gpt-4o-mini") 
     
     # D. Orchestrator
-    orchestrator = RAGOrchestrator(retriever, reranker, generator)
+    orchestrator = LCRAGOrchestrator(retriever, reranker, generator)
     
     return orchestrator
 
@@ -98,7 +98,9 @@ if prompt := st.chat_input("请输入你的问题 (例如: 墨大CS硕士雅思�
         
         # === 核心调用 ===
         # 使用 session_id 区分不同用户，这里 Demo 简单用 default
-        answer, sources = rag_orchestrator.run(query=prompt, session_id="demo_user")
+        result = rag_orchestrator.run(prompt)
+        answer = result["answer"]
+        sources = result["reranked_results"]
         
         duration = time.time() - start_time
         

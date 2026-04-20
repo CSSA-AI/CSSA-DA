@@ -1,95 +1,71 @@
 import unittest
-from typing import List, Dict, Any
-
-from langchain_core.runnables import RunnableLambda
-
+from typing import List
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
-from app.services.rag.orchestrator import LCRAGOrchestrator
+from app.services.rag.retriever.base import BaseRetriever
+from app.services.rag.reranker.base import BaseReranker
+from app.services.rag.generator.base import BaseGenerator
+from app.services.rag.orchestrator import RAGOrchestrator
 
 
-# -------------------------
-# Dummy retriever (Runnable)
-# -------------------------
-class DummyRetriever:
-    def search(self, query: str) -> List[SearchResult]:
-        articles = [
-            Article(text="Content 1", questions=["Q1"]),
-            Article(text="Content 2", questions=["Q2"]),
-            Article(text="Content 3", questions=["Q3"]),
-        ]
+# Dummy Retriever: return first 3 SearchResults
+class DummyRetriever(BaseRetriever):
+    def search(self, query: str, top_k: int = 5) -> List[SearchResult]:
         return [
-            SearchResult(article=articles[0], score=0.9, rank=1),
-            SearchResult(article=articles[1], score=0.8, rank=2),
-            SearchResult(article=articles[2], score=0.7, rank=3),
+            SearchResult(article=Article(title="Title 1", raw_text="Content 1"), score=0.9, rank=1),
+            SearchResult(article=Article(title="Title 2", raw_text="Content 2"), score=0.8, rank=2),
+            SearchResult(article=Article(title="Title 3", raw_text="Content 3"), score=0.7, rank=3)
         ]
 
 
-# -------------------------
-# Dummy reranker (Runnable)
-# -------------------------
-class DummyReranker:
-    def as_runnable(self):
-        return RunnableLambda(self._run)
-
-    def _run(self, inputs: Dict[str, Any]) -> List[SearchResult]:
-        # inputs = {"query": "...", "search_results": [...]}
-        return inputs["search_results"][:2]  # keep top 2
+# Dummy Reranker: return first 2 SearchResults
+class DummyReranker(BaseReranker):
+    def rerank(self, query: str, articles: List[SearchResult], top_k: int = 2) -> List[SearchResult]:
+        return articles[:2]
 
 
-# -------------------------
-# Dummy generator (Runnable)
-# -------------------------
-class DummyGenerator:
-    def as_runnable(self):
-        return RunnableLambda(self._run)
-
-    def _run(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        # inputs = {"query": "...", "reranked_results": [...]}
-        articles = inputs["reranked_results"]
-        contents = [a.article.text for a in articles]
-        answer = f"Generated answer using: {' + '.join(contents)}"
-        return {
-            "answer": answer,
-            "reranked_results": articles
-        }
+# Dummy Generator: return string
+class DummyGenerator(BaseGenerator):
+    def generate(self, query: str, articles: List[Article]) -> str:
+        contents = [article.raw_text for article in articles]
+        return f"Generated answer for '{query}' using: {' + '.join(contents)}"
 
 
-# -------------------------
-# Test LCEL Orchestrator
-# -------------------------
-class TestLCRAGOrchestrator(unittest.TestCase):
+class TestRAGOrchestrator(unittest.TestCase):
 
     def setUp(self):
         self.retriever = DummyRetriever()
         self.reranker = DummyReranker()
         self.generator = DummyGenerator()
-
-        self.orchestrator = LCRAGOrchestrator(
+        self.orchestrator = RAGOrchestrator(
             retriever=self.retriever,
             reranker=self.reranker,
             generator=self.generator
         )
 
-    def test_pipeline_runs(self):
-        result = self.orchestrator.run("What is LangChain?")
+    def test_orchestrator_pipeline(self):
+        query = "What is LangChain?"
+        result = self.orchestrator.run(query)
 
-        self.assertIsInstance(result, dict)
-        self.assertIn("answer", result)
-        self.assertIn("reranked_results", result)
-
-        self.assertIn("Content 1", result["answer"])
-        self.assertIn("Content 2", result["answer"])
-        self.assertEqual(len(result["reranked_results"]), 2)
+        self.assertIsInstance(result, str)
+        self.assertIn("Generated answer", result)
+        self.assertIn("Content 1", result)
+        self.assertIn("Content 2", result)
 
     def test_empty_query(self):
         result = self.orchestrator.run("")
-        self.assertIsInstance(result, dict)
-        self.assertIn("answer", result)
+        self.assertTrue(len(result) > 0)
 
-    def test_reranked_length(self):
-        result = self.orchestrator.run("test")
-        self.assertEqual(len(result["reranked_results"]), 2)
+    def test_article_pipeline_length(self):
+        retrieve_result = self.retriever.search("test")
+        self.assertEqual(len(retrieve_result), 3)
+
+        reranked = self.reranker.rerank("test", retrieve_result)
+        self.assertEqual(len(reranked), 2)
+
+        # Manually extract articles to simulate what orchestrator does
+        generated = self.generator.generate("test", reranked)
+        self.assertTrue("Content 1" in generated)
 
 
 if __name__ == "__main__":

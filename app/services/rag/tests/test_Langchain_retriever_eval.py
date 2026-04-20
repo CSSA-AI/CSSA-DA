@@ -1,6 +1,6 @@
 # python -m app.services.rag.tests.test_retriever_eval
 from app.schemas.article import Article
-from app.services.rag.retriever.faiss_retriever import FAISSRetriever
+from app.services.rag.retriever.Langchain_faiss_retriever import FAISSRetriever
 from app.services.rag.eval.retriever_eval import RetrieverEvaluator
 
 # -----------------------------

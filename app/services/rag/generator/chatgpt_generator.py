@@ -35,6 +35,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 # 不在此处强制报错，便于测试时 monkeypatch 链条；真正调用到 LLM 再说
+from langchain_core.runnables import RunnableLambda
 
 
 # ========== 工具函数：Token 估算 / 截断 / Prompt 预览 ==========
@@ -292,21 +293,18 @@ class ChatGPTGenerator(BaseGenerator):
         max_retries: int = 2,
         history_store: Optional[InMemoryHistoryStore] = None,
     ):
-        # 保存模型名供其它功能（token 估算/历史裁剪）使用
         self.model_name = model_name
 
-        # 底层 LLM
+        # ===== LLM =====
         self.llm = ChatOpenAI(
             api_key=OPENAI_API_KEY,
             model=model_name,
             temperature=temperature,
-            streaming=True,      # 允许底层流式
+            streaming=True,
             max_retries=max_retries,
-            # 注意：不同版本的 langchain_openai 可能不支持 stream_usage/extra_body；在此不强行设置，避免兼容性问题
-            # 如果版本支持，可在外部配置中开启：extra_body={"stream_options": {"include_usage": True}}
         )
 
-        # —— 保持原有 Prompt 内容（不引入额外变量以避免破坏兼容） ——
+        # ===== Prompt =====
         self.prompt = ChatPromptTemplate.from_messages([
             ("system",
              "你是一名友好、知识丰富的CSSA智能助手, 专门为在澳洲的留学生提供建议。"
@@ -319,28 +317,37 @@ class ChatGPTGenerator(BaseGenerator):
              "资料:\n{context}")
         ])
 
-        # —— LCEL：prompt → llm → 解析为 str ——
+        # ===== LCEL Chain（⚠️ 必须在 __init__ 里）=====
         self.base_chain = self.prompt | self.llm | StrOutputParser()
 
-        # —— 会话历史仓库（按 session_id 区分；默认带 token 上限） ——
+        # ===== Memory =====
         self.history_store = history_store or InMemoryHistoryStore(
             max_tokens_per_session=800,
             model_name=model_name,
-            max_messages=None,  # 可按需设置条数上限
+            max_messages=None,
         )
 
         def _get_history(session_id: str) -> BaseChatMessageHistory:
             return self.history_store.get_history(session_id)
 
-        # —— 绑定记忆：把 chat_history 注入到 MessagesPlaceholder 中 ——
         self.chain_with_mem = RunnableWithMessageHistory(
             self.base_chain,
             _get_history,
-            input_messages_key="question",      # 只把 question 当成“人类输入”写入历史
-            history_messages_key="chat_history" # 历史插槽
+            input_messages_key="question",
+            history_messages_key="chat_history"
         )
 
-    # base.py 的要求：generate(self, query: str, articles: list[Article], **kwargs) -> Iterable[str]
+    # ✅ 正确：类方法（不在 __init__ 里）
+    def as_runnable(self):
+        return RunnableLambda(
+            lambda x: self.generate_text(
+                query=x["query"],
+                search_results=x["search_results"],
+                session_id=x.get("session_id", "default")
+            )
+        )
+
+    # ===== 流式 =====
     def generate(
         self,
         query: str,
@@ -350,15 +357,14 @@ class ChatGPTGenerator(BaseGenerator):
         on_usage: Optional[Callable[[Dict], None]] = None,
         **kwargs,
     ) -> Iterable[str]:
-        """
-        逐字/逐块流式生成。yield 出文本增量；末尾（finally）触发 on_usage。
-        """
+
         context_str = _format_context_from_articles(
             search_results,
             max_answer_tokens=800,
             max_question_tokens=60,
             model_for_token=self.model_name,
         )
+
         inputs = {"question": query, "context": context_str}
 
         usage_cb = UsageCallback(
@@ -376,13 +382,12 @@ class ChatGPTGenerator(BaseGenerator):
 
         try:
             for piece in stream:
-                # 直接逐块吐出给上层
                 yield piece
         finally:
             if on_usage:
                 on_usage(usage_cb.usage or {})
 
-    # 可选：非流式一次性完整答案（保留并与父类签名对齐）
+    # ===== 非流式 =====
     def generate_text(
         self,
         query: str,
@@ -392,24 +397,21 @@ class ChatGPTGenerator(BaseGenerator):
         on_usage: Optional[Callable[[Dict], None]] = None,
         **kwargs,
     ) -> str:
-        """
-        返回一次性完整答案字符串。保持旧 prompt/context 逻辑，并自动注入对话记忆。
-        额外参数：
-          - session_id：会话隔离；同一个 session 会利用历史上下文
-          - on_usage：回调，形如 lambda usage_dict: ...
-        """
+
         context_str = _format_context_from_articles(
             search_results,
             max_answer_tokens=800,
             max_question_tokens=60,
             model_for_token=self.model_name,
         )
+
         inputs = {"question": query, "context": context_str}
 
         usage_cb = UsageCallback(
             prompt_text_getter=lambda: _prompt_preview(self.prompt, inputs),
             model_name=self.model_name,
         )
+
         try:
             resp_text = self.chain_with_mem.invoke(
                 inputs,
@@ -423,7 +425,7 @@ class ChatGPTGenerator(BaseGenerator):
             if on_usage:
                 on_usage(usage_cb.usage or {})
 
-    # —— 方便测试/调试的历史操作 ——
+    # ===== Debug =====
     def get_history_messages(self, session_id: str):
         return self.history_store.get_history(session_id).messages
 
