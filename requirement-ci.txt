@@ -1,0 +1,22 @@
+# 基础
+numpy
+pandas
+scikit-learn
+tqdm
+
+# 测试
+pytest
+
+# RAG 核心
+faiss-cpu
+torch
+sentence-transformers
+rank-bm25==0.2.2
+
+# NLP
+nltk
+gensim
+
+# 可选（如果你们代码用到）
+accelerate
+peft
