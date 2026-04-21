@@ -1,6 +1,5 @@
-from typing import List, Dict, Callable
+from typing import Any, Dict, List
 from app.schemas.search_result import SearchResult
-from app.schemas.article import Article
 import math
 
 class RetrieverEvaluator:
@@ -76,7 +75,7 @@ class RetrieverEvaluator:
         self,
         retrieved: List[SearchResult],
         ground_truth_ids: List[str]
-    ) -> Dict:
+    ) -> Dict[str, Any]:
         retrieved_ids = [r.article.id for r in retrieved]
 
         return {

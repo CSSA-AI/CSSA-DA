@@ -62,7 +62,9 @@ class RerankerEvaluator:
         ]
 
         dcg = self._dcg(relevances)
-        ideal_relevances = sorted(relevances, reverse=True)
+        # IDCG must reflect the true number of relevant docs, not just those in top_k
+        n_relevant = min(len(ground_truth_ids), k)
+        ideal_relevances = [1] * n_relevant + [0] * (k - n_relevant)
         idcg = self._dcg(ideal_relevances)
 
         if idcg == 0:
@@ -117,12 +119,12 @@ class RerankerEvaluator:
         search_results: List[SearchResult],
         ground_truth_ids: List[str],
         reranker: BaseReranker,
-        top_k: int | None = None,
+        k: int | None = None,
     ) -> Dict[str, Any]:
         """
         一次性跑 rerank + 各种指标，方便在 test 脚本里调用。
         """
-        k = top_k or self.k
+        k = k or self.k
         reranked = reranker.rerank(query, search_results, top_k=k)
 
         return {
