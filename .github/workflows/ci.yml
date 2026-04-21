@@ -29,18 +29,27 @@ jobs:
 
       - name: Install project dependencies
         run: |
-          pip install pyyaml
+          pip install --upgrade pip pyyaml
           python - <<'PY'
           import yaml
+
+          name_map = {
+              "pytorch": "torch",
+          }
+
           with open("environment_cpu.yml", "r", encoding="utf-8") as f:
               env = yaml.safe_load(f)
 
           deps = []
           for dep in env["dependencies"]:
-              if isinstance(dep, str) and dep != "pip":
-                  if dep.startswith("python="):
+              if isinstance(dep, str):
+                  if dep == "pip" or dep.startswith("python="):
                       continue
-                  deps.append(dep)
+
+                  pkg = dep.split("=")[0].strip()
+                  pkg = name_map.get(pkg, pkg)
+                  deps.append(pkg)
+
               elif isinstance(dep, dict) and "pip" in dep:
                   deps.extend(dep["pip"])
 
@@ -49,6 +58,7 @@ jobs:
                   f.write(d + "\n")
           PY
 
+          cat requirements-ci.txt
           pip install -r requirements-ci.txt
 
       - name: Create test env file
