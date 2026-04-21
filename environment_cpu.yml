@@ -17,6 +17,7 @@ dependencies:
   - ipykernel
   - jupyter
   - ipython
+  - pytest
   # 向量检索核心
   - faiss-cpu>=1.7.4
   # 深度学习基础
