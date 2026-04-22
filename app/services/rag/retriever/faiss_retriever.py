@@ -70,19 +70,25 @@ class FAISSRetriever(BaseRetriever):
         ).astype("float32")
         return vec
 
-    def search(self, query: str, top_k: int = 10) -> List[Tuple[int, float, Article]]:
+    def search(self, query: str, top_k: int = 10) -> List[SearchResult]:
         """Retrieve top-k articles given a query string."""
         if not self._is_built:
             self._encode_articles()
             self._build_index()
 
-        vec = self._encode_query(query)  # shape: (1, dim)
+        vec = self._encode_query(query)
         scores, indices = self.index.search(vec, top_k)
 
         results = []
-        for i, score in zip(indices[0], scores[0]):
+        for rank, (i, score) in enumerate(zip(indices[0], scores[0]), start=1):
+            if i == -1:
+                continue
             article = self.id_mapping[i]
-            result = SearchResult(article=article, score=score, rank=i)
+            result = SearchResult(
+                article=article,
+                score=float(score),
+                rank=rank
+            )
             results.append(result)
         return results
 
@@ -90,8 +96,13 @@ class FAISSRetriever(BaseRetriever):
         """Save embeddings, FAISS index, and ID mapping to disk."""
         torch.save(self.question_embeddings.detach().cpu(), embed_path)
         faiss.write_index(self.index, index_path)
-        with open(idmap_path, 'w') as f:
-            json.dump({str(k): v.to_dict() for k, v in self.id_mapping.items()}, f, indent=4)
+        with open(idmap_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {str(k): v.model_dump(mode="json") for k, v in self.id_mapping.items()},
+                f,
+                indent=4,
+                ensure_ascii=False
+            )
 
     def load_index(self, index_path):
         """Load an existing FAISS index from disk."""

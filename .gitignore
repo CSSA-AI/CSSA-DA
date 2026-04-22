@@ -1,5 +1,21 @@
-*.DS_Store
-*.pyc
 *.pickle
-__pycache__
+
+# Python
+__pycache__/
+*.pyc
+
+# virtual environments
+venv/
+.venv/
+env/
+ENV/
+cssa-ci/
+
+# pytest
+.pytest_cache/
+
+# env files
 .env
+
+# OS
+.DS_Store

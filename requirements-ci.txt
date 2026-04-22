@@ -1,0 +1,30 @@
+# 测试框架
+pytest
+
+# 数据模型
+pydantic
+
+# 数据库
+sqlalchemy
+psycopg2-binary
+pgvector
+
+# 向量检索
+numpy
+faiss-cpu
+torch
+sentence-transformers
+peft
+
+# LangChain（generator 测试）
+langchain-core
+langchain-openai
+langchain-community
+openai
+
+# 工具
+python-dotenv
+tiktoken
+
+# RAG 辅助
+rank-bm25==0.2.2
