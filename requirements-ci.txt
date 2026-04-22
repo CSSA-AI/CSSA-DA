@@ -14,6 +14,7 @@ numpy
 faiss-cpu
 torch
 sentence-transformers
+peft
 
 # LangChain（generator 测试）
 langchain-core
