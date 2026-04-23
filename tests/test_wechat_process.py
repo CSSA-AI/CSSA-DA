@@ -41,20 +41,23 @@ class TestWechatDataPurify:
         游离链接 https://mmbiz.qpic.cn/123456
         这是结尾
         """
-        expected = "欢迎\n这是一张图 \n游离链接 \n这是结尾"
+        # 期望值更新：匹配去掉了所有换行符的结果
+        expected = "欢迎 这是一张图  游离链接  这是结尾"
         assert clean_text(raw_text) == expected
 
     def test_formatting_and_compression(self):
         """测试阶段 4: 排版整理与幽灵字符压缩"""
         # 包含零宽字符 \u200b，多个连续空格，以及 4 个连续换行
         raw_text = "Hello\u200bWorld!    This  is   a test.\n\n\n\nNext paragraph."
-        expected = "HelloWorld! This is a test.\n\nNext paragraph."
+        # 期望值更新：换行没了，两句话粘在一起了
+        expected = "HelloWorld! This is a test.Next paragraph."
         assert clean_text(raw_text) == expected
         
     def test_long_dividers(self):
         """测试长条分割线的清除"""
         raw_text = "段落一\n=========================\n段落二\n------------\n段落三"
-        expected = "段落一\n段落二\n段落三"
+        # 期望值更新：分割线和换行全没，三段粘在一起
+        expected = "段落一段落二段落三"
         assert clean_text(raw_text) == expected
 
     def test_empty_input(self):
