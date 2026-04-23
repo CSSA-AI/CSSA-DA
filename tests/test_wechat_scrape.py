@@ -2,7 +2,7 @@ import sys
 import os
 import json
 import pytest
-import request
+import requests
 from unittest.mock import patch, MagicMock
 
 # 动态将 scripts 目录加入环境变量
