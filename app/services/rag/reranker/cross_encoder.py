@@ -1,36 +1,71 @@
-from .base import BaseReranker
-from app.schemas.article import Article
-from app.schemas.search_result import SearchResult
-from typing import List, Tuple
+from typing import List, Optional
 from sentence_transformers import CrossEncoder
 from peft import PeftModel
 
+from app.core.config import rag_config
+from app.schemas.search_result import SearchResult
+from .base import BaseReranker
+
+
 class CrossEncoderReranker(BaseReranker):
-    # model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L12-v2')
+    def __init__(
+        self,
+        model_name: Optional[str] = None,
+        adapter_path: Optional[str] = None,
+    ):
+        reranker_config = rag_config["reranker"]
 
-    def __init__(self, model_name, adapter_path=None):
+        model_name = model_name or reranker_config["model_name"]
+        adapter_path = adapter_path or reranker_config.get("adapter_path")
+
         super().__init__()
-        self.model = CrossEncoder(model_name)
-        # 给底层 HF 模型加载 LoRA adapter
-        if adapter_path:
-            self.model.model = PeftModel.from_pretrained(self.model.model, adapter_path)
 
-    def rerank(self, query, search_results: List[SearchResult], top_k: int = 3) -> List[SearchResult]:
+        self.model = CrossEncoder(model_name)
+
+        # LoRA adapter（可选）
+        if adapter_path:
+            self.model.model = PeftModel.from_pretrained(
+                self.model.model,
+                adapter_path
+            )
+
+    def rerank(
+        self,
+        query: str,
+        search_results: List[SearchResult],
+        top_k: Optional[int] = None,
+    ) -> List[SearchResult]:
+
         if not search_results:
             return []
-        
+
+        top_k = top_k or rag_config["reranker"]["top_k"]
+
         pairs = [(query, result.article.text) for result in search_results]
         scores = self.model.predict(pairs)
 
+        # ⚠️ 不直接改原对象（推荐）
+        scored_results = []
+
         for result, score in zip(search_results, scores):
-            result.score = float(score)
-        
-        # 按新分数降序排序
-        sorted_results = sorted(search_results, key=lambda x: x.score, reverse=True)
-        
-        # 4. 截取 Top K 并更新 Rank 字段 (可选，方便调试)
+            new_result = SearchResult(
+                article=result.article,
+                score=float(score),
+                rank=result.rank,  # 暂时保留
+            )
+            scored_results.append(new_result)
+
+        # 排序
+        sorted_results = sorted(
+            scored_results,
+            key=lambda x: x.score,
+            reverse=True
+        )
+
+        # 截断 + 重新 rank
         final_results = sorted_results[:top_k]
+
         for rank, res in enumerate(final_results, start=1):
-            res.rank = rank  # 标记最终排名，方便前端展示 "No.1 推荐"
-            
+            res.rank = rank
+
         return final_results
