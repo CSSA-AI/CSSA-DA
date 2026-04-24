@@ -3,7 +3,7 @@ from unittest.mock import patch, MagicMock
 
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
-from app.services.rag.reranker.cross_encoder_reranker import CrossEncoderReranker
+from app.services.rag.reranker.cross_encoder import CrossEncoderReranker
 
 
 class TestCrossEncoderRerankerUnit(unittest.TestCase):
