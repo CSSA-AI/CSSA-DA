@@ -3,7 +3,7 @@ from unittest.mock import patch, MagicMock
 
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
-from app.services.rag.reranker.cross_encoder import CrossEncoderReranker
+from app.services.rag.reranker.cross_encoder_reranker import CrossEncoderReranker
 
 
 class TestCrossEncoderRerankerUnit(unittest.TestCase):
@@ -68,7 +68,8 @@ class TestCrossEncoderRerankerUnit(unittest.TestCase):
         mock_peft_model,
     ):
         mock_model = MagicMock()
-        mock_model.model = MagicMock()
+        original_inner_model = MagicMock()
+        mock_model.model = original_inner_model
         mock_cross_encoder.return_value = mock_model
 
         mock_adapter_model = MagicMock()
@@ -77,7 +78,7 @@ class TestCrossEncoderRerankerUnit(unittest.TestCase):
         reranker = CrossEncoderReranker()
 
         mock_peft_model.from_pretrained.assert_called_once_with(
-            mock_model.model,
+            original_inner_model,
             "fake-adapter-path",
         )
         self.assertEqual(reranker.model.model, mock_adapter_model)

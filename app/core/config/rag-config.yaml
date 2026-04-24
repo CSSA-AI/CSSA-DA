@@ -2,6 +2,11 @@ retriever:
   embedding_model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
   top_k: 5
 
+reranker:
+  model_name: cross-encoder/ms-marco-MiniLM-L12-v2
+  top_k: 3
+  adapter_path: null
+
 pgvector:
   table_name: knowledge_base
 
