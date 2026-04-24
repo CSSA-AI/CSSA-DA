@@ -37,19 +37,31 @@ class TestFAISSRetrieverUnit(unittest.TestCase):
         self.assertIsNotNone(retriever.model)
         self.assertFalse(retriever._is_built)
         self.assertEqual(len(retriever.id_mapping), 3)
+        mock_st.assert_called_once_with("fake-model")
+
+    @patch("app.services.rag.retriever.faiss_retriever.rag_config", {
+        "retriever": {
+            "embedding_model": "default-embedding-model",
+            "top_k": 5
+        },
+        "faiss": {
+            "index_path": "data/faiss/index.faiss",
+            "embedding_path": "data/faiss/question_embeddings.pt",
+            "idmap_path": "data/faiss/id_mapping.json"
+        }
+    })
+    @patch("app.services.rag.retriever.faiss_retriever.SentenceTransformer")
+    def test_init_uses_default_model_from_rag_config(self, mock_st):
+        retriever = FAISSRetriever(input_list=self.articles)
+
+        self.assertEqual(retriever.model_name, "default-embedding-model")
+        mock_st.assert_called_once_with("default-embedding-model")
 
     def test_init_raises_type_error_when_input_not_article_list(self):
         with self.assertRaises(TypeError):
             FAISSRetriever(
                 input_list=["not an article"],
                 model_name="fake-model"
-            )
-
-    def test_init_raises_value_error_when_model_name_missing(self):
-        with self.assertRaises(ValueError):
-            FAISSRetriever(
-                input_list=self.articles,
-                model_name=""
             )
 
     @patch("app.services.rag.retriever.faiss_retriever.SentenceTransformer")
@@ -155,9 +167,9 @@ class TestFAISSRetrieverUnit(unittest.TestCase):
         def fake_encode(inputs, **kwargs):
             if kwargs.get("convert_to_tensor", False):
                 return torch.tensor([
-                    [1.0, 0.0],   # article 0
-                    [0.0, 1.0],   # article 1
-                    [0.8, 0.2]    # article 2
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [0.8, 0.2]
                 ])
             if kwargs.get("convert_to_numpy", False):
                 return np.array([[1.0, 0.0]], dtype=np.float32)
@@ -182,6 +194,41 @@ class TestFAISSRetrieverUnit(unittest.TestCase):
             self.assertIsInstance(item.score, float)
             self.assertIsInstance(item.rank, int)
 
+    @patch("app.services.rag.retriever.faiss_retriever.rag_config", {
+        "retriever": {
+            "embedding_model": "fake-model",
+            "top_k": 2
+        },
+        "faiss": {
+            "index_path": "data/faiss/index.faiss",
+            "embedding_path": "data/faiss/question_embeddings.pt",
+            "idmap_path": "data/faiss/id_mapping.json"
+        }
+    })
+    @patch("app.services.rag.retriever.faiss_retriever.SentenceTransformer")
+    def test_search_uses_default_top_k_from_rag_config(self, mock_st):
+        mock_model = MagicMock()
+
+        def fake_encode(inputs, **kwargs):
+            if kwargs.get("convert_to_tensor", False):
+                return torch.tensor([
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [0.8, 0.2]
+                ])
+            if kwargs.get("convert_to_numpy", False):
+                return np.array([[1.0, 0.0]], dtype=np.float32)
+            raise ValueError("Unexpected encode call")
+
+        mock_model.encode.side_effect = fake_encode
+        mock_st.return_value = mock_model
+
+        retriever = FAISSRetriever(input_list=self.articles)
+
+        results = retriever.search("student visa")
+
+        self.assertEqual(len(results), 2)
+
     @patch("app.services.rag.retriever.faiss_retriever.SentenceTransformer")
     def test_search_builds_index_only_once(self, mock_st):
         mock_model = MagicMock()
@@ -205,8 +252,15 @@ class TestFAISSRetrieverUnit(unittest.TestCase):
             model_name="fake-model"
         )
 
-        with patch.object(retriever, "_encode_articles", wraps=retriever._encode_articles) as mock_encode_articles, \
-             patch.object(retriever, "_build_index", wraps=retriever._build_index) as mock_build_index:
+        with patch.object(
+            retriever,
+            "_encode_articles",
+            wraps=retriever._encode_articles
+        ) as mock_encode_articles, patch.object(
+            retriever,
+            "_build_index",
+            wraps=retriever._build_index
+        ) as mock_build_index:
 
             retriever.search("student visa", top_k=2)
             retriever.search("485 visa", top_k=2)
@@ -221,9 +275,9 @@ class TestFAISSRetrieverUnit(unittest.TestCase):
         def fake_encode(inputs, **kwargs):
             if kwargs.get("convert_to_tensor", False):
                 return torch.tensor([
-                    [1.0, 0.0],   # article 0 - should be most similar
-                    [0.0, 1.0],   # article 1
-                    [0.3, 0.7]    # article 2
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [0.3, 0.7]
                 ])
             if kwargs.get("convert_to_numpy", False):
                 return np.array([[1.0, 0.0]], dtype=np.float32)

@@ -13,7 +13,7 @@ from app.schemas.article import Article
 # 引入你的后端组件
 from app.services.rag.orchestrator import RAGOrchestrator
 from app.services.rag.retriever.faiss_retriever import FAISSRetriever
-from app.services.rag.reranker.cross_encoder import CrossEncoderReranker
+from app.services.rag.reranker.cross_encoder_reranker import CrossEncoderReranker
 from app.services.rag.generator.chatgpt_generator import ChatGPTGenerator
 
 # 设置页面配置

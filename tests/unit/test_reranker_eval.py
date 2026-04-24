@@ -2,7 +2,7 @@
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
 
-from app.services.rag.reranker.cross_encoder import CrossEncoderReranker
+from app.services.rag.reranker.cross_encoder_reranker import CrossEncoderReranker
 from app.services.rag.eval.reranker_eval import RerankerEvaluator
 
 def build_mock_results():

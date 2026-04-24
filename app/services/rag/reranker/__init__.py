@@ -1,3 +1,3 @@
-from .cross_encoder import CrossEncoderReranker
+from .cross_encoder_reranker import CrossEncoderReranker
 
 __all__ = ["CrossEncoderReranker"]
