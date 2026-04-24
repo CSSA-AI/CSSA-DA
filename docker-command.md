@@ -111,3 +111,33 @@ docker exec -it rag_postgres_db psql -U rag_user -d rag_vectordb
 # 这个SQL语句可以是任何想要的
 SELECT COUNT(*) FROM knowledge_base;
 ```
+
+## 本地测试流程
+
+*本地测试应该用来进行unittest，以轻量化为目的。Integration test请使用docker*
+
+### 1. 创建虚拟环境
+
+```bash
+python3 -m venv cssa-ci source 
+source cssa-ci/bin/activate   # Mac/Linux
+.\cssa-ci\Scripts\Activate.ps1
+```
+
+### 2. 安装依赖
+
+```bash
+pip install -r requirements-ci.txt
+```
+
+### 3. 测试
+
+
+```bash
+# 跑单个测试文件 
+pytest tests/filename.py -v
+
+# 跑全部测试文件
+pytest -v
+```
+
