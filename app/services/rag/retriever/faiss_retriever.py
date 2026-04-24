@@ -1,56 +1,57 @@
-'''
-This is a Retriever that: 
-- using FAISS techinique, 
-- use only the original question (no question generated)
-- use sentence-transformer
-'''
 import json
 import torch
 import faiss
 import numpy as np
-from typing import List, Tuple, Optional
+from typing import List, Optional
 from sentence_transformers import SentenceTransformer
 
+from app.core.config import rag_config
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
 from app.services.rag.retriever.base import BaseRetriever
 
 
 class FAISSRetriever(BaseRetriever):
-    def __init__(self, input_list: List[Article], model_name: str):
-        super().__init__(input_list, model_name)
+    def __init__(
+        self,
+        input_list: List[Article],
+        model_name: Optional[str] = None,
+    ):
+        retriever_config = rag_config["retriever"]
+
+        model_name = model_name or retriever_config["embedding_model"]
+        super().__init__(model_name=model_name)
 
         if not all(isinstance(x, Article) for x in input_list):
             raise TypeError("input_list must be a list of Article")
 
-        if not model_name:
-            raise ValueError("FAISSRetriever requires a model_name.")
-
+        self.articles = input_list
         self.model = SentenceTransformer(self.model_name)
+
         self.id_mapping = {i: article for i, article in enumerate(self.articles)}
         self.question_embeddings = None
         self.index = None
         self._is_built = False
 
     def _encode_articles(self):
-        """Encode each article’s first question into normalized embeddings."""
         questions = []
-        for a in self.articles:
-            if not a.questions:
-                raise ValueError(f"Article {a.id} has no questions")
-            questions.append(a.questions[0])
+
+        for article in self.articles:
+            if not article.questions:
+                raise ValueError(f"Article {article.id} has no questions")
+            questions.append(article.questions[0])
 
         self.question_embeddings = self.model.encode(
             questions,
             convert_to_tensor=True,
             normalize_embeddings=True,
             batch_size=32,
-            show_progress_bar=True
+            show_progress_bar=True,
         )
+
         return self.question_embeddings
 
     def _build_index(self):
-        """Build a FAISS index (IndexFlatIP) using the encoded question embeddings."""
         if self.question_embeddings is None:
             raise RuntimeError("Must encode articles first")
 
@@ -62,16 +63,15 @@ class FAISSRetriever(BaseRetriever):
         self._is_built = True
 
     def _encode_query(self, query: str) -> np.ndarray:
-        """Encode a query string into a normalized float32 numpy vector."""
-        vec = self.model.encode(
+        return self.model.encode(
             [query],
             normalize_embeddings=True,
-            convert_to_numpy=True
+            convert_to_numpy=True,
         ).astype("float32")
-        return vec
 
-    def search(self, query: str, top_k: int = 10) -> List[SearchResult]:
-        """Retrieve top-k articles given a query string."""
+    def search(self, query: str, top_k: Optional[int] = None) -> List[SearchResult]:
+        top_k = top_k or rag_config["retriever"]["top_k"]
+
         if not self._is_built:
             self._encode_articles()
             self._build_index()
@@ -80,31 +80,51 @@ class FAISSRetriever(BaseRetriever):
         scores, indices = self.index.search(vec, top_k)
 
         results = []
+
         for rank, (i, score) in enumerate(zip(indices[0], scores[0]), start=1):
             if i == -1:
                 continue
+
             article = self.id_mapping[i]
-            result = SearchResult(
-                article=article,
-                score=float(score),
-                rank=rank
+
+            results.append(
+                SearchResult(
+                    article=article,
+                    score=float(score),
+                    rank=rank,
+                )
             )
-            results.append(result)
+
         return results
 
-    def save_all(self, embed_path, index_path, idmap_path):
-        """Save embeddings, FAISS index, and ID mapping to disk."""
+    def save_all(
+        self,
+        embed_path: Optional[str] = None,
+        index_path: Optional[str] = None,
+        idmap_path: Optional[str] = None,
+    ):
+        faiss_config = rag_config["faiss"]
+
+        embed_path = embed_path or faiss_config["embedding_path"]
+        index_path = index_path or faiss_config["index_path"]
+        idmap_path = idmap_path or faiss_config["idmap_path"]
+
+        if self.question_embeddings is None or self.index is None:
+            raise RuntimeError("Index must be built before saving")
+
         torch.save(self.question_embeddings.detach().cpu(), embed_path)
         faiss.write_index(self.index, index_path)
+
         with open(idmap_path, "w", encoding="utf-8") as f:
             json.dump(
                 {str(k): v.model_dump(mode="json") for k, v in self.id_mapping.items()},
                 f,
                 indent=4,
-                ensure_ascii=False
+                ensure_ascii=False,
             )
 
-    def load_index(self, index_path):
-        """Load an existing FAISS index from disk."""
+    def load_index(self, index_path: Optional[str] = None):
+        index_path = index_path or rag_config["faiss"]["index_path"]
+
         self.index = faiss.read_index(index_path)
         self._is_built = True
