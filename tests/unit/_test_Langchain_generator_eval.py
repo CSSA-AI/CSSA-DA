@@ -2,7 +2,7 @@
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
 
-from app.services.rag.generator.chatgpt_generator import ChatGPTGenerator
+from app.services.rag.generator._chatgpt_generator import ChatGPTGenerator
 from app.services.rag.eval.generator_eval import GeneratorEvaluator
 
 def build_mock_results():

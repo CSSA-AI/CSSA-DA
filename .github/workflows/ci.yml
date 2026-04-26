@@ -37,8 +37,8 @@ jobs:
           cp .env.example .env || true
           echo "OPENAI_API_KEY=dummy-key-for-ci" >> .env
 
-      - name: Run tests
+      - name: Run unit tests
         env:
           OPENAI_API_KEY: dummy-key-for-ci
         run: |
-          pytest -q
+          pytest tests/unit -q

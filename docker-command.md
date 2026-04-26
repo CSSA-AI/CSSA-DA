@@ -100,8 +100,9 @@ docker compose --profile cpu up -d --build --force-recreate
 
 ## 建立本地数据库
 ```bash
-docker exec -i rag_postgres_db psql -U rag_user -d rag_vectordb < database_setup.sql
-docker exec -it rag_worker_cpu python /scripts/import_demo.py
+docker exec -i rag_postgres_db psql -U rag_user -d rag_vectordb < database_setup.sql # Linux/Mac User
+type database_setup.sql | docker exec -i rag_postgres_db psql -U rag_user -d rag_vectordb # Windows User
+docker exec -it rag_worker_cpu python scripts/import_demo.py
 ```
 
 ## 进入数据库运行SQL Query

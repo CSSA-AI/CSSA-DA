@@ -56,9 +56,9 @@ class PGVectorRetriever(BaseRetriever):
                 created_at,
                 tags,
                 link,
-                embedding <-> %s AS distance
+                embedding <-> %s::vector AS distance
             FROM {table}
-            ORDER BY embedding <-> %s
+            ORDER BY embedding <-> %s::vector
             LIMIT %s;
         """).format(
             table=sql.Identifier(self.table_name)
