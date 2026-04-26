@@ -14,7 +14,7 @@ from app.schemas.article import Article
 from app.services.rag.Langchain_orchestrator import LCRAGOrchestrator
 from app.services.rag.retriever.Langchain_faiss_retriever import FAISSRetriever
 from app.services.rag.reranker.Langchain_cross_encoder import CrossEncoderReranker
-from app.services.rag.generator.chatgpt_generator import ChatGPTGenerator
+from app.services.rag.generator._chatgpt_generator import ChatGPTGenerator
 
 # 设置页面配置
 st.set_page_config(page_title="墨大留学助手 (RAG Demo)", page_icon="🎓")
