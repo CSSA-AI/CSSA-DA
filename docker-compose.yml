@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # 数据库：全队通用
   postgres:
-    image: ankane/pgvector:v0.5.1
+    image: pgvector/pgvector:0.7.4-pg16
     container_name: rag_postgres_db
     restart: always
     environment:
