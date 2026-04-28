@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # 数据库：全队通用
   postgres:
-    image: ankane/pgvector:v0.5.1
+    image: pgvector/pgvector:0.7.4-pg16
     container_name: rag_postgres_db
     restart: always
     environment:
@@ -30,7 +30,8 @@ services:
     volumes:
       - .:/app
     environment:
-      - DATABASE_URL=postgresql+asyncpg://rag_user:rag_password@postgres:5432/rag_vectordb
+      - DATABASE_URL=postgresql://rag_user:rag_password@postgres:5432/rag_vectordb
+      - ASYNC_DATABASE_URL=postgresql+asyncpg://rag_user:rag_password@postgres:5432/rag_vectordb
 
   # GPU 工作节点 (给带 Nvidia 显卡的组员)
   worker-gpu:
@@ -47,7 +48,8 @@ services:
     volumes:
       - .:/app
     environment:
-      - DATABASE_URL=postgresql+asyncpg://rag_user:rag_password@postgres:5432/rag_vectordb
+      - DATABASE_URL=postgresql://rag_user:rag_password@postgres:5432/rag_vectordb
+      - ASYNC_DATABASE_URL=postgresql+asyncpg://rag_user:rag_password@postgres:5432/rag_vectordb
     deploy:
       resources:
         reservations:

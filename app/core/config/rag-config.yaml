@@ -1,0 +1,35 @@
+retriever:
+  embedding_model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+  embedding_dim: 384
+  top_k: 5
+
+reranker:
+  model_name: cross-encoder/ms-marco-MiniLM-L12-v2
+  top_k: 3
+  adapter_path: null
+
+pgvector:
+  table_name: knowledge_base
+
+faiss:
+  index_path: data/faiss/index.faiss
+  embedding_path: data/faiss/question_embeddings.pt
+  idmap_path: data/faiss/id_mapping.json
+
+generator:
+  provider: openai
+  model_name: gpt-4o-mini
+  temperature: 0.3
+  max_retries: 2
+  streaming: false
+
+  system_prompt: |
+    你是一名友好、知识丰富的 CSSA 智能助手，专门为在澳洲的中国留学生提供建议。
+    请严格根据提供的资料回答问题。
+    如果资料中没有答案，请说明资料不足，不要编造。
+    如资料包含来源和链接，请尽量引用。
+    回答要简洁、清晰、有礼貌。
+
+  context:
+    max_items: 5
+    max_chars_per_item: 2000

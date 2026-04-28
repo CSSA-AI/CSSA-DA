@@ -12,6 +12,7 @@ dependencies:
   - ipykernel
   - jupyter
   - scikit-learn
+  - pytest
   - nltk
   - gensim
   - ipython

@@ -1,13 +1,13 @@
-from app.schemas.article import Article
-from app.schemas.search_result import SearchResult
 from abc import ABC, abstractmethod
-from typing import Tuple, List
+from typing import List, Optional
+
+from app.schemas.search_result import SearchResult
+
+
 class BaseRetriever(ABC):
-    def __init__(self, input_list: List[Article], model_name: str = None):
-        self.articles = input_list
+    def __init__(self, model_name: Optional[str] = None):
         self.model_name = model_name
-        pass
-    
+
     @abstractmethod
-    def search(self, query: str, top_k: int = 5) -> List[SearchResult]:
+    def search(self, query: str, top_k: Optional[int] = None) -> List[SearchResult]:
         pass
