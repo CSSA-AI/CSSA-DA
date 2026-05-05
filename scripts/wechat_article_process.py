@@ -135,7 +135,6 @@ def process_and_transform_articles():
             continue
 
         title = item.get("title", "未命名文章")
-        clean_title = re.sub(r'【[^【】]*】', '', title).strip()
         raw_content = item.get("content", "")
         original_char_count += len(raw_content)
         
@@ -145,17 +144,17 @@ def process_and_transform_articles():
         
         # 二次质量检验: 如果砍掉模板和乱码后，正文所剩无几，直接抛弃
         if len(re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', cleaned_content)) < 30:
-            print(f"  🗑️ [DROP] 剔除无用数据 (清洗后沦为空壳) | 标题: {clean_title}")
+            print(f"  🗑️ [DROP] 剔除无用数据 (清洗后沦为空壳) | 标题: {title}")
             dropped_count += 1
             continue
 
-        if not cleaned_content.startswith(clean_title) and not cleaned_content.startswith(f"# {clean_title}"):
-            full_text = f"# {clean_title}\n\n{cleaned_content}"
+        if not cleaned_content.startswith(title) and not cleaned_content.startswith(f"# {title}"):
+            full_text = f"# {title}\n\n{cleaned_content}"
         else:
             full_text = cleaned_content
 
         rag_item = {
-            "questions": [clean_title],
+            "questions": [title],
             "text": full_text,
             "source": "WeChat: 墨大中国学生会",
             "author": None,
