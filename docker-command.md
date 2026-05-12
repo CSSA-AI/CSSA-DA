@@ -120,9 +120,9 @@ SELECT COUNT(*) FROM knowledge_base;
 ### 1. 创建虚拟环境
 
 ```bash
-python3 -m venv cssa-ci source 
-source cssa-ci/bin/activate   # Mac/Linux
-.\cssa-ci\Scripts\Activate.ps1
+python3 -m venv cssa-ci .venv
+source .venv/bin/activate   # Mac/Linux
+.\.venv\Scripts\Activate.ps1 # Windows
 ```
 
 ### 2. 安装依赖
