@@ -83,34 +83,13 @@ def clean_text(text):
 
 def extract_tags(raw_data):
     """
-    从原始数据的 title 和 content 中提取【】括号内的标签。
-    
-    步骤:
-    1. 从 raw_data 中读取 title 和 content 字段
-    2. 将两者合并成一个字符串，扩大搜索范围
-    3. 用正则表达式找出所有【】中的内容
-    4. 去重并过滤掉空字符串
-    5. 返回标签列表
+    只从标题中提取【】括号内的标签，避免正文噪音污染 tags。
     """
-    
-    # Step 1: 取出 title 和 content，如果不存在则用空字符串兜底
     title = raw_data.get("title", "")
-    content = raw_data.get("content", "")
-    
-    # Step 2: 拼接成一个字符串，同时搜索标题和正文
-    # 用换行符隔开，防止两段文字意外粘连
-    combined_text = title + "\n" + content
-    
-    # Step 3: 正则表达式核心
-    # 【 和 】是中文全角括号（Unicode: \u3010 和 \u3011）
-    # [^【】]+ 匹配括号内：一个或多个"不是【也不是】"的任意字符
-    # 这样能避免嵌套括号或空括号【】的误匹配
     pattern = r'【([^【】]+)】'
-    matches = re.findall(pattern, combined_text)
+    matches = re.findall(pattern, title)
     
-    # Step 4: 去重（用 dict.fromkeys 保留顺序）并过滤空字符串
     unique_tags = list(dict.fromkeys(tag.strip() for tag in matches if tag.strip()))
-    
     return unique_tags
 
 def process_and_transform_articles():
@@ -153,6 +132,9 @@ def process_and_transform_articles():
         else:
             full_text = cleaned_content
 
+        base_tags = ["微信公众号", "CSSA"]
+        extra_tags = extract_tags(item)
+
         rag_item = {
             "questions": [title],
             "text": full_text,
@@ -161,7 +143,7 @@ def process_and_transform_articles():
             "post_date": item.get("date", "1970-01-01"),
             "language": "simplified-chinese",
             "created_at": current_date,
-            "tags": list(dict.fromkeys(["微信公众号", "CSSA"] + extract_tags(item))),
+            "tags": list(dict.fromkeys(base_tags + extra_tags)),
             "link": item.get("link", "")
         }
         
