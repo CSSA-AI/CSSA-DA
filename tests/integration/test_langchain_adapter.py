@@ -101,14 +101,15 @@ def test_langchain_rag_adapter_end_to_end():
     chain = adapter.as_chain()
 
     try:
-        answer = chain.invoke({
+        state = chain.invoke({
             "query": "墨尔本大学 special consideration 怎么申请？",
             "top_k": 5,
             "rerank_top_k": 3,
         })
 
-        assert "fake answer" in answer
-        assert len(answer.strip()) > 0
+        assert "fake answer" in state["answer"]
+        assert len(state["answer"].strip()) > 0
+        assert state["search_results"]
 
     finally:
         retriever.close()

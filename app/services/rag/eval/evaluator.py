@@ -50,8 +50,6 @@ class PipelineEvaluator:
         self,
         query: str,
         ground_truth_ids: List[str],
-        *,
-        session_id: str = "eval",
     ) -> Dict[str, Any]:
         """
         对单条 query 跑完整 pipeline，返回各阶段指标。
@@ -87,7 +85,7 @@ class PipelineEvaluator:
 
         # Stage 3: Generate + evaluate
         generator_metrics: Dict[str, Any] = self._gen_eval.evaluate(
-            query, reranked, ground_truth_ids, self.generator, session_id=session_id
+            query, reranked, ground_truth_ids, self.generator
         )
 
         return {
@@ -100,8 +98,6 @@ class PipelineEvaluator:
     def evaluate_batch(
         self,
         test_cases: List[Dict[str, Any]],
-        *,
-        session_id: str = "eval",
     ) -> Dict[str, Any]:
         """
         批量评估，返回逐条结果 + 数值指标的宏平均。
@@ -122,7 +118,7 @@ class PipelineEvaluator:
             }
         """
         per_query: List[Dict[str, Any]] = [
-            self.evaluate(case["query"], case["ground_truth_ids"], session_id=session_id)
+            self.evaluate(case["query"], case["ground_truth_ids"])
             for case in test_cases
         ]
         return {"per_query": per_query, "aggregate": self._aggregate(per_query)}
