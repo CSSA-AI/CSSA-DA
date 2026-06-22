@@ -23,16 +23,23 @@ class ChatGPTGenerator(BaseGenerator):
     - 不负责 memory / tracing / orchestration
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        model_name: Optional[str] = None,
+        temperature: Optional[float] = None,
+        api_key: Optional[str] = None,
+    ):
         cfg = rag_config["generator"]
 
-        if not settings.OPENAI_API_KEY:
+        api_key = api_key or settings.OPENAI_API_KEY
+        if not api_key:
             raise ValueError("OPENAI_API_KEY is required for ChatGPTGenerator")
 
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        self.client = OpenAI(api_key=api_key)
 
-        self.model_name = cfg["model_name"]
-        self.temperature = cfg.get("temperature", 0.3)
+        self.model_name = model_name or cfg["model_name"]
+        self.temperature = temperature if temperature is not None else cfg.get("temperature", 0.3)
         self.max_retries = cfg.get("max_retries", 2)
         self.streaming = cfg.get("streaming", False)
 

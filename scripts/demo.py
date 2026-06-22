@@ -14,7 +14,7 @@ from app.schemas.article import Article
 from app.services.rag.orchestrator import RAGOrchestrator
 from app.services.rag.retriever.faiss_retriever import FAISSRetriever
 from app.services.rag.reranker.cross_encoder_reranker import CrossEncoderReranker
-from app.services.rag.generator._chatgpt_generator import ChatGPTGenerator
+from app.services.rag.generator.chatgpt_generator import ChatGPTGenerator
 
 # 设置页面配置
 st.set_page_config(page_title="墨大留学助手 (RAG Demo)", page_icon="🎓")
@@ -44,13 +44,13 @@ def init_rag_system():
 
     # 3. 初始化组件
     # A. Retriever
-    retriever = FAISSRetriever(input_list=all_articles, model_name="BAAI/bge-m3")
+    retriever = FAISSRetriever(input_list=all_articles)
     
     # B. Reranker
-    reranker = CrossEncoderReranker(model_name="BAAI/bge-reranker-v2-m3")
+    reranker = CrossEncoderReranker()
     
     # C. Generator
-    generator = ChatGPTGenerator(model_name="gpt-4o-mini") 
+    generator = ChatGPTGenerator()
     
     # D. Orchestrator
     orchestrator = RAGOrchestrator(retriever, reranker, generator)
@@ -97,8 +97,13 @@ if prompt := st.chat_input("请输入你的问题 (例如: 墨大CS硕士雅思�
         start_time = time.time()
         
         # === 核心调用 ===
-        # 使用 session_id 区分不同用户，这里 Demo 简单用 default
-        answer, sources = rag_orchestrator.run(query=prompt, session_id="demo_user")
+        answer, sources = rag_orchestrator.run(
+            query=prompt,
+            chat_history=[
+                {"role": msg["role"], "content": msg["content"]}
+                for msg in st.session_state.messages[:-1]
+            ],
+        )
         
         duration = time.time() - start_time
         

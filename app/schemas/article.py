@@ -1,13 +1,16 @@
 import uuid
 from typing import List, Optional
 from datetime import date, datetime
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 class Article(BaseModel):
     # --- 1. 声明字段 (Declarative Fields) ---
     # Pydantic 会自动读取这些来验证数据
     text: str
-    questions: List[str] = Field(default_factory=list)  # 如果没传，默认为空列表
+    questions: List[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("questions", "question"),
+    )
     
     # default_factory 用于动态生成默认值，完美替代你的 manual UUID logic
     id: str = Field(default_factory=lambda: str(uuid.uuid4())) 
@@ -23,6 +26,15 @@ class Article(BaseModel):
     language: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     link: Optional[str] = None
+
+    @field_validator("questions", mode="before")
+    @classmethod
+    def normalize_questions(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        return value
 
     # --- 2. 自定义逻辑 (如果有必要) ---
     # 如果你需要特殊的日期解析逻辑，可以用 @field_validator，但通常不需要

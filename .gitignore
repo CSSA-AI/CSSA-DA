@@ -14,8 +14,18 @@ cssa-ci/
 # pytest
 .pytest_cache/
 
+# Tool caches and coverage
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
 # env files
 .env
 
 # OS
 .DS_Store
+
+# Accidental PowerShell cache
+/Microsoft/

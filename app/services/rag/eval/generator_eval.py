@@ -96,17 +96,11 @@ class GeneratorEvaluator:
         search_results: List[SearchResult],
         ground_truth_ids: List[str],
         generator: BaseGenerator,
-        *,
-        session_id: str = "eval",
     ) -> Dict[str, Any]:
         """
         统一评估接口：生成答案 + 计算三大指标。
         """
-        answer = generator.generate_text(
-            query,
-            search_results,
-            session_id=session_id,
-        )
+        answer = generator.generate_text(query, search_results)
 
         return {
             "answer": answer,

@@ -1,9 +1,10 @@
 import json
 import psycopg2
 from sentence_transformers import SentenceTransformer
+from app.core.config import rag_config
 
 # 1. 加载 embedding 模型
-model = SentenceTransformer("all-MiniLM-L6-v2")
+model = SentenceTransformer(rag_config["retriever"]["embedding_model"])
 
 # 2. 连接数据库
 conn = psycopg2.connect(
@@ -41,7 +42,7 @@ for item in data:
     if content:
         text_for_embedding += content
 
-    embedding = model.encode(text_for_embedding).tolist()
+    embedding = model.encode(text_for_embedding, normalize_embeddings=True).tolist()
 
     cur.execute("""
         INSERT INTO knowledge_base (

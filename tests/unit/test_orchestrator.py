@@ -49,7 +49,7 @@ class DummyGenerator(BaseGenerator):
         contents = [article.text for article in articles]
         return f"Generated answer for '{query}' using: {' + '.join(contents)}"
 
-    def generate_text(self, query: str, search_results: List[SearchResult], session_id: str = "default") -> str:
+    def generate_text(self, query: str, search_results: List[SearchResult], **kwargs) -> str:
         articles = [item.article for item in search_results]
         return self.generate(query, articles)
 
@@ -90,9 +90,14 @@ class TestRAGOrchestrator(unittest.TestCase):
         reranked = self.reranker.rerank("test", retrieve_result)
         self.assertEqual(len(reranked), 2)
 
-        generated = self.generator.generate_text("test", reranked, session_id="default")
+        generated = self.generator.generate_text("test", reranked)
         self.assertIn("Content 1", generated)
         self.assertIn("Content 2", generated)
+
+    def test_article_accepts_legacy_singular_question(self):
+        article = Article(text="Content", question="Legacy question")
+
+        self.assertEqual(article.questions, ["Legacy question"])
 
 
 if __name__ == "__main__":

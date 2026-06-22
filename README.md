@@ -16,7 +16,7 @@ User Query
 [Reranker]    ──  CrossEncoder re-ranking (LoRA fine-tuning supported)
     │
     ▼
-[Generator]   ──  ChatGPT with LangChain, token-capped conversation history
+[Generator]   ──  OpenAI SDK generation with explicit chat history
     │
     ▼
 Answer + Source Articles
@@ -60,7 +60,7 @@ CSSA-DA/
 │           │   └── train_lora.py            # LoRA fine-tuning script
 │           ├── generator/
 │           │   ├── base.py                  # Abstract base class
-│           │   └── chatgpt_generator.py     # LangChain ChatOpenAI with streaming + history
+│           │   └── chatgpt_generator.py     # OpenAI SDK generation + streaming
 │           ├── eval/                        # Evaluation module (WIP)
 │           └── tests/
 │               ├── test_faiss_retriever.py
@@ -157,9 +157,12 @@ This launches a chat UI at `http://localhost:8501` with streaming responses and 
 - Training script: [app/services/rag/reranker/train_lora.py](app/services/rag/reranker/train_lora.py)
 
 ### Generator ([app/services/rag/generator/chatgpt_generator.py](app/services/rag/generator/chatgpt_generator.py))
-- LangChain `ChatOpenAI` integration with token-capped conversation history
-- Formats retrieved articles as context, truncating to stay within token limits
-- Supports streaming (`Iterable[str]`) and tracks token usage per call
+- OpenAI SDK integration without a LangChain dependency
+- Explicit plain-dictionary chat history supplied by the calling application
+- Context truncation plus synchronous and streaming output
+
+The optional `LangChainRAGAdapter` wraps the framework-independent components as
+LCEL runnables and returns shared pipeline state containing the answer and sources.
 
 ### Question Generator ([app/services/question_generator/](app/services/question_generator/))
 - Uses GPT to generate natural Chinese questions for each article (used to build the FAISS search index)
