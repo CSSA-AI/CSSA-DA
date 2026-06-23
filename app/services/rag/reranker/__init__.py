@@ -1,3 +1,5 @@
-from .cross_encoder_reranker import CrossEncoderReranker
+"""Reranker implementations.
 
-__all__ = ["CrossEncoderReranker"]
+Import concrete implementations from their modules to avoid loading ML
+dependencies when only the base interface is needed.
+"""

@@ -56,19 +56,27 @@ class TestWechatScraper:
         batch1 = [{"title": "文章1", "link": "url1"}]
         batch2 = [{"title": "文章2", "link": "url2"}]
         
-        with open(os.path.join(scraper.TEMP_DIR, "batch_0.json"), "w") as f:
+        with open(
+            os.path.join(scraper.TEMP_DIR, "batch_0.json"),
+            "w",
+            encoding="utf-8",
+        ) as f:
             json.dump(batch1, f)
-        with open(os.path.join(scraper.TEMP_DIR, "batch_20.json"), "w") as f:
+        with open(
+            os.path.join(scraper.TEMP_DIR, "batch_20.json"),
+            "w",
+            encoding="utf-8",
+        ) as f:
             json.dump(batch2, f)
             
-        with open(scraper.STATE_FILE, "w") as f:
+        with open(scraper.STATE_FILE, "w", encoding="utf-8") as f:
             json.dump({"begin": 40}, f)
 
         mock_state = {"total_saved": 2, "valid_count": 2}
         scraper.merge_and_cleanup(mock_state)
 
         assert os.path.exists(scraper.FINAL_FILE)
-        with open(scraper.FINAL_FILE, "r") as f:
+        with open(scraper.FINAL_FILE, "r", encoding="utf-8") as f:
             final_data = json.load(f)
             assert len(final_data) == 2
             assert final_data[0]["title"] == "文章1"
@@ -105,7 +113,7 @@ class TestWechatScraper:
     
         assert os.path.exists(scraper.FINAL_FILE)
         
-        with open(scraper.FINAL_FILE, "r") as f:
+        with open(scraper.FINAL_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             assert len(data) == 1
             assert data[0]["title"] == "测试文章"
