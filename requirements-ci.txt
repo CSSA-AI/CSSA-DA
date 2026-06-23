@@ -1,5 +1,7 @@
 # 测试框架
 pytest
+fastapi
+httpx
 
 # 数据模型
 pydantic

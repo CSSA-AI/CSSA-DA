@@ -1,3 +1,5 @@
-from app.services.rag.generator.chatgpt_generator import ChatGPTGenerator
+"""Answer generator implementations.
 
-__all__ = ["ChatGPTGenerator"]
+Import concrete implementations from their modules so lightweight API routes
+do not initialize provider dependencies during application startup.
+"""
