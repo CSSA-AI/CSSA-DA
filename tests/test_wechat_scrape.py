@@ -51,6 +51,12 @@ class TestWechatScraper:
         assert isinstance(loaded_state["seen_links"], set)
         assert "linkA" in loaded_state["seen_links"]
 
+    def test_api_key_is_required(self, monkeypatch):
+        monkeypatch.delenv("WECHAT_API_KEY", raising=False)
+
+        with pytest.raises(ValueError, match="WECHAT_API_KEY is required"):
+            scraper.get_api_key()
+
     def test_merge_and_cleanup(self, tmp_path):
         """测试最后的分块合并与无痕清理逻辑"""
         batch1 = [{"title": "文章1", "link": "url1"}]
