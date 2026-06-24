@@ -127,10 +127,12 @@ OPENAI_API_KEY=sk-...
 ### 3. Docker
 
 ```bash
-docker-compose up
+docker compose --profile cpu up --build
 ```
 
-See [docker-command.md](docker-command.md) for detailed Docker usage.
+This starts PostgreSQL and the FastAPI service. Open `http://localhost:8000/docs`.
+Use the `gpu` profile instead on a machine with a supported NVIDIA GPU. See
+[docker-command.md](docker-command.md) for detailed Docker usage.
 
 ---
 

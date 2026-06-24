@@ -16,3 +16,15 @@ jobs:
 
       - name: Build CPU image
         run: docker build -f Dockerfile.cpu -t cssa-da:ci .
+
+      - name: Smoke test API container
+        run: |
+          docker run --rm -d --name cssa-da-api -p 8000:8000 -e OPENAI_API_KEY=dummy-key cssa-da:ci
+          for attempt in {1..30}; do
+            if curl --fail --silent http://localhost:8000/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs cssa-da-api
+          exit 1
