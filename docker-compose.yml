@@ -1,11 +1,8 @@
-version: '3.8'
-
 services:
-  # 数据库：全队通用
   postgres:
     image: pgvector/pgvector:0.7.4-pg16
     container_name: rag_postgres_db
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_USER: rag_user
       POSTGRES_PASSWORD: rag_password
@@ -14,42 +11,49 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag_user -d rag_vectordb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # CPU 工作节点 (给 Mac 和无显卡组员)
-  worker-cpu:
-    build: 
+  api-cpu:
+    build:
       context: .
       dockerfile: Dockerfile.cpu
-    container_name: rag_worker_cpu
+    container_name: rag_api_cpu
     profiles: ["cpu"]
+    restart: unless-stopped
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     ports:
-      - 8000:8000
-      - 8501:8501
-    volumes:
-      - .:/app
+      - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://rag_user:rag_password@postgres:5432/rag_vectordb
-      - ASYNC_DATABASE_URL=postgresql+asyncpg://rag_user:rag_password@postgres:5432/rag_vectordb
+      ENV: ${ENV:-dev}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DATABASE_URL: postgresql://rag_user:rag_password@postgres:5432/rag_vectordb
+    volumes:
+      - huggingface_cache:/root/.cache/huggingface
 
-  # GPU 工作节点 (给带 Nvidia 显卡的组员)
-  worker-gpu:
-    build: 
+  api-gpu:
+    build:
       context: .
       dockerfile: Dockerfile.gpu
-    container_name: rag_worker_gpu
+    container_name: rag_api_gpu
     profiles: ["gpu"]
+    restart: unless-stopped
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     ports:
-      - 8000:8000
-      - 8501:8501
-    volumes:
-      - .:/app
+      - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://rag_user:rag_password@postgres:5432/rag_vectordb
-      - ASYNC_DATABASE_URL=postgresql+asyncpg://rag_user:rag_password@postgres:5432/rag_vectordb
+      ENV: ${ENV:-dev}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DATABASE_URL: postgresql://rag_user:rag_password@postgres:5432/rag_vectordb
+    volumes:
+      - huggingface_cache:/root/.cache/huggingface
     deploy:
       resources:
         reservations:
@@ -60,3 +64,4 @@ services:
 
 volumes:
   pgdata:
+  huggingface_cache:
