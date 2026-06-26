@@ -1,25 +1,55 @@
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-# 引入我们定好的标准契约
 from app.schemas.search_result import SearchResult
 
-from .retriever.base import BaseRetriever
-from .reranker.base import BaseReranker
+from .adapters.langchain_adapter import LangChainRAGAdapter
 from .generator.base import BaseGenerator
+from .reranker.base import BaseReranker
+from .retriever.base import BaseRetriever
 
 logger = logging.getLogger(__name__)
 
-class RAGOrchestrator:
-    """Framework-independent composition of the three core RAG stages."""
 
-    def __init__(self, retriever: BaseRetriever, reranker: BaseReranker, generator: BaseGenerator):
+class RAGOrchestrator:
+    """Owns the RAG workflow and composes LangChain runnables."""
+
+    def __init__(
+        self,
+        retriever: BaseRetriever,
+        reranker: BaseReranker,
+        generator: BaseGenerator,
+    ):
         self.retriever = retriever
         self.reranker = reranker
         self.generator = generator
 
-    # [改动 1]: 返回值从 str 改为 Tuple[str, List]
-    # 这样前端或者测试脚本就能知道："这句话是参考哪篇文章写的？"
+    def as_chain(self):
+        """Build the LangChain runnable pipeline from wrapped RAG components."""
+        adapter = LangChainRAGAdapter()
+        return (
+            adapter.retriever_runnable(self.retriever)
+            | adapter.reranker_runnable(self.reranker)
+            | adapter.generator_runnable(self.generator)
+        )
+
+    def invoke(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """Run the LangChain runnable pipeline and return its full state."""
+        return self.as_chain().invoke(inputs)
+
+    def stream(self, inputs: Dict[str, Any]) -> Iterable[str]:
+        """Stream from the generator after retrieve and rerank have completed."""
+        state = (
+            LangChainRAGAdapter.retriever_runnable(self.retriever)
+            | LangChainRAGAdapter.reranker_runnable(self.reranker)
+        ).invoke(inputs)
+
+        yield from self.generator.stream_text(
+            query=state["query"],
+            search_results=state["search_results"],
+            chat_history=state.get("chat_history"),
+        )
+
     def run(
         self,
         query: str,
@@ -28,27 +58,16 @@ class RAGOrchestrator:
         rerank_top_k: Optional[int] = None,
         chat_history: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[str, List[SearchResult]]:
-        logger.info(f"🚀 Starting RAG pipeline for query: {query}")
-        
-        # 1. Retrieve
-        retrieve_kwargs = {"top_k": top_k} if top_k is not None else {}
-        retrieve_result = self.retriever.search(query=query, **retrieve_kwargs)
-        logger.info(f"🔍 Retrieved {len(retrieve_result)} articles.")
-        
-        # 2. Rerank
-        rerank_kwargs = {"top_k": rerank_top_k} if rerank_top_k is not None else {}
-        reranker_result = self.reranker.rerank(
-            query=query, search_results=retrieve_result, **rerank_kwargs
+        logger.info("Starting RAG pipeline for query: %s", query)
+
+        state = self.invoke(
+            {
+                "query": query,
+                "top_k": top_k,
+                "rerank_top_k": rerank_top_k,
+                "chat_history": chat_history,
+            }
         )
-        logger.info(f"⚖️ Reranked and kept {len(reranker_result)} articles.")
-        
-        # 3. Generate (Blocking/Non-streaming)
-        generate_result = self.generator.generate_text(
-            query=query,
-            search_results=reranker_result,
-            chat_history=chat_history,
-        )
-        logger.info("🤖 Generated response successfully.")
-        
-        # 返回 (答案文本, 参考来源)
-        return generate_result, reranker_result
+
+        logger.info("Generated response successfully.")
+        return state["answer"], state["search_results"]

@@ -1,11 +1,12 @@
-# tests/integration/test_langchain_rag_adapter.py
+# tests/integration/test_rag_pipeline.py
 
 import os
 import pytest
 import psycopg2
+from psycopg2.extras import Json
 from sentence_transformers import SentenceTransformer
 
-from app.services.rag.adapters.langchain_adapter import LangChainRAGAdapter
+from app.services.rag.orchestrator import RAGOrchestrator
 from app.services.rag.reranker.cross_encoder_reranker import CrossEncoderReranker
 from app.services.rag.retriever.pg_retriever import PGVectorRetriever
 
@@ -36,13 +37,13 @@ def setup_knowledge_base():
                 CREATE TABLE knowledge_base (
                     id SERIAL PRIMARY KEY,
                     question_text TEXT,
-                    content TEXT,
+                    content TEXT NOT NULL,
                     source TEXT,
                     author TEXT,
                     post_date DATE,
                     language TEXT,
-                    created_at TIMESTAMP,
-                    tags TEXT[],
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+                    tags JSONB,
                     link TEXT,
                     embedding vector(384)
                 );
@@ -62,7 +63,7 @@ def setup_knowledge_base():
                     embedding
                 )
                 VALUES (
-                    %s, %s, %s, %s, %s, %s, NOW(), %s, %s, %s::vector
+                    %s, %s, %s, %s, %s, %s, NOW(), %s::jsonb, %s, %s::vector
                 );
             """, (
                 "墨尔本大学 special consideration 怎么申请？",
@@ -71,7 +72,7 @@ def setup_knowledge_base():
                 "test",
                 "2025-01-01",
                 "zh",
-                ["unimelb", "special consideration"],
+                Json(["unimelb", "special consideration"]),
                 "https://students.unimelb.edu.au",
                 embedding,
             ))
@@ -87,18 +88,18 @@ class FakeGenerator:
         yield f"fake answer for: {query}"
 
 
-def test_langchain_rag_adapter_end_to_end():
+def test_rag_pipeline_end_to_end():
     retriever = PGVectorRetriever()
     reranker = CrossEncoderReranker()
     generator = FakeGenerator()
 
-    adapter = LangChainRAGAdapter(
+    orchestrator = RAGOrchestrator(
         retriever=retriever,
         reranker=reranker,
         generator=generator,
     )
 
-    chain = adapter.as_chain()
+    chain = orchestrator.as_chain()
 
     try:
         state = chain.invoke({
