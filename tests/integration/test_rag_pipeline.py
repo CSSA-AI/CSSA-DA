@@ -1,13 +1,11 @@
-# tests/integration/test_rag_pipeline.py
-
 import os
-import pytest
+
+import numpy as np
 import psycopg2
+import pytest
 from psycopg2.extras import Json
-from sentence_transformers import SentenceTransformer
 
 from app.services.rag.orchestrator import RAGOrchestrator
-from app.services.rag.reranker.cross_encoder_reranker import CrossEncoderReranker
 from app.services.rag.retriever.pg_retriever import PGVectorRetriever
 
 
@@ -17,16 +15,12 @@ if os.getenv("RUN_INTEGRATION_TESTS") != "1":
     pytest.skip("skip integration tests by default", allow_module_level=True)
 
 
+TEST_EMBEDDING = [0.1] * 384
+
+
 @pytest.fixture(scope="function", autouse=True)
 def setup_knowledge_base():
     database_url = os.environ["DATABASE_URL"]
-
-    model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-
-    embedding = model.encode(
-        ["墨尔本大学 special consideration 怎么申请？"],
-        normalize_embeddings=True,
-    )[0].tolist()
 
     with psycopg2.connect(database_url) as conn:
         with conn.cursor() as cur:
@@ -66,18 +60,28 @@ def setup_knowledge_base():
                     %s, %s, %s, %s, %s, %s, NOW(), %s::jsonb, %s, %s::vector
                 );
             """, (
-                "墨尔本大学 special consideration 怎么申请？",
-                "墨尔本大学 Special consideration 通常需要在规定时间内通过学校系统提交申请，并上传相关证明材料。",
+                "How do I apply for special consideration?",
+                "Students can apply for special consideration through the university portal.",
                 "University of Melbourne",
                 "test",
                 "2025-01-01",
-                "zh",
+                "en",
                 Json(["unimelb", "special consideration"]),
                 "https://students.unimelb.edu.au",
-                embedding,
+                TEST_EMBEDDING,
             ))
 
         conn.commit()
+
+
+class FakeEmbeddingModel:
+    def encode(self, texts, normalize_embeddings=True):
+        return np.array([TEST_EMBEDDING for _ in texts])
+
+
+class FakeReranker:
+    def rerank(self, query, search_results, top_k=None):
+        return search_results[:top_k]
 
 
 class FakeGenerator:
@@ -89,8 +93,12 @@ class FakeGenerator:
 
 
 def test_rag_pipeline_end_to_end():
-    retriever = PGVectorRetriever()
-    reranker = CrossEncoderReranker()
+    retriever = PGVectorRetriever.__new__(PGVectorRetriever)
+    retriever.conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    retriever.table_name = "knowledge_base"
+    retriever.model = FakeEmbeddingModel()
+
+    reranker = FakeReranker()
     generator = FakeGenerator()
 
     orchestrator = RAGOrchestrator(
@@ -103,7 +111,7 @@ def test_rag_pipeline_end_to_end():
 
     try:
         state = chain.invoke({
-            "query": "墨尔本大学 special consideration 怎么申请？",
+            "query": "How do I apply for special consideration?",
             "top_k": 5,
             "rerank_top_k": 3,
         })

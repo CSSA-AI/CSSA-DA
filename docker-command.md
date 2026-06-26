@@ -34,9 +34,6 @@ docker compose --profile cpu up -d
 # Follow API logs
 docker compose logs -f api-cpu
 
-# Run a one-off script inside the image
-docker compose --profile cpu run --rm api-cpu python scripts/import_demo.py
-
 # Open a shell
 docker compose --profile cpu run --rm api-cpu bash
 
