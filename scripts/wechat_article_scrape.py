@@ -11,7 +11,7 @@ from datetime import datetime
 # ==========================================
 # 系统配置 (Configuration)
 # ==========================================
-API_KEY = 'afd78ef5a5984e2d85f672c244c98138'
+WECHAT_API_KEY_ENV = "WECHAT_API_KEY"
 FAKE_ID = "MjM5OTAxNTM0MA=="  # 墨大 CSSA
 BASE_URL = "https://down.mptext.top/api/public/v1"
 
@@ -26,6 +26,16 @@ def init_environment():
     """初始化目录结构"""
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(TEMP_DIR, exist_ok=True)
+
+
+def get_api_key():
+    """Read the harvester credential at runtime rather than from source code."""
+    api_key = os.getenv(WECHAT_API_KEY_ENV)
+    if not api_key:
+        raise ValueError(
+            f"{WECHAT_API_KEY_ENV} is required to run the WeChat harvester"
+        )
+    return api_key
 
 def load_state():
     """读取上次的抓取进度"""
@@ -87,7 +97,7 @@ def merge_and_cleanup(state):
 def fetch_pipeline():
     init_environment()
     state = load_state()
-    headers = {"X-Auth-Key": API_KEY}
+    headers = {"X-Auth-Key": get_api_key()}
     size = 20  # 每批次 20 篇
 
     try:
@@ -103,7 +113,7 @@ def fetch_pipeline():
             if res_data.get("base_resp", {}).get("ret") != 0:
                 err = res_data.get('base_resp', {}).get('err_msg')
                 print(f"❌ [API ERROR] 接口报错: {err}")
-                print("💡 提示: 可能是密钥已过期。请更新代码里的 API_KEY 后重新运行，脚本会自动断点续传！")
+                print("💡 提示: 密钥可能已过期。请更新 WECHAT_API_KEY 后重新运行，脚本会自动断点续传！")
                 break
 
             articles = res_data.get("articles", [])

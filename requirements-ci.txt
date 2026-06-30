@@ -8,6 +8,7 @@ pydantic
 
 # 数据库
 sqlalchemy
+alembic
 psycopg2-binary
 pgvector
 

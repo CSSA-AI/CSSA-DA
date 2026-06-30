@@ -27,34 +27,40 @@ class FakeGenerator:
     def generate_text(self, query, search_results, chat_history=None):
         return f"answer:{query}:{len(search_results)}:{len(chat_history or [])}"
 
-    def stream_text(self, query, search_results, chat_history=None):
-        yield "answer:"
-        yield query
+
+def test_retriever_runnable_wraps_retriever_only():
+    runnable = LangChainRAGAdapter.retriever_runnable(FakeRetriever())
+
+    state = runnable.invoke({"query": "hello", "top_k": 5})
+
+    assert state["query"] == "hello"
+    assert state["search_results"][0].score == 0.5
 
 
-def test_chain_returns_full_pipeline_state():
-    adapter = LangChainRAGAdapter(FakeRetriever(), FakeGenerator(), FakeReranker())
+def test_reranker_runnable_wraps_reranker_only():
+    search_results = FakeRetriever().search("hello")
+    runnable = LangChainRAGAdapter.reranker_runnable(FakeReranker())
 
-    state = adapter.invoke({
-        "query": "hello",
-        "top_k": 5,
-        "rerank_top_k": 3,
-        "chat_history": [{"role": "user", "content": "earlier"}],
-    })
+    state = runnable.invoke(
+        {"query": "hello", "search_results": search_results, "rerank_top_k": 3}
+    )
+
+    assert state["search_results"][0].score == 0.9
+
+
+def test_generator_runnable_wraps_generator_only():
+    search_results = FakeRetriever().search("hello")
+    runnable = LangChainRAGAdapter.generator_runnable(FakeGenerator())
+
+    state = runnable.invoke(
+        {
+            "query": "hello",
+            "search_results": search_results,
+            "chat_history": [{"role": "user", "content": "earlier"}],
+        }
+    )
 
     assert state["answer"] == "answer:hello:1:1"
-    assert state["search_results"][0].score == 0.9
-    assert state["query"] == "hello"
-
-
-def test_adapter_can_skip_reranker_and_stream_full_pipeline():
-    adapter = LangChainRAGAdapter(FakeRetriever(), FakeGenerator())
-
-    state = adapter.invoke({"query": "hello"})
-    chunks = list(adapter.stream({"query": "hello"}))
-
-    assert state["search_results"][0].score == 0.5
-    assert chunks == ["answer:", "hello"]
 
 
 def test_core_components_do_not_import_langchain():

@@ -34,9 +34,6 @@ docker compose --profile cpu up -d
 # Follow API logs
 docker compose logs -f api-cpu
 
-# Run a one-off script inside the image
-docker compose --profile cpu run --rm api-cpu python scripts/import_demo.py
-
 # Open a shell
 docker compose --profile cpu run --rm api-cpu bash
 
@@ -59,6 +56,28 @@ docker compose --profile cpu down --volumes
 ## PostgreSQL
 
 ```bash
-docker exec -i rag_postgres_db psql -U rag_user -d rag_vectordb < database_setup.sql
+# Start only the local database
+docker compose up -d postgres
+
+# Apply database migrations
+DATABASE_URL=postgresql://rag_user:rag_password@localhost:5432/rag_vectordb \
+  python -m alembic upgrade head
+
+# Inspect the database manually
 docker exec -it rag_postgres_db psql -U rag_user -d rag_vectordb
+```
+
+On Windows PowerShell, set `DATABASE_URL` like this:
+
+```powershell
+$env:DATABASE_URL='postgresql://rag_user:rag_password@localhost:5432/rag_vectordb'
+.\.venv\Scripts\python.exe -m alembic upgrade head
+```
+
+For disposable local development data, reset the migrated schema with:
+
+```powershell
+$env:DATABASE_URL='postgresql://rag_user:rag_password@localhost:5432/rag_vectordb'
+.\.venv\Scripts\python.exe -m alembic downgrade base
+.\.venv\Scripts\python.exe -m alembic upgrade head
 ```

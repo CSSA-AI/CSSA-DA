@@ -52,6 +52,7 @@ dependencies:
 
       # --- 数据库 (Postgres + pgvector) ---
       - sqlalchemy               # [新增] ORM 框架
+      - alembic                  # Database schema migrations
       - asyncpg                  # [新增] 异步 Postgres 驱动 (FastAPI 标配)
       - psycopg2-binary          # 同步驱动 (备用)
       - pgvector                 # [新增] 向量数据库插件支持
