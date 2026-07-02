@@ -6,7 +6,9 @@ from datetime import datetime
 # ==========================================
 # 路径与配置
 # ==========================================
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+ROOT_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..")
+)
 DATA_DIR = os.path.join(ROOT_DIR, "data")
 
 INPUT_FILE = os.path.join(DATA_DIR, "wechat_articles_all.json")
@@ -119,12 +121,12 @@ def process_and_transform_articles():
             full_text = cleaned_content
 
         rag_item = {
-            "questions": [title],
-            "text": full_text,
+            "question_text": title,
+            "content": full_text,
             "source": "WeChat: 墨大中国学生会",
             "author": None,
             "post_date": item.get("date", "1970-01-01"),
-            "language": "simplified-chinese",
+            "language": "zh",
             "created_at": current_date,
             "tags": ["微信公众号", "CSSA"],
             "link": item.get("link", "")
@@ -146,5 +148,3 @@ def process_and_transform_articles():
     print(f"💾 最终处理结果已保存至: {os.path.abspath(OUTPUT_FILE)}")
     print("="*60)
 
-if __name__ == "__main__":
-    process_and_transform_articles()

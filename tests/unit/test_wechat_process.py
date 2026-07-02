@@ -1,11 +1,11 @@
-import sys
-import os
 import pytest
+import shutil
+from pathlib import Path
 
 # 动态将 scripts 目录加入环境变量，方便导入处理脚本
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../scripts')))
+from pipelines.transform import wechat_articles
 
-from wechat_article_process import clean_text
+clean_text = wechat_articles.clean_text
 
 class TestWechatDataPurify:
     """测试微信公众号数据清洗的各个阶段 (适配极限压缩模式)"""
@@ -62,3 +62,45 @@ class TestWechatDataPurify:
         """测试边界情况: 输入为空或 None"""
         assert clean_text("") == ""
         assert clean_text(None) == ""
+
+
+def test_processed_output_matches_knowledge_base_shape(monkeypatch):
+    temp_dir = Path(__file__).parent / ".tmp_wechat_process"
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir)
+    temp_dir.mkdir()
+
+    input_file = temp_dir / "wechat_articles_all.json"
+    output_file = temp_dir / "wechat_articles_processed.json"
+
+    input_file.write_text(
+        """
+        [
+          {
+            "is_valid_for_rag": true,
+            "title": "Special consideration guide",
+            "content": "This article explains how students apply for special consideration at university.",
+            "date": "2026-04-10",
+            "link": "https://example.com/article"
+          }
+        ]
+        """,
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(wechat_articles, "INPUT_FILE", str(input_file))
+    monkeypatch.setattr(wechat_articles, "OUTPUT_FILE", str(output_file))
+    monkeypatch.setattr(wechat_articles, "DATA_DIR", str(temp_dir))
+
+    try:
+        wechat_articles.process_and_transform_articles()
+
+        processed = output_file.read_text(encoding="utf-8")
+
+        assert '"question_text": "Special consideration guide"' in processed
+        assert '"content": "# Special consideration guide' in processed
+        assert '"language": "zh"' in processed
+        assert '"questions"' not in processed
+        assert '"text"' not in processed
+    finally:
+        shutil.rmtree(temp_dir)

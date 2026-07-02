@@ -16,7 +16,9 @@ FAKE_ID = "MjM5OTAxNTM0MA=="  # 墨大 CSSA
 BASE_URL = "https://down.mptext.top/api/public/v1"
 
 # 目录与文件路径配置
-DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
+DATA_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "data")
+)
 TEMP_DIR = os.path.join(DATA_DIR, "temp_chunks")
 STATE_FILE = os.path.join(DATA_DIR, "scraper_state.json")
 FINAL_FILE = os.path.join(DATA_DIR, "wechat_articles_all.json")
@@ -214,5 +216,3 @@ def fetch_pipeline():
         save_state(state)
         sys.exit(1)
 
-if __name__ == "__main__":
-    fetch_pipeline()

@@ -1,30 +1,33 @@
-import sys
 import os
 import json
+import shutil
+from pathlib import Path
 import pytest
 import requests  # 修复 NameError
 from unittest.mock import patch, MagicMock
 
 # 动态将 scripts 目录加入环境变量
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../scripts')))
-
-import wechat_article_scrape as scraper
+from pipelines.ingestion import wechat_articles as scraper
 
 class TestWechatScraper:
     """测试微信爬虫的 ETL 流程 (包含状态管理和文件合并)"""
 
     @pytest.fixture(autouse=True)
-    def setup_and_teardown(self, tmp_path):
+    def setup_and_teardown(self):
         """核心隔离机制：使用 pytest 临时目录保护真实数据文件"""
+        self.test_workspace = Path(__file__).parent / ".tmp_wechat_scrape"
+        if self.test_workspace.exists():
+            shutil.rmtree(self.test_workspace)
+
         self.original_data_dir = scraper.DATA_DIR
         self.original_temp_dir = scraper.TEMP_DIR
         self.original_state_file = scraper.STATE_FILE
         self.original_final_file = scraper.FINAL_FILE
 
-        scraper.DATA_DIR = str(tmp_path / "data")
-        scraper.TEMP_DIR = str(tmp_path / "data" / "temp_chunks")
-        scraper.STATE_FILE = str(tmp_path / "data" / "scraper_state.json")
-        scraper.FINAL_FILE = str(tmp_path / "data" / "wechat_articles_all.json")
+        scraper.DATA_DIR = str(self.test_workspace / "data")
+        scraper.TEMP_DIR = str(self.test_workspace / "data" / "temp_chunks")
+        scraper.STATE_FILE = str(self.test_workspace / "data" / "scraper_state.json")
+        scraper.FINAL_FILE = str(self.test_workspace / "data" / "wechat_articles_all.json")
 
         scraper.init_environment()
         yield  
@@ -33,6 +36,9 @@ class TestWechatScraper:
         scraper.TEMP_DIR = self.original_temp_dir
         scraper.STATE_FILE = self.original_state_file
         scraper.FINAL_FILE = self.original_final_file
+
+        if self.test_workspace.exists():
+            shutil.rmtree(self.test_workspace)
 
     def test_state_management_serialization(self):
         """测试状态的存取逻辑：重点测试 set 集合转 JSON 列表是否正常"""
@@ -57,7 +63,7 @@ class TestWechatScraper:
         with pytest.raises(ValueError, match="WECHAT_API_KEY is required"):
             scraper.get_api_key()
 
-    def test_merge_and_cleanup(self, tmp_path):
+    def test_merge_and_cleanup(self):
         """测试最后的分块合并与无痕清理逻辑"""
         batch1 = [{"title": "文章1", "link": "url1"}]
         batch2 = [{"title": "文章2", "link": "url2"}]
@@ -90,7 +96,7 @@ class TestWechatScraper:
         assert not os.path.exists(scraper.TEMP_DIR)
         assert not os.path.exists(scraper.STATE_FILE)
 
-    @patch('wechat_article_scrape.requests.get')
+    @patch('pipelines.ingestion.wechat_articles.requests.get')
     def test_api_network_error_handling(self, mock_get):
         """测试网络超时及最后合并结束机制"""
         

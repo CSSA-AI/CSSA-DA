@@ -17,6 +17,24 @@ services:
       timeout: 5s
       retries: 5
 
+  postgres-test:
+    image: pgvector/pgvector:0.7.4-pg16
+    container_name: rag_postgres_test
+    profiles: ["test"]
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: testdb
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d testdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   api-cpu:
     build:
       context: .
