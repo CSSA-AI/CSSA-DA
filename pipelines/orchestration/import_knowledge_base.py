@@ -1,6 +1,6 @@
-import argparse
-import os
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Protocol
 
 from app.core.config import rag_config
 from pipelines.embedding.knowledge_base_text import encode_records
@@ -10,83 +10,100 @@ from pipelines.shared.paths import DEFAULT_KNOWLEDGE_BASE_INPUT
 from pipelines.validation.knowledge_base_records import validate_records
 
 
-def import_records(
-    input_file: Path,
+class EmbeddingModel(Protocol):
+    def encode(
+        self,
+        texts: list[str],
+        *,
+        normalize_embeddings: bool,
+    ) -> Any: ...
+
+
+class KnowledgeBaseValidationError(ValueError):
+    def __init__(self, errors: list[str]):
+        self.errors = errors
+        super().__init__(
+            f"Refusing to import {len(errors)} validation errors"
+        )
+
+
+@dataclass(frozen=True)
+class ImportResult:
+    attempted_count: int
+    inserted_count: int
+
+
+def import_knowledge_base(
+    records: list[dict[str, Any]],
+    embedder: EmbeddingModel,
     database_url: str,
     *,
+    table_name: str | None = None,
+    expected_embedding_dim: int | None = None,
+    batch_size: int = 100,
+) -> ImportResult:
+    if batch_size <= 0:
+        raise ValueError("batch_size must be greater than zero")
+
+    errors = validate_records(records)
+    if errors:
+        raise KnowledgeBaseValidationError(errors)
+
+    if not records:
+        return ImportResult(attempted_count=0, inserted_count=0)
+
+    table_name = table_name or rag_config["pgvector"]["table_name"]
+    if expected_embedding_dim is None:
+        expected_embedding_dim = rag_config["retriever"]["embedding_dim"]
+
+    inserted_count = 0
+    for start in range(0, len(records), batch_size):
+        batch = records[start : start + batch_size]
+        embeddings = encode_records(batch, embedder)
+        inserted_count += insert_records(
+            batch,
+            embeddings,
+            database_url,
+            table_name,
+            expected_embedding_dim=expected_embedding_dim,
+        )
+
+    return ImportResult(
+        attempted_count=len(records),
+        inserted_count=inserted_count,
+    )
+
+
+def run_local_import(
+    database_url: str,
+    *,
+    input_file: Path = DEFAULT_KNOWLEDGE_BASE_INPUT,
     model_name: str | None = None,
     table_name: str | None = None,
     limit: int | None = None,
-) -> int:
+    batch_size: int = 100,
+) -> ImportResult:
+    if limit is not None and limit < 0:
+        raise ValueError("limit cannot be negative")
+    if batch_size <= 0:
+        raise ValueError("batch_size must be greater than zero")
+
     records = load_json_records(input_file)
     if limit is not None:
         records = records[:limit]
 
-    errors = validate_records(records)
-    if errors:
-        for error in errors[:20]:
-            print(f"- {error}")
-        if len(errors) > 20:
-            print(f"- ... {len(errors) - 20} more")
-        raise ValueError(f"Refusing to import {len(errors)} validation errors")
+    if not records:
+        return ImportResult(attempted_count=0, inserted_count=0)
 
     model_name = model_name or rag_config["retriever"]["embedding_model"]
-    table_name = table_name or rag_config["pgvector"]["table_name"]
-
-    print(f"Input file: {input_file}")
-    print(f"Rows to import: {len(records)}")
-    print(f"Embedding model: {model_name}")
-    print(f"Target table: {table_name}")
 
     from sentence_transformers import SentenceTransformer
 
-    model = SentenceTransformer(model_name)
-    embeddings = encode_records(records, model)
-    inserted = insert_records(
+    embedder = SentenceTransformer(model_name)
+    return import_knowledge_base(
         records,
-        embeddings,
+        embedder,
         database_url,
-        table_name,
-        expected_embedding_dim=rag_config["retriever"]["embedding_dim"],
+        table_name=table_name,
+        batch_size=batch_size,
     )
-
-    print(f"Inserted rows: {inserted}")
-    return inserted
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Import validated knowledge-base records into Postgres."
-    )
-    parser.add_argument(
-        "--input",
-        type=Path,
-        default=DEFAULT_KNOWLEDGE_BASE_INPUT,
-        help="Processed JSON file to import.",
-    )
-    parser.add_argument(
-        "--database-url",
-        default=os.getenv("DATABASE_URL"),
-        help="Postgres connection URL. Defaults to DATABASE_URL.",
-    )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=None,
-        help="Import only the first N rows. Useful for smoke tests.",
-    )
-    args = parser.parse_args()
-
-    if not args.database_url:
-        raise ValueError("DATABASE_URL is required")
-
-    import_records(
-        input_file=args.input,
-        database_url=args.database_url,
-        limit=args.limit,
-    )
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

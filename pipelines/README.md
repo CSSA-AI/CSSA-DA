@@ -23,6 +23,31 @@ step is implemented in:
 pipelines/transform/wechat_articles.py
 ```
 
+## Complete local workflow
+
+To run harvesting, transformation, validation, embedding and import as one
+fail-fast workflow:
+
+```powershell
+$env:WECHAT_API_KEY='<wechat-api-key>'
+$env:DATABASE_URL='postgresql://rag_user:rag_password@localhost:5432/rag_vectordb'
+.\.venv\Scripts\python.exe -m pipelines run-wechat-pipeline
+```
+
+The individual stage commands remain available for development and recovery.
+
+## Import batching
+
+Knowledge-base imports validate the complete input before embedding, then process
+records in batches of 100 by default:
+
+```powershell
+.\.venv\Scripts\python.exe -m pipelines import-knowledge-base --batch-size 250
+```
+
+Each completed batch is committed independently. If a later batch fails, rerun
+the command; the database uniqueness constraint skips records already inserted.
+
 ## Knowledge base local workflow
 
 From the repo root:
@@ -30,7 +55,7 @@ From the repo root:
 ```powershell
 # 1. Rebuild processed WeChat records from raw scraper output.
 $env:PYTHONUTF8='1'
-.\.venv\Scripts\python.exe -m pipelines.transform.wechat_articles
+.\.venv\Scripts\python.exe -m pipelines transform-wechat
 
 # 2. Validate records before import.
 .\.venv\Scripts\python.exe -m pipelines.orchestration.validate_knowledge_base
@@ -43,10 +68,10 @@ $env:DATABASE_URL='postgresql://rag_user:rag_password@localhost:5432/rag_vectord
 .\.venv\Scripts\python.exe -m alembic upgrade head
 
 # 5. Smoke-test one row first.
-.\.venv\Scripts\python.exe -m pipelines.orchestration.import_knowledge_base --limit 1
+.\.venv\Scripts\python.exe -m pipelines import-knowledge-base --limit 1
 
 # 6. Import all validated rows.
-.\.venv\Scripts\python.exe -m pipelines.orchestration.import_knowledge_base
+.\.venv\Scripts\python.exe -m pipelines import-knowledge-base
 
 # 7. Smoke-test retrieval from imported rows.
 .\.venv\Scripts\python.exe -m pipelines.orchestration.smoke_test_retrieval --query "墨尔本 校招"
