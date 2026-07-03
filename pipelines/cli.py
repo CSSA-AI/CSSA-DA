@@ -35,10 +35,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{result.output_location}"
         )
     elif args.command == "transform-wechat":
-        from pipelines.transform.wechat_articles import (
-            process_and_transform_articles,
+        from pipelines.orchestration.transform_wechat import (
+            run_local_transform,
         )
+        from pipelines.shared.paths import DEFAULT_KNOWLEDGE_BASE_INPUT
 
-        process_and_transform_articles()
+        result = run_local_transform()
+        print(
+            f"Transformed {result.stats.output_count} articles to "
+            f"{DEFAULT_KNOWLEDGE_BASE_INPUT}"
+        )
 
     return 0

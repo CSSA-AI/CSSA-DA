@@ -1,8 +1,9 @@
-import pytest
+import json
 import shutil
+from datetime import date
 from pathlib import Path
 
-# 动态将 scripts 目录加入环境变量，方便导入处理脚本
+from pipelines.orchestration.transform_wechat import run_local_transform
 from pipelines.transform import wechat_articles
 
 clean_text = wechat_articles.clean_text
@@ -64,7 +65,55 @@ class TestWechatDataPurify:
         assert clean_text(None) == ""
 
 
-def test_processed_output_matches_knowledge_base_shape(monkeypatch):
+def test_transform_articles_returns_records_and_statistics():
+    raw_articles = [
+        {
+            "is_valid_for_rag": True,
+            "title": "Special consideration guide",
+            "content": (
+                "This article explains how students apply for special "
+                "consideration at university."
+            ),
+            "date": "2026-04-10",
+            "link": "https://example.com/article",
+        },
+        {
+            "is_valid_for_rag": True,
+            "title": "Empty article",
+            "content": "too short",
+            "date": "2026-04-11",
+            "link": "https://example.com/empty",
+        },
+        {
+            "is_valid_for_rag": False,
+            "title": "Skipped article",
+            "content": "This content should not be transformed.",
+            "link": "https://example.com/skipped",
+        },
+    ]
+
+    result = wechat_articles.transform_articles(
+        raw_articles,
+        created_at=date(2026, 7, 4),
+    )
+
+    assert len(result.records) == 1
+    assert result.records[0]["question_text"] == (
+        "Special consideration guide"
+    )
+    assert result.records[0]["content"].startswith(
+        "# Special consideration guide"
+    )
+    assert result.records[0]["created_at"] == "2026-07-04"
+    assert "questions" not in result.records[0]
+    assert "text" not in result.records[0]
+    assert result.stats.input_count == 3
+    assert result.stats.output_count == 1
+    assert result.stats.dropped_count == 1
+    assert result.stats.skipped_count == 1
+
+
+def test_local_transform_reads_and_writes_json():
     temp_dir = Path(__file__).parent / ".tmp_wechat_process"
     if temp_dir.exists():
         shutil.rmtree(temp_dir)
@@ -74,33 +123,33 @@ def test_processed_output_matches_knowledge_base_shape(monkeypatch):
     output_file = temp_dir / "wechat_articles_processed.json"
 
     input_file.write_text(
-        """
-        [
-          {
-            "is_valid_for_rag": true,
-            "title": "Special consideration guide",
-            "content": "This article explains how students apply for special consideration at university.",
-            "date": "2026-04-10",
-            "link": "https://example.com/article"
-          }
-        ]
-        """,
+        json.dumps(
+            [
+                {
+                    "is_valid_for_rag": True,
+                    "title": "Special consideration guide",
+                    "content": (
+                        "This article explains how students apply for "
+                        "special consideration at university."
+                    ),
+                    "date": "2026-04-10",
+                    "link": "https://example.com/article",
+                }
+            ]
+        ),
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(wechat_articles, "INPUT_FILE", str(input_file))
-    monkeypatch.setattr(wechat_articles, "OUTPUT_FILE", str(output_file))
-    monkeypatch.setattr(wechat_articles, "DATA_DIR", str(temp_dir))
-
     try:
-        wechat_articles.process_and_transform_articles()
+        result = run_local_transform(
+            input_file=input_file,
+            output_file=output_file,
+            created_at=date(2026, 7, 4),
+        )
+        processed = json.loads(output_file.read_text(encoding="utf-8"))
 
-        processed = output_file.read_text(encoding="utf-8")
-
-        assert '"question_text": "Special consideration guide"' in processed
-        assert '"content": "# Special consideration guide' in processed
-        assert '"language": "zh"' in processed
-        assert '"questions"' not in processed
-        assert '"text"' not in processed
+        assert result.stats.output_count == 1
+        assert processed == result.records
+        assert not output_file.with_suffix(".json.tmp").exists()
     finally:
         shutil.rmtree(temp_dir)

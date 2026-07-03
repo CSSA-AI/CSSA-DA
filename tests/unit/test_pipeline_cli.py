@@ -2,6 +2,10 @@ from unittest.mock import patch
 
 from pipelines.cli import main
 from pipelines.ingestion.wechat import HarvestResult
+from pipelines.transform.wechat_articles import (
+    WechatTransformResult,
+    WechatTransformStats,
+)
 
 
 @patch("pipelines.orchestration.harvest_wechat.run_local_harvest")
@@ -20,9 +24,21 @@ def test_harvest_wechat_command(mock_run_local_harvest):
 
 
 @patch(
-    "pipelines.transform.wechat_articles.process_and_transform_articles"
+    "pipelines.orchestration.transform_wechat.run_local_transform"
 )
 def test_transform_wechat_command(mock_process_articles):
+    mock_process_articles.return_value = WechatTransformResult(
+        records=[],
+        stats=WechatTransformStats(
+            input_count=0,
+            skipped_count=0,
+            dropped_count=0,
+            output_count=0,
+            original_char_count=0,
+            cleaned_char_count=0,
+        ),
+    )
+
     exit_code = main(["transform-wechat"])
 
     assert exit_code == 0
