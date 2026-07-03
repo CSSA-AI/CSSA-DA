@@ -25,9 +25,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     if args.command == "harvest-wechat":
-        from pipelines.ingestion.wechat_articles import fetch_pipeline
+        from pipelines.orchestration.harvest_wechat import (
+            run_local_harvest,
+        )
 
-        fetch_pipeline()
+        result = run_local_harvest()
+        print(
+            f"Harvested {result.articles_written} articles to "
+            f"{result.output_location}"
+        )
     elif args.command == "transform-wechat":
         from pipelines.transform.wechat_articles import (
             process_and_transform_articles,

@@ -1,132 +1,196 @@
-import os
 import json
 import shutil
 from pathlib import Path
+from unittest.mock import MagicMock
+
 import pytest
-import requests  # 修复 NameError
-from unittest.mock import patch, MagicMock
+import requests
 
-# 动态将 scripts 目录加入环境变量
-from pipelines.ingestion import wechat_articles as scraper
+from pipelines.ingestion.wechat import (
+    HarvestState,
+    WechatApiError,
+    WechatClient,
+    WechatHarvesterConfig,
+    harvest_wechat,
+)
+from pipelines.ingestion.wechat.storage import (
+    JsonChunkArticleSink,
+    JsonFileCheckpointStore,
+    MemoryArticleSink,
+    MemoryCheckpointStore,
+)
 
-class TestWechatScraper:
-    """测试微信爬虫的 ETL 流程 (包含状态管理和文件合并)"""
 
-    @pytest.fixture(autouse=True)
-    def setup_and_teardown(self):
-        """核心隔离机制：使用 pytest 临时目录保护真实数据文件"""
-        self.test_workspace = Path(__file__).parent / ".tmp_wechat_scrape"
-        if self.test_workspace.exists():
-            shutil.rmtree(self.test_workspace)
+@pytest.fixture
+def config():
+    return WechatHarvesterConfig(
+        api_key="test-api-key",
+        delay_seconds=0,
+    )
 
-        self.original_data_dir = scraper.DATA_DIR
-        self.original_temp_dir = scraper.TEMP_DIR
-        self.original_state_file = scraper.STATE_FILE
-        self.original_final_file = scraper.FINAL_FILE
 
-        scraper.DATA_DIR = str(self.test_workspace / "data")
-        scraper.TEMP_DIR = str(self.test_workspace / "data" / "temp_chunks")
-        scraper.STATE_FILE = str(self.test_workspace / "data" / "scraper_state.json")
-        scraper.FINAL_FILE = str(self.test_workspace / "data" / "wechat_articles_all.json")
+@pytest.fixture
+def test_workspace():
+    workspace = Path(__file__).parent / ".tmp_wechat_scrape"
+    if workspace.exists():
+        shutil.rmtree(workspace)
+    workspace.mkdir()
 
-        scraper.init_environment()
-        yield  
-        
-        scraper.DATA_DIR = self.original_data_dir
-        scraper.TEMP_DIR = self.original_temp_dir
-        scraper.STATE_FILE = self.original_state_file
-        scraper.FINAL_FILE = self.original_final_file
+    yield workspace
 
-        if self.test_workspace.exists():
-            shutil.rmtree(self.test_workspace)
+    if workspace.exists():
+        shutil.rmtree(workspace)
 
-    def test_state_management_serialization(self):
-        """测试状态的存取逻辑：重点测试 set 集合转 JSON 列表是否正常"""
-        mock_state = {
-            "begin": 40,
-            "total_saved": 40,
-            "valid_count": 35,
-            "seen_links": {"linkA", "linkB"}
+
+def test_api_key_is_required(monkeypatch):
+    monkeypatch.delenv("WECHAT_API_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="WECHAT_API_KEY is required"):
+        WechatHarvesterConfig.from_environment()
+
+
+def test_local_checkpoint_store_round_trip(test_workspace):
+    state_file = test_workspace / "scraper_state.json"
+    store = JsonFileCheckpointStore(state_file)
+    state = HarvestState(
+        begin=40,
+        total_saved=35,
+        valid_count=30,
+        seen_links={"linkB", "linkA"},
+    )
+
+    store.save(state)
+
+    assert store.load() == state
+    assert not state_file.with_suffix(".json.tmp").exists()
+
+    store.clear()
+    assert store.load() == HarvestState()
+
+
+def test_local_article_sink_is_ordered_and_idempotent(test_workspace):
+    sink = JsonChunkArticleSink(
+        temp_dir=test_workspace / "temp_chunks",
+        final_file=test_workspace / "wechat_articles_all.json",
+    )
+    sink.write_batch(20, [{"title": "old second"}])
+    sink.write_batch(0, [{"title": "first"}])
+    sink.write_batch(20, [{"title": "second"}])
+
+    output = sink.finalize()
+    articles = json.loads(
+        (test_workspace / "wechat_articles_all.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert articles == [{"title": "first"}, {"title": "second"}]
+    assert output.article_count == 2
+    assert not (test_workspace / "temp_chunks").exists()
+
+
+def test_harvester_uses_injected_client_and_memory_storage(config):
+    list_response = MagicMock()
+    list_response.json.return_value = {
+        "base_resp": {"ret": 0},
+        "articles": [
+            {
+                "title": "测试文章",
+                "link": "fake_url",
+                "create_time": 123456789,
+            }
+        ],
+    }
+    empty_response = MagicMock()
+    empty_response.json.return_value = {
+        "base_resp": {"ret": 0},
+        "articles": [],
+    }
+    http_client = MagicMock()
+    http_client.get.side_effect = [
+        list_response,
+        requests.exceptions.Timeout(),
+        empty_response,
+    ]
+    sleep = MagicMock()
+    checkpoint_store = MemoryCheckpointStore()
+    article_sink = MemoryArticleSink()
+
+    result = harvest_wechat(
+        config=config,
+        client=WechatClient(config, http_client=http_client),
+        checkpoint_store=checkpoint_store,
+        article_sink=article_sink,
+        sleep=sleep,
+    )
+
+    assert result.articles_written == 1
+    assert article_sink.articles[0]["title"] == "测试文章"
+    assert article_sink.articles[0]["content"] == ""
+    assert checkpoint_store.load() == HarvestState()
+    sleep.assert_called_once_with(0)
+    assert all(
+        call.kwargs["timeout"] == config.request_timeout_seconds
+        for call in http_client.get.call_args_list
+    )
+
+
+def test_api_error_is_raised(config):
+    response = MagicMock()
+    response.json.return_value = {
+        "base_resp": {
+            "ret": 1,
+            "err_msg": "expired credential",
         }
+    }
+    http_client = MagicMock()
+    http_client.get.return_value = response
 
-        scraper.save_state(mock_state)
+    with pytest.raises(WechatApiError, match="expired credential"):
+        WechatClient(
+            config,
+            http_client=http_client,
+        ).list_articles(0)
 
-        assert os.path.exists(scraper.STATE_FILE)
-        loaded_state = scraper.load_state()
-        assert loaded_state["begin"] == 40
-        assert isinstance(loaded_state["seen_links"], set)
-        assert "linkA" in loaded_state["seen_links"]
 
-    def test_api_key_is_required(self, monkeypatch):
-        monkeypatch.delenv("WECHAT_API_KEY", raising=False)
+def test_keyboard_interrupt_is_propagated_without_advancing_state(config):
+    client = MagicMock()
+    client.list_articles.side_effect = KeyboardInterrupt
+    checkpoint_store = MemoryCheckpointStore()
 
-        with pytest.raises(ValueError, match="WECHAT_API_KEY is required"):
-            scraper.get_api_key()
+    with pytest.raises(KeyboardInterrupt):
+        harvest_wechat(
+            config=config,
+            client=client,
+            checkpoint_store=checkpoint_store,
+            article_sink=MemoryArticleSink(),
+            sleep=MagicMock(),
+        )
 
-    def test_merge_and_cleanup(self):
-        """测试最后的分块合并与无痕清理逻辑"""
-        batch1 = [{"title": "文章1", "link": "url1"}]
-        batch2 = [{"title": "文章2", "link": "url2"}]
-        
-        with open(
-            os.path.join(scraper.TEMP_DIR, "batch_0.json"),
-            "w",
-            encoding="utf-8",
-        ) as f:
-            json.dump(batch1, f)
-        with open(
-            os.path.join(scraper.TEMP_DIR, "batch_20.json"),
-            "w",
-            encoding="utf-8",
-        ) as f:
-            json.dump(batch2, f)
-            
-        with open(scraper.STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump({"begin": 40}, f)
+    assert checkpoint_store.load() == HarvestState()
 
-        mock_state = {"total_saved": 2, "valid_count": 2}
-        scraper.merge_and_cleanup(mock_state)
 
-        assert os.path.exists(scraper.FINAL_FILE)
-        with open(scraper.FINAL_FILE, "r", encoding="utf-8") as f:
-            final_data = json.load(f)
-            assert len(final_data) == 2
-            assert final_data[0]["title"] == "文章1"
-
-        assert not os.path.exists(scraper.TEMP_DIR)
-        assert not os.path.exists(scraper.STATE_FILE)
-
-    @patch('pipelines.ingestion.wechat_articles.requests.get')
-    def test_api_network_error_handling(self, mock_get):
-        """测试网络超时及最后合并结束机制"""
-        
-        # 1. 模拟第一页获取成功
-        mock_list_response = MagicMock()
-        mock_list_response.json.return_value = {
-            "base_resp": {"ret": 0},
-            "articles": [{"title": "测试文章", "link": "fake_url", "create_time": 123456789}]
+def test_failed_batch_write_does_not_advance_checkpoint(config):
+    client = MagicMock()
+    client.list_articles.return_value = [
+        {
+            "title": "测试文章",
+            "link": "fake_url",
+            "create_time": 123456789,
         }
-    
-        # 2. 模拟第二页见底 (重点: 必须包含 "base_resp": {"ret": 0}，防止被判断为 API 失效)
-        empty_response = MagicMock()
-        empty_response.json.return_value = {
-            "base_resp": {"ret": 0}, 
-            "articles": []
-        }
+    ]
+    client.download_article.return_value = "valid article content " * 10
+    checkpoint_store = MemoryCheckpointStore()
+    article_sink = MagicMock()
+    article_sink.write_batch.side_effect = OSError("storage unavailable")
 
-        mock_get.side_effect = [
-            mock_list_response,               # 请求 1：获取文章列表 (成功)
-            requests.exceptions.Timeout(),    # 请求 2：下载正文 (抛出超时错误)
-            empty_response                    # 请求 3：下一页获取列表 (空，触发停止合并)
-        ]
-    
-        with patch('builtins.print'):
-            scraper.fetch_pipeline()
-    
-        assert os.path.exists(scraper.FINAL_FILE)
-        
-        with open(scraper.FINAL_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            assert len(data) == 1
-            assert data[0]["title"] == "测试文章"
-            assert data[0]["content"] == ""
+    with pytest.raises(OSError, match="storage unavailable"):
+        harvest_wechat(
+            config=config,
+            client=client,
+            checkpoint_store=checkpoint_store,
+            article_sink=article_sink,
+            sleep=MagicMock(),
+        )
+
+    assert checkpoint_store.load() == HarvestState()

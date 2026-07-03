@@ -1,14 +1,22 @@
 from unittest.mock import patch
 
 from pipelines.cli import main
+from pipelines.ingestion.wechat import HarvestResult
 
 
-@patch("pipelines.ingestion.wechat_articles.fetch_pipeline")
-def test_harvest_wechat_command(mock_fetch_pipeline):
+@patch("pipelines.orchestration.harvest_wechat.run_local_harvest")
+def test_harvest_wechat_command(mock_run_local_harvest):
+    mock_run_local_harvest.return_value = HarvestResult(
+        output_location="data/wechat_articles_all.json",
+        articles_written=10,
+        total_saved=10,
+        valid_count=8,
+    )
+
     exit_code = main(["harvest-wechat"])
 
     assert exit_code == 0
-    mock_fetch_pipeline.assert_called_once_with()
+    mock_run_local_harvest.assert_called_once_with()
 
 
 @patch(
