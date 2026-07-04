@@ -54,6 +54,13 @@ docker compose --profile pipeline run --rm --no-deps pipeline-cpu transform-wech
 docker compose --profile pipeline run --rm pipeline-cpu import-knowledge-base
 ```
 
+## Observability
+
+Pipeline commands emit JSON logs to standard output. Every command receives a
+`run_id`; the complete workflow also logs stage duration, record counts,
+failures and import batch progress. Docker captures these logs directly, and
+the same JSON format can later be sent to CloudWatch.
+
 ## Import batching
 
 Knowledge-base imports validate the complete input before embedding, then process

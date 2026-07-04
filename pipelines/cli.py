@@ -1,9 +1,18 @@
 import argparse
+import logging
 import os
 from collections.abc import Sequence
 from pathlib import Path
+from uuid import uuid4
 
+from pipelines.shared.logging import (
+    configure_pipeline_logging,
+    pipeline_run_context,
+)
 from pipelines.shared.paths import DEFAULT_KNOWLEDGE_BASE_INPUT
+
+
+logger = logging.getLogger(__name__)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -72,27 +81,63 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    configure_pipeline_logging()
+    run_id = str(uuid4())
 
+    with pipeline_run_context(run_id):
+        logger.info(
+            "Pipeline command started",
+            extra={
+                "event": "command_started",
+                "stage": args.command,
+            },
+        )
+        try:
+            return _run_command(parser, args, run_id)
+        except Exception as error:
+            logger.exception(
+                "Pipeline command failed",
+                extra={
+                    "event": "command_failed",
+                    "stage": args.command,
+                    "error_type": type(error).__name__,
+                },
+            )
+            raise
+
+
+def _run_command(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    run_id: str,
+) -> int:
     if args.command == "harvest-wechat":
         from pipelines.orchestration.harvest_wechat import (
             run_local_harvest,
         )
 
         result = run_local_harvest()
-        print(
-            f"Harvested {result.articles_written} articles to "
-            f"{result.output_location}"
+        logger.info(
+            "WeChat harvest completed",
+            extra={
+                "event": "command_completed",
+                "stage": args.command,
+                "record_count": result.articles_written,
+            },
         )
     elif args.command == "transform-wechat":
         from pipelines.orchestration.transform_wechat import (
             run_local_transform,
         )
-        from pipelines.shared.paths import DEFAULT_KNOWLEDGE_BASE_INPUT
 
         result = run_local_transform()
-        print(
-            f"Transformed {result.stats.output_count} articles to "
-            f"{DEFAULT_KNOWLEDGE_BASE_INPUT}"
+        logger.info(
+            "WeChat transformation completed",
+            extra={
+                "event": "command_completed",
+                "stage": args.command,
+                "record_count": result.stats.output_count,
+            },
         )
     elif args.command == "import-knowledge-base":
         from pipelines.orchestration.import_knowledge_base import (
@@ -110,9 +155,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             limit=args.limit,
             batch_size=args.batch_size,
         )
-        print(
-            f"Inserted {result.inserted_count} of "
-            f"{result.attempted_count} records"
+        logger.info(
+            "Knowledge-base import completed",
+            extra={
+                "event": "command_completed",
+                "stage": args.command,
+                "record_count": result.attempted_count,
+                "inserted_count": result.inserted_count,
+            },
         )
     elif args.command == "run-wechat-pipeline":
         from pipelines.orchestration.wechat_pipeline import (
@@ -127,12 +177,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = run_local_wechat_pipeline(
             database_url=args.database_url,
             batch_size=args.batch_size,
+            run_id=run_id,
         )
-        print(
-            f"Harvested {result.harvested_count}, transformed "
-            f"{result.transformed_count}, rejected "
-            f"{result.rejected_count}, inserted "
-            f"{result.inserted_count}"
+        logger.info(
+            "WeChat pipeline command completed",
+            extra={
+                "event": "command_completed",
+                "stage": args.command,
+                "record_count": result.transformed_count,
+                "inserted_count": result.inserted_count,
+            },
         )
 
     return 0

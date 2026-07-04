@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from pipelines.cli import main
 from pipelines.ingestion.wechat import HarvestResult
@@ -78,6 +78,7 @@ def test_import_knowledge_base_command(mock_run_local_import):
 )
 def test_run_wechat_pipeline_command(mock_run_pipeline):
     mock_run_pipeline.return_value = WechatPipelineRunResult(
+        run_id="run-123",
         harvested_count=12,
         transformed_count=9,
         skipped_count=2,
@@ -104,4 +105,5 @@ def test_run_wechat_pipeline_command(mock_run_pipeline):
             "postgresql://test:test@localhost:5432/testdb"
         ),
         batch_size=100,
+        run_id=ANY,
     )

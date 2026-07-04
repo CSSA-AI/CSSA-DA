@@ -17,6 +17,9 @@ jobs:
       - name: Build CPU image
         run: docker build -f Dockerfile.cpu -t cssa-da:ci .
 
+      - name: Smoke test pipeline CLI
+        run: docker run --rm --entrypoint python cssa-da:ci -m pipelines --help
+
       - name: Smoke test API container
         run: |
           docker run --rm -d --name cssa-da-api -p 8000:8000 -e OPENAI_API_KEY=dummy-key cssa-da:ci

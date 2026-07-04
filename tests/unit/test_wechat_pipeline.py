@@ -56,13 +56,18 @@ def test_local_pipeline_runs_stages_and_returns_report():
                 inserted_count=8,
             ),
         ) as import_records,
+        patch(
+            "pipelines.orchestration.wechat_pipeline.logger"
+        ) as pipeline_logger,
     ):
         result = run_local_wechat_pipeline(
             DATABASE_URL,
             data_dir=data_dir,
+            run_id="run-123",
         )
 
     assert result == WechatPipelineRunResult(
+        run_id="run-123",
         harvested_count=12,
         transformed_count=9,
         skipped_count=2,
@@ -88,6 +93,13 @@ def test_local_pipeline_runs_stages_and_returns_report():
         table_name=None,
         batch_size=100,
     )
+    completed_events = [
+        call.kwargs["extra"]["stage"]
+        for call in pipeline_logger.info.call_args_list
+        if call.kwargs.get("extra", {}).get("event")
+        == "stage_completed"
+    ]
+    assert completed_events == ["harvest", "transform", "import"]
 
 
 def test_local_pipeline_stops_when_transformation_fails():
@@ -108,8 +120,18 @@ def test_local_pipeline_stops_when_transformation_fails():
         patch(
             "pipelines.orchestration.wechat_pipeline.run_local_import"
         ) as import_records,
+        patch(
+            "pipelines.orchestration.wechat_pipeline.logger"
+        ) as pipeline_logger,
         pytest.raises(ValueError, match="invalid raw data"),
     ):
-        run_local_wechat_pipeline(DATABASE_URL)
+        run_local_wechat_pipeline(
+            DATABASE_URL,
+            run_id="run-failure",
+        )
 
     import_records.assert_not_called()
+    assert (
+        pipeline_logger.exception.call_args.kwargs["extra"]["stage"]
+        == "transform"
+    )
