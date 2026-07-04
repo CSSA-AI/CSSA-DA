@@ -4,7 +4,10 @@ from typing import Any, Protocol
 
 from app.core.config import rag_config
 from pipelines.embedding.knowledge_base_text import encode_records
-from pipelines.loaders.postgres_knowledge_base import insert_records
+from pipelines.loaders.base import KnowledgeBaseLoader
+from pipelines.loaders.postgres_knowledge_base import (
+    PostgresKnowledgeBaseLoader,
+)
 from pipelines.shared.json_records import load_json_records
 from pipelines.shared.paths import DEFAULT_KNOWLEDGE_BASE_INPUT
 from pipelines.validation.knowledge_base_records import validate_records
@@ -36,10 +39,8 @@ class ImportResult:
 def import_knowledge_base(
     records: list[dict[str, Any]],
     embedder: EmbeddingModel,
-    database_url: str,
+    loader: KnowledgeBaseLoader,
     *,
-    table_name: str | None = None,
-    expected_embedding_dim: int | None = None,
     batch_size: int = 100,
 ) -> ImportResult:
     if batch_size <= 0:
@@ -52,21 +53,11 @@ def import_knowledge_base(
     if not records:
         return ImportResult(attempted_count=0, inserted_count=0)
 
-    table_name = table_name or rag_config["pgvector"]["table_name"]
-    if expected_embedding_dim is None:
-        expected_embedding_dim = rag_config["retriever"]["embedding_dim"]
-
     inserted_count = 0
     for start in range(0, len(records), batch_size):
         batch = records[start : start + batch_size]
         embeddings = encode_records(batch, embedder)
-        inserted_count += insert_records(
-            batch,
-            embeddings,
-            database_url,
-            table_name,
-            expected_embedding_dim=expected_embedding_dim,
-        )
+        inserted_count += loader.insert_batch(batch, embeddings)
 
     return ImportResult(
         attempted_count=len(records),
@@ -95,15 +86,24 @@ def run_local_import(
     if not records:
         return ImportResult(attempted_count=0, inserted_count=0)
 
+    errors = validate_records(records)
+    if errors:
+        raise KnowledgeBaseValidationError(errors)
+
     model_name = model_name or rag_config["retriever"]["embedding_model"]
+    table_name = table_name or rag_config["pgvector"]["table_name"]
 
     from sentence_transformers import SentenceTransformer
 
     embedder = SentenceTransformer(model_name)
-    return import_knowledge_base(
-        records,
-        embedder,
+    with PostgresKnowledgeBaseLoader(
         database_url,
-        table_name=table_name,
-        batch_size=batch_size,
-    )
+        table_name,
+        expected_embedding_dim=rag_config["retriever"]["embedding_dim"],
+    ) as loader:
+        return import_knowledge_base(
+            records,
+            embedder,
+            loader,
+            batch_size=batch_size,
+        )

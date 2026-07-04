@@ -5,6 +5,9 @@ import numpy as np
 import psycopg2
 import pytest
 
+from pipelines.loaders.postgres_knowledge_base import (
+    PostgresKnowledgeBaseLoader,
+)
 from pipelines.orchestration.import_knowledge_base import (
     ImportResult,
     import_knowledge_base,
@@ -49,11 +52,16 @@ def test_import_pipeline_validates_embeds_and_loads(test_database_url):
     record = _record()
     embedder = FakeEmbedder()
 
-    result = import_knowledge_base(
-        records=[record],
-        embedder=embedder,
-        database_url=test_database_url,
-    )
+    with PostgresKnowledgeBaseLoader(
+        test_database_url,
+        "knowledge_base",
+        expected_embedding_dim=384,
+    ) as loader:
+        result = import_knowledge_base(
+            records=[record],
+            embedder=embedder,
+            loader=loader,
+        )
 
     with psycopg2.connect(test_database_url) as conn:
         with conn.cursor() as cursor:
@@ -84,18 +92,23 @@ def test_batched_import_is_idempotent(test_database_url):
     records = [_record(1), _record(2)]
     embedder = FakeEmbedder()
 
-    first_result = import_knowledge_base(
-        records=records,
-        embedder=embedder,
-        database_url=test_database_url,
-        batch_size=1,
-    )
-    second_result = import_knowledge_base(
-        records=records,
-        embedder=FakeEmbedder(),
-        database_url=test_database_url,
-        batch_size=1,
-    )
+    with PostgresKnowledgeBaseLoader(
+        test_database_url,
+        "knowledge_base",
+        expected_embedding_dim=384,
+    ) as loader:
+        first_result = import_knowledge_base(
+            records=records,
+            embedder=embedder,
+            loader=loader,
+            batch_size=1,
+        )
+        second_result = import_knowledge_base(
+            records=records,
+            embedder=FakeEmbedder(),
+            loader=loader,
+            batch_size=1,
+        )
 
     with psycopg2.connect(test_database_url) as conn:
         with conn.cursor() as cursor:

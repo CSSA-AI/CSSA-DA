@@ -54,6 +54,27 @@ services:
     volumes:
       - huggingface_cache:/root/.cache/huggingface
 
+  pipeline-cpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    profiles: ["pipeline"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    entrypoint: ["python", "-m", "pipelines"]
+    command: ["--help"]
+    environment:
+      PYTHONUTF8: "1"
+      PYTHONUNBUFFERED: "1"
+      WECHAT_API_KEY: ${WECHAT_API_KEY:-}
+      DATABASE_URL: postgresql://rag_user:rag_password@postgres:5432/rag_vectordb
+    volumes:
+      - ./data:/app/data
+      - huggingface_cache:/root/.cache/huggingface
+
   api-gpu:
     build:
       context: .

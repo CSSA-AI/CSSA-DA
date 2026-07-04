@@ -36,6 +36,24 @@ $env:DATABASE_URL='postgresql://rag_user:rag_password@localhost:5432/rag_vectord
 
 The individual stage commands remain available for development and recovery.
 
+### Run through Docker
+
+The pipeline service uses the CPU image, local `data/` directory, shared model
+cache and Docker PostgreSQL network:
+
+```powershell
+$env:WECHAT_API_KEY='<wechat-api-key>'
+docker compose --profile pipeline run --rm --entrypoint alembic pipeline-cpu upgrade head
+docker compose --profile pipeline run --rm pipeline-cpu run-wechat-pipeline
+```
+
+Individual commands use the same service:
+
+```powershell
+docker compose --profile pipeline run --rm --no-deps pipeline-cpu transform-wechat
+docker compose --profile pipeline run --rm pipeline-cpu import-knowledge-base
+```
+
 ## Import batching
 
 Knowledge-base imports validate the complete input before embedding, then process
@@ -47,6 +65,7 @@ records in batches of 100 by default:
 
 Each completed batch is committed independently. If a later batch fails, rerun
 the command; the database uniqueness constraint skips records already inserted.
+All batches in one import run reuse a single PostgreSQL connection.
 
 ## Knowledge base local workflow
 
