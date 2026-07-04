@@ -1,18 +1,30 @@
-import json
-import os
 import re
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import date
+from typing import Any
 
-# ==========================================
-# 路径与配置
-# ==========================================
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-DATA_DIR = os.path.join(ROOT_DIR, "data")
 
-INPUT_FILE = os.path.join(DATA_DIR, "wechat_articles_all.json")
-OUTPUT_FILE = os.path.join(DATA_DIR, "wechat_articles_processed.json")
+@dataclass(frozen=True)
+class WechatTransformStats:
+    input_count: int
+    skipped_count: int
+    dropped_count: int
+    output_count: int
+    original_char_count: int
+    cleaned_char_count: int
 
-def clean_text(text):
+    @property
+    def removed_char_count(self) -> int:
+        return self.original_char_count - self.cleaned_char_count
+
+
+@dataclass(frozen=True)
+class WechatTransformResult:
+    records: list[dict[str, Any]]
+    stats: WechatTransformStats
+
+
+def clean_text(text: str | None) -> str:
     """
     数据深度净化核心逻辑：使用正则表达式剔除无用字符、图片、前端代码和模板
     """
@@ -78,25 +90,21 @@ def clean_text(text):
     
     return text.strip()
 
-def process_and_transform_articles():
-    print(f"🔄 [INIT] 开始数据净化与 RAG Schema 转换任务...")
-    
-    if not os.path.exists(INPUT_FILE):
-        print(f"❌ [ERROR] 找不到输入文件: {INPUT_FILE}")
-        return
 
-    with open(INPUT_FILE, "r", encoding="utf-8") as f:
-        raw_articles = json.load(f)
-
+def transform_articles(
+    raw_articles: list[dict[str, Any]],
+    *,
+    created_at: date,
+) -> WechatTransformResult:
     processed_articles = []
-    current_date = datetime.now().strftime("%Y-%m-%d")
-    
     original_char_count = 0
     cleaned_char_count = 0
     dropped_count = 0
+    skipped_count = 0
 
     for item in raw_articles:
         if not item.get("is_valid_for_rag", False):
+            skipped_count += 1
             continue
 
         title = item.get("title", "未命名文章")
@@ -109,7 +117,6 @@ def process_and_transform_articles():
         
         # 二次质量检验: 如果砍掉模板和乱码后，正文所剩无几，直接抛弃
         if len(re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', cleaned_content)) < 30:
-            print(f"  🗑️ [DROP] 剔除无用数据 (清洗后沦为空壳) | 标题: {title}")
             dropped_count += 1
             continue
 
@@ -119,32 +126,28 @@ def process_and_transform_articles():
             full_text = cleaned_content
 
         rag_item = {
-            "questions": [title],
-            "text": full_text,
+            "question_text": title,
+            "content": full_text,
             "source": "WeChat: 墨大中国学生会",
             "author": None,
             "post_date": item.get("date", "1970-01-01"),
-            "language": "simplified-chinese",
-            "created_at": current_date,
+            "language": "zh",
+            "created_at": created_at.isoformat(),
             "tags": ["微信公众号", "CSSA"],
             "link": item.get("link", "")
         }
         
         processed_articles.append(rag_item)
 
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(processed_articles, f, ensure_ascii=False, indent=2)
+    return WechatTransformResult(
+        records=processed_articles,
+        stats=WechatTransformStats(
+            input_count=len(raw_articles),
+            skipped_count=skipped_count,
+            dropped_count=dropped_count,
+            output_count=len(processed_articles),
+            original_char_count=original_char_count,
+            cleaned_char_count=cleaned_char_count,
+        ),
+    )
 
-    print("\n" + "="*60)
-    print(f"🎉 [SUCCESS] 数据深度清洗与转换完毕！")
-    print(f"📊 产出统计:")
-    print(f"   - 成功生成高纯度 RAG 语料: {len(processed_articles)} 条")
-    print(f"   - 因空壳被拦截丢弃: {dropped_count} 条")
-    print(f"   - 数据瘦身效果: 字符数由 {original_char_count} 暴降至 {cleaned_char_count}")
-    print(f"   - 成功剔除 CSS 代码与底部冗余模板字符共: {original_char_count - cleaned_char_count} 个")
-    print(f"💾 最终处理结果已保存至: {os.path.abspath(OUTPUT_FILE)}")
-    print("="*60)
-
-if __name__ == "__main__":
-    process_and_transform_articles()

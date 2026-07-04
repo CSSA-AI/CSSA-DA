@@ -19,30 +19,9 @@ TEST_EMBEDDING = [0.1] * 384
 
 
 @pytest.fixture(scope="function", autouse=True)
-def setup_knowledge_base():
-    database_url = os.environ["DATABASE_URL"]
-
-    with psycopg2.connect(database_url) as conn:
+def seed_knowledge_base(test_database_url, clean_knowledge_base):
+    with psycopg2.connect(test_database_url) as conn:
         with conn.cursor() as cur:
-            cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            cur.execute("DROP TABLE IF EXISTS knowledge_base;")
-
-            cur.execute("""
-                CREATE TABLE knowledge_base (
-                    id SERIAL PRIMARY KEY,
-                    question_text TEXT,
-                    content TEXT NOT NULL,
-                    source TEXT,
-                    author TEXT,
-                    post_date DATE,
-                    language TEXT,
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-                    tags JSONB,
-                    link TEXT,
-                    embedding vector(384)
-                );
-            """)
-
             cur.execute("""
                 INSERT INTO knowledge_base (
                     question_text,
@@ -92,9 +71,9 @@ class FakeGenerator:
         yield f"fake answer for: {query}"
 
 
-def test_rag_pipeline_end_to_end():
+def test_rag_pipeline_end_to_end(test_database_url):
     retriever = PGVectorRetriever.__new__(PGVectorRetriever)
-    retriever.conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    retriever.conn = psycopg2.connect(test_database_url)
     retriever.table_name = "knowledge_base"
     retriever.model = FakeEmbeddingModel()
 
