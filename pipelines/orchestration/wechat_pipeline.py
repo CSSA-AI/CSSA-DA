@@ -44,6 +44,8 @@ def run_local_wechat_pipeline(
     model_name: str | None = None,
     table_name: str | None = None,
     batch_size: int = 100,
+    import_checkpoint_file: Path | None = None,
+    reset_import_checkpoint: bool = False,
     run_id: str | None = None,
 ) -> WechatPipelineRunResult:
     run_id = run_id or str(uuid4())
@@ -88,6 +90,8 @@ def run_local_wechat_pipeline(
                 model_name=model_name,
                 table_name=table_name,
                 batch_size=batch_size,
+                checkpoint_file=import_checkpoint_file,
+                reset_checkpoint=reset_import_checkpoint,
             ),
             lambda result: {
                 "record_count": result.attempted_count,

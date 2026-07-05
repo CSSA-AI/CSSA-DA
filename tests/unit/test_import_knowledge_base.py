@@ -10,8 +10,13 @@ from pipelines.embedding.knowledge_base_text import build_embedding_text
 from pipelines.orchestration.import_knowledge_base import (
     ImportResult,
     KnowledgeBaseValidationError,
+    build_import_checkpoint_identity,
+    database_target_id,
     import_knowledge_base,
     run_local_import,
+)
+from pipelines.shared.import_checkpoint import (
+    MemoryImportCheckpointStore,
 )
 
 
@@ -158,6 +163,139 @@ def test_import_stops_after_failed_batch():
     assert embedder.encode.call_count == 2
 
 
+def test_import_resumes_after_failed_batch_without_reembedding():
+    records = []
+    for index in range(3):
+        record = _valid_record()
+        record["question_text"] = f"Question {index}"
+        record["link"] = f"https://example.com/{index}"
+        records.append(record)
+
+    identity = build_import_checkpoint_identity(
+        records,
+        model_name="test-model",
+        table_name="knowledge_base",
+        target_id=database_target_id(DATABASE_URL),
+        batch_size=2,
+    )
+    checkpoint_store = MemoryImportCheckpointStore()
+    first_embedder = MagicMock()
+    first_embedder.encode.side_effect = lambda texts, **_: np.array(
+        [[0.1] * 384 for _ in texts]
+    )
+    first_loader = MagicMock()
+    first_loader.insert_batch.side_effect = [
+        2,
+        OSError("database unavailable"),
+    ]
+
+    with pytest.raises(OSError, match="database unavailable"):
+        import_knowledge_base(
+            records,
+            first_embedder,
+            first_loader,
+            batch_size=2,
+            checkpoint_store=checkpoint_store,
+            checkpoint_identity=identity,
+        )
+
+    failed_checkpoint = checkpoint_store.load()
+    assert failed_checkpoint.status == "failed"
+    assert failed_checkpoint.next_batch_index == 1
+    assert failed_checkpoint.inserted_count == 2
+
+    resumed_embedder = MagicMock()
+    resumed_embedder.encode.return_value = np.array([[0.1] * 384])
+    resumed_loader = MagicMock()
+    resumed_loader.insert_batch.return_value = 1
+
+    result = import_knowledge_base(
+        records,
+        resumed_embedder,
+        resumed_loader,
+        batch_size=2,
+        checkpoint_store=checkpoint_store,
+        checkpoint_identity=identity,
+    )
+
+    assert result == ImportResult(
+        attempted_count=3,
+        inserted_count=3,
+    )
+    resumed_embedder.encode.assert_called_once()
+    assert len(resumed_embedder.encode.call_args.args[0]) == 1
+    resumed_loader.insert_batch.assert_called_once()
+
+    completed_embedder = MagicMock()
+    completed_loader = MagicMock()
+    cached_result = import_knowledge_base(
+        records,
+        completed_embedder,
+        completed_loader,
+        batch_size=2,
+        checkpoint_store=checkpoint_store,
+        checkpoint_identity=identity,
+    )
+
+    assert cached_result == result
+    completed_embedder.encode.assert_not_called()
+    completed_loader.insert_batch.assert_not_called()
+
+
+def test_changed_dataset_starts_a_new_checkpoint():
+    first_records = [_valid_record()]
+    store = MemoryImportCheckpointStore()
+    first_identity = build_import_checkpoint_identity(
+        first_records,
+        model_name="test-model",
+        table_name="knowledge_base",
+        target_id=database_target_id(DATABASE_URL),
+        batch_size=1,
+    )
+    first_embedder = MagicMock()
+    first_embedder.encode.return_value = np.array([[0.1] * 384])
+    first_loader = MagicMock()
+    first_loader.insert_batch.return_value = 1
+    import_knowledge_base(
+        first_records,
+        first_embedder,
+        first_loader,
+        batch_size=1,
+        checkpoint_store=store,
+        checkpoint_identity=first_identity,
+    )
+
+    changed_record = _valid_record()
+    changed_record["question_text"] = "A changed question"
+    changed_record["link"] = "https://example.com/changed"
+    changed_records = [changed_record]
+    changed_identity = build_import_checkpoint_identity(
+        changed_records,
+        model_name="test-model",
+        table_name="knowledge_base",
+        target_id=database_target_id(DATABASE_URL),
+        batch_size=1,
+    )
+    changed_embedder = MagicMock()
+    changed_embedder.encode.return_value = np.array([[0.2] * 384])
+    changed_loader = MagicMock()
+    changed_loader.insert_batch.return_value = 1
+
+    result = import_knowledge_base(
+        changed_records,
+        changed_embedder,
+        changed_loader,
+        batch_size=1,
+        checkpoint_store=store,
+        checkpoint_identity=changed_identity,
+    )
+
+    assert result.inserted_count == 1
+    changed_embedder.encode.assert_called_once()
+    changed_loader.insert_batch.assert_called_once()
+    assert store.load().identity == changed_identity
+
+
 def test_import_rejects_non_positive_batch_size():
     with pytest.raises(ValueError, match="batch_size"):
         import_knowledge_base(
@@ -199,10 +337,16 @@ def test_local_import_loads_file_and_constructs_model(
             input_file=input_file,
             model_name="test-model",
         )
+        cached_result = run_local_import(
+            DATABASE_URL,
+            input_file=input_file,
+            model_name="test-model",
+        )
     finally:
         shutil.rmtree(temp_dir)
 
     assert result == ImportResult(attempted_count=1, inserted_count=1)
+    assert cached_result == result
     mock_sentence_transformer.assert_called_once_with("test-model")
     mock_loader_class.assert_called_once_with(
         DATABASE_URL,

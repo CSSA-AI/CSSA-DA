@@ -92,6 +92,8 @@ def test_local_pipeline_runs_stages_and_returns_report():
         model_name=None,
         table_name=None,
         batch_size=100,
+        checkpoint_file=None,
+        reset_checkpoint=False,
     )
     completed_events = [
         call.kwargs["extra"]["stage"]

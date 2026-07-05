@@ -57,6 +57,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=100,
         help="Number of records to embed and insert per batch.",
     )
+    import_command.add_argument(
+        "--checkpoint-file",
+        type=Path,
+        default=None,
+        help="Import checkpoint JSON file.",
+    )
+    import_command.add_argument(
+        "--reset-checkpoint",
+        action="store_true",
+        help="Discard prior import progress and start again.",
+    )
     pipeline_command = commands.add_parser(
         "run-wechat-pipeline",
         help=(
@@ -73,6 +84,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=100,
         help="Number of records to embed and insert per batch.",
+    )
+    pipeline_command.add_argument(
+        "--reset-import-checkpoint",
+        action="store_true",
+        help="Discard prior import progress and start again.",
     )
 
     return parser
@@ -154,6 +170,8 @@ def _run_command(
             input_file=args.input,
             limit=args.limit,
             batch_size=args.batch_size,
+            checkpoint_file=args.checkpoint_file,
+            reset_checkpoint=args.reset_checkpoint,
         )
         logger.info(
             "Knowledge-base import completed",
@@ -177,6 +195,7 @@ def _run_command(
         result = run_local_wechat_pipeline(
             database_url=args.database_url,
             batch_size=args.batch_size,
+            reset_import_checkpoint=args.reset_import_checkpoint,
             run_id=run_id,
         )
         logger.info(
