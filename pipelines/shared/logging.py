@@ -22,6 +22,12 @@ STRUCTURED_FIELDS = (
     "inserted_count",
     "error_count",
     "error_type",
+    "checkpoint_status",
+    "next_batch_index",
+    "dataset_fingerprint",
+    "model_name",
+    "table_name",
+    "target_id",
 )
 
 

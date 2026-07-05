@@ -10,7 +10,12 @@ from pipelines.loaders.postgres_knowledge_base import (
 )
 from pipelines.orchestration.import_knowledge_base import (
     ImportResult,
+    build_import_checkpoint_identity,
+    database_target_id,
     import_knowledge_base,
+)
+from pipelines.shared.import_checkpoint import (
+    MemoryImportCheckpointStore,
 )
 
 
@@ -125,3 +130,70 @@ def test_batched_import_is_idempotent(test_database_url):
     )
     assert len(embedder.encoded_batches) == 2
     assert row_count == 2
+
+
+def test_failed_import_resumes_after_last_committed_batch(
+    test_database_url,
+):
+    records = [_record(1), _record(2), _record(3)]
+    checkpoint_store = MemoryImportCheckpointStore()
+    identity = build_import_checkpoint_identity(
+        records,
+        model_name="fake-embedder",
+        table_name="knowledge_base",
+        target_id=database_target_id(test_database_url),
+        batch_size=2,
+    )
+
+    with PostgresKnowledgeBaseLoader(
+        test_database_url,
+        "knowledge_base",
+        expected_embedding_dim=384,
+    ) as postgres_loader:
+        failing_loader = _FailOnSecondBatchLoader(postgres_loader)
+
+        with pytest.raises(RuntimeError, match="simulated batch failure"):
+            import_knowledge_base(
+                records=records,
+                embedder=FakeEmbedder(),
+                loader=failing_loader,
+                batch_size=2,
+                checkpoint_store=checkpoint_store,
+                checkpoint_identity=identity,
+            )
+
+        resumed_embedder = FakeEmbedder()
+        result = import_knowledge_base(
+            records=records,
+            embedder=resumed_embedder,
+            loader=postgres_loader,
+            batch_size=2,
+            checkpoint_store=checkpoint_store,
+            checkpoint_identity=identity,
+        )
+
+    with psycopg2.connect(test_database_url) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM knowledge_base")
+            row_count = cursor.fetchone()[0]
+
+    assert result == ImportResult(
+        attempted_count=3,
+        inserted_count=3,
+    )
+    assert len(resumed_embedder.encoded_batches) == 1
+    assert len(resumed_embedder.encoded_batches[0]) == 1
+    assert checkpoint_store.load().status == "completed"
+    assert row_count == 3
+
+
+class _FailOnSecondBatchLoader:
+    def __init__(self, loader):
+        self.loader = loader
+        self.call_count = 0
+
+    def insert_batch(self, records, embeddings):
+        self.call_count += 1
+        if self.call_count == 2:
+            raise RuntimeError("simulated batch failure")
+        return self.loader.insert_batch(records, embeddings)

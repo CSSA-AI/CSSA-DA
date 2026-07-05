@@ -71,8 +71,20 @@ records in batches of 100 by default:
 ```
 
 Each completed batch is committed independently. If a later batch fails, rerun
-the command; the database uniqueness constraint skips records already inserted.
-All batches in one import run reuse a single PostgreSQL connection.
+the command; it resumes from the first unfinished batch without regenerating
+earlier embeddings. All batches in one import run reuse a single PostgreSQL
+connection.
+
+Local progress is stored in `data/import_checkpoint.json`. Its identity includes
+the dataset fingerprint, embedding model, table, sanitized database target and
+batch size. A changed identity starts a new import automatically. To deliberately
+rerun an unchanged completed import:
+
+```powershell
+.\.venv\Scripts\python.exe -m pipelines import-knowledge-base --reset-checkpoint
+```
+
+For the complete workflow, use `--reset-import-checkpoint`.
 
 ## Knowledge base local workflow
 

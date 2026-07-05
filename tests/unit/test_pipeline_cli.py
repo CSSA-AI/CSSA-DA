@@ -66,11 +66,18 @@ def test_import_knowledge_base_command(mock_run_local_import):
             "postgresql://test:test@localhost:5432/testdb",
             "--limit",
             "10",
+            "--checkpoint-file",
+            "checkpoint.json",
+            "--reset-checkpoint",
         ]
     )
 
     assert exit_code == 0
-    mock_run_local_import.assert_called_once()
+    assert (
+        mock_run_local_import.call_args.kwargs["checkpoint_file"]
+        == Path("checkpoint.json")
+    )
+    assert mock_run_local_import.call_args.kwargs["reset_checkpoint"] is True
 
 
 @patch(
@@ -96,6 +103,7 @@ def test_run_wechat_pipeline_command(mock_run_pipeline):
             "run-wechat-pipeline",
             "--database-url",
             "postgresql://test:test@localhost:5432/testdb",
+            "--reset-import-checkpoint",
         ]
     )
 
@@ -105,5 +113,6 @@ def test_run_wechat_pipeline_command(mock_run_pipeline):
             "postgresql://test:test@localhost:5432/testdb"
         ),
         batch_size=100,
+        reset_import_checkpoint=True,
         run_id=ANY,
     )
