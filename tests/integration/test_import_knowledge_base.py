@@ -60,6 +60,8 @@ def test_import_pipeline_validates_embeds_and_loads(test_database_url):
     with PostgresKnowledgeBaseLoader(
         test_database_url,
         "knowledge_base",
+        embedding_model="fake-embedder",
+        embedding_revision="revision-123",
         expected_embedding_dim=384,
     ) as loader:
         result = import_knowledge_base(
@@ -72,7 +74,8 @@ def test_import_pipeline_validates_embeds_and_loads(test_database_url):
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT question_text, content, tags, link
+                SELECT question_text, content, tags, link,
+                       embedding_model, embedding_revision
                 FROM knowledge_base
                 """
             )
@@ -90,6 +93,8 @@ def test_import_pipeline_validates_embeds_and_loads(test_database_url):
         record["content"],
         record["tags"],
         record["link"],
+        "fake-embedder",
+        "revision-123",
     )
 
 
@@ -100,6 +105,7 @@ def test_batched_import_is_idempotent(test_database_url):
     with PostgresKnowledgeBaseLoader(
         test_database_url,
         "knowledge_base",
+        embedding_model="fake-embedder",
         expected_embedding_dim=384,
     ) as loader:
         first_result = import_knowledge_base(
@@ -148,6 +154,7 @@ def test_failed_import_resumes_after_last_committed_batch(
     with PostgresKnowledgeBaseLoader(
         test_database_url,
         "knowledge_base",
+        embedding_model="fake-embedder",
         expected_embedding_dim=384,
     ) as postgres_loader:
         failing_loader = _FailOnSecondBatchLoader(postgres_loader)

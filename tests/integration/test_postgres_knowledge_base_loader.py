@@ -14,6 +14,8 @@ if os.getenv("RUN_INTEGRATION_TESTS") != "1":
 
 
 TEST_EMBEDDING = [0.1] * 384
+EMBEDDING_MODEL = "test-embedding-model"
+EMBEDDING_REVISION = "revision-123"
 
 
 def _knowledge_base_record():
@@ -38,6 +40,8 @@ def test_loader_inserts_knowledge_base_record(test_database_url):
         embeddings=[TEST_EMBEDDING],
         database_url=test_database_url,
         table_name="knowledge_base",
+        embedding_model=EMBEDDING_MODEL,
+        embedding_revision=EMBEDDING_REVISION,
         expected_embedding_dim=384,
     )
 
@@ -45,7 +49,8 @@ def test_loader_inserts_knowledge_base_record(test_database_url):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT question_text, content, source, author, tags, link
+                SELECT question_text, content, source, author, tags, link,
+                       embedding_model, embedding_revision
                 FROM knowledge_base
                 """
             )
@@ -59,6 +64,8 @@ def test_loader_inserts_knowledge_base_record(test_database_url):
         record["author"],
         record["tags"],
         record["link"],
+        EMBEDDING_MODEL,
+        EMBEDDING_REVISION,
     )
 
 
@@ -70,6 +77,7 @@ def test_loader_ignores_duplicate_record(test_database_url):
         embeddings=[TEST_EMBEDDING],
         database_url=test_database_url,
         table_name="knowledge_base",
+        embedding_model=EMBEDDING_MODEL,
         expected_embedding_dim=384,
     )
     second_inserted = insert_records(
@@ -77,6 +85,7 @@ def test_loader_ignores_duplicate_record(test_database_url):
         embeddings=[TEST_EMBEDDING],
         database_url=test_database_url,
         table_name="knowledge_base",
+        embedding_model=EMBEDDING_MODEL,
         expected_embedding_dim=384,
     )
 

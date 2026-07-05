@@ -10,6 +10,8 @@ from pipelines.loaders.postgres_knowledge_base import (
 
 DATABASE_URL = "postgresql://test:test@localhost:5432/testdb"
 TABLE_NAME = "knowledge_base"
+EMBEDDING_MODEL = "test-embedding-model"
+EMBEDDING_REVISION = "revision-123"
 
 
 def _record(index=1):
@@ -23,7 +25,13 @@ def _record(index=1):
 
 @patch("pipelines.loaders.postgres_knowledge_base.psycopg2.connect")
 def test_empty_batch_returns_zero_without_connecting(mock_connect):
-    inserted = insert_records([], [], DATABASE_URL, TABLE_NAME)
+    inserted = insert_records(
+        [],
+        [],
+        DATABASE_URL,
+        TABLE_NAME,
+        embedding_model=EMBEDDING_MODEL,
+    )
 
     assert inserted == 0
     mock_connect.assert_not_called()
@@ -32,7 +40,13 @@ def test_empty_batch_returns_zero_without_connecting(mock_connect):
 @patch("pipelines.loaders.postgres_knowledge_base.psycopg2.connect")
 def test_rejects_mismatched_record_and_embedding_counts(mock_connect):
     with pytest.raises(ValueError, match="same number of items"):
-        insert_records([{}], [], DATABASE_URL, TABLE_NAME)
+        insert_records(
+            [{}],
+            [],
+            DATABASE_URL,
+            TABLE_NAME,
+            embedding_model=EMBEDDING_MODEL,
+        )
 
     mock_connect.assert_not_called()
 
@@ -40,7 +54,13 @@ def test_rejects_mismatched_record_and_embedding_counts(mock_connect):
 @patch("pipelines.loaders.postgres_knowledge_base.psycopg2.connect")
 def test_rejects_empty_embedding(mock_connect):
     with pytest.raises(ValueError, match="embedding 1 is empty"):
-        insert_records([{}], [[]], DATABASE_URL, TABLE_NAME)
+        insert_records(
+            [{}],
+            [[]],
+            DATABASE_URL,
+            TABLE_NAME,
+            embedding_model=EMBEDDING_MODEL,
+        )
 
     mock_connect.assert_not_called()
 
@@ -53,6 +73,7 @@ def test_rejects_inconsistent_embedding_dimensions(mock_connect):
             [[0.1, 0.2], [0.1]],
             DATABASE_URL,
             TABLE_NAME,
+            embedding_model=EMBEDDING_MODEL,
         )
 
     mock_connect.assert_not_called()
@@ -66,6 +87,7 @@ def test_rejects_unexpected_embedding_dimension(mock_connect):
             [[0.1, 0.2]],
             DATABASE_URL,
             TABLE_NAME,
+            embedding_model=EMBEDDING_MODEL,
             expected_embedding_dim=384,
         )
 
@@ -82,6 +104,8 @@ def test_context_loader_reuses_one_connection_for_batches(mock_connect):
     with PostgresKnowledgeBaseLoader(
         DATABASE_URL,
         TABLE_NAME,
+        embedding_model=EMBEDDING_MODEL,
+        embedding_revision=EMBEDDING_REVISION,
         expected_embedding_dim=2,
     ) as loader:
         first_inserted = loader.insert_batch(
@@ -97,6 +121,12 @@ def test_context_loader_reuses_one_connection_for_batches(mock_connect):
     assert second_inserted == 1
     mock_connect.assert_called_once_with(DATABASE_URL)
     assert cursor.executemany.call_count == 2
+    first_row = cursor.executemany.call_args_list[0].args[1][0]
+    assert first_row[-3:] == (
+        EMBEDDING_MODEL,
+        EMBEDDING_REVISION,
+        [0.1, 0.2],
+    )
     assert connection.commit.call_count == 2
     connection.close.assert_called_once_with()
 
@@ -112,6 +142,7 @@ def test_context_loader_rolls_back_failed_batch(mock_connect):
         PostgresKnowledgeBaseLoader(
             DATABASE_URL,
             TABLE_NAME,
+            embedding_model=EMBEDDING_MODEL,
             expected_embedding_dim=2,
         ) as loader,
         pytest.raises(OSError, match="database unavailable"),

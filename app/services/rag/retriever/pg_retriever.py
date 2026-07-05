@@ -76,6 +76,8 @@ class PGVectorRetriever(BaseRetriever):
                 link,
                 embedding <-> %s::vector AS distance
             FROM {table}
+            WHERE embedding_model = %s
+              AND embedding_revision IS NOT DISTINCT FROM %s
             ORDER BY embedding <-> %s::vector
             LIMIT %s;
         """).format(
@@ -83,7 +85,16 @@ class PGVectorRetriever(BaseRetriever):
         )
 
         with self.conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute(query_sql, (vec.tolist(), vec.tolist(), top_k))
+            cursor.execute(
+                query_sql,
+                (
+                    vec.tolist(),
+                    self.model_name,
+                    self.model_revision,
+                    vec.tolist(),
+                    top_k,
+                ),
+            )
             rows = cursor.fetchall()
 
         results = []

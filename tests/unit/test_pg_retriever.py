@@ -119,6 +119,7 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
     @patch("app.services.rag.retriever.pg_retriever.rag_config", {
         "retriever": {
             "embedding_model": "fake-embedding-model",
+            "embedding_revision": "revision-123",
             "top_k": 2,
         },
         "pgvector": {
@@ -187,8 +188,16 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
 
         mock_cursor.execute.assert_called_once()
         _, params = mock_cursor.execute.call_args[0]
-        self.assertEqual(params[1], [0.1, 0.2, 0.3])
-        self.assertEqual(params[2], 2)
+        self.assertEqual(
+            params,
+            (
+                [0.1, 0.2, 0.3],
+                "fake-embedding-model",
+                "revision-123",
+                [0.1, 0.2, 0.3],
+                2,
+            ),
+        )
 
     @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
     @patch("app.services.rag.retriever.pg_retriever.psycopg2.connect")
@@ -223,7 +232,7 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
 
         mock_cursor.execute.assert_called_once()
         _, params = mock_cursor.execute.call_args[0]
-        self.assertEqual(params[2], 3)
+        self.assertEqual(params[4], 3)
 
     @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
     @patch("app.services.rag.retriever.pg_retriever.psycopg2.connect")
