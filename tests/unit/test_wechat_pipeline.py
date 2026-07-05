@@ -90,6 +90,7 @@ def test_local_pipeline_runs_stages_and_returns_report():
         database_url=DATABASE_URL,
         input_file=data_dir / "wechat_articles_processed.json",
         model_name=None,
+        model_revision=None,
         table_name=None,
         batch_size=100,
         checkpoint_file=None,

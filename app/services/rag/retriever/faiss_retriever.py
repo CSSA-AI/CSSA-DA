@@ -16,17 +16,35 @@ class FAISSRetriever(BaseRetriever):
         self,
         input_list: List[Article],
         model_name: Optional[str] = None,
+        model_revision: Optional[str] = None,
     ):
         retriever_config = rag_config["retriever"]
 
-        model_name = model_name or retriever_config["embedding_model"]
-        super().__init__(model_name=model_name)
+        configured_model_name = retriever_config["embedding_model"]
+        model_name = model_name or configured_model_name
+        if (
+            model_revision is None
+            and model_name == configured_model_name
+        ):
+            model_revision = retriever_config.get("embedding_revision")
+        super().__init__(
+            model_name=model_name,
+            model_revision=model_revision,
+        )
 
         if not all(isinstance(x, Article) for x in input_list):
             raise TypeError("input_list must be a list of Article")
 
         self.articles = input_list
-        self.model = SentenceTransformer(self.model_name)
+        model_kwargs = (
+            {"revision": self.model_revision}
+            if self.model_revision
+            else {}
+        )
+        self.model = SentenceTransformer(
+            self.model_name,
+            **model_kwargs,
+        )
 
         self.id_mapping = {i: article for i, article in enumerate(self.articles)}
         self.question_embeddings = None

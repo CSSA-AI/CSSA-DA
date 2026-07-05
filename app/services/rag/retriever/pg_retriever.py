@@ -15,23 +15,41 @@ class PGVectorRetriever(BaseRetriever):
         self,
         database_url: Optional[str] = None,
         model_name: Optional[str] = None,
+        model_revision: Optional[str] = None,
         table_name: Optional[str] = None,
     ):
         retriever_config = rag_config["retriever"]
         pgvector_config = rag_config["pgvector"]
 
-        model_name = model_name or retriever_config["embedding_model"]
+        configured_model_name = retriever_config["embedding_model"]
+        model_name = model_name or configured_model_name
+        if (
+            model_revision is None
+            and model_name == configured_model_name
+        ):
+            model_revision = retriever_config.get("embedding_revision")
         database_url = database_url or settings.DATABASE_URL
         table_name = table_name or pgvector_config["table_name"]
 
         if not database_url:
             raise ValueError("DATABASE_URL is required for PGVectorRetriever")
 
-        super().__init__(model_name=model_name)
+        super().__init__(
+            model_name=model_name,
+            model_revision=model_revision,
+        )
 
         self.table_name = table_name
         self.conn = psycopg2.connect(database_url)
-        self.model = SentenceTransformer(self.model_name)
+        model_kwargs = (
+            {"revision": self.model_revision}
+            if self.model_revision
+            else {}
+        )
+        self.model = SentenceTransformer(
+            self.model_name,
+            **model_kwargs,
+        )
 
     def _encode_query(self, query: str):
         """Encode query into normalized embedding."""

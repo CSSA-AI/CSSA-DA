@@ -26,6 +26,7 @@ STRUCTURED_FIELDS = (
     "next_batch_index",
     "dataset_fingerprint",
     "model_name",
+    "model_revision",
     "table_name",
     "target_id",
 )

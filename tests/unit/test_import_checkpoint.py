@@ -6,6 +6,7 @@ from pipelines.shared.import_checkpoint import (
     ImportCheckpoint,
     ImportCheckpointIdentity,
     JsonImportCheckpointStore,
+    build_import_checkpoint_identity,
     fingerprint_records,
 )
 
@@ -18,6 +19,7 @@ def _identity():
         target_id="postgresql://localhost:5432/testdb",
         batch_size=100,
         record_count=10,
+        model_revision="revision-123",
     )
 
 
@@ -69,3 +71,25 @@ def test_json_checkpoint_store_round_trip():
         assert store.load() is None
     finally:
         shutil.rmtree(temp_dir)
+
+
+def test_checkpoint_identity_changes_with_model_revision():
+    records = [{"question_text": "What is CSSA?"}]
+    common = {
+        "records": records,
+        "model_name": "embedding-model",
+        "table_name": "knowledge_base",
+        "target_id": "postgresql://localhost:5432/cssa",
+        "batch_size": 100,
+    }
+
+    first = build_import_checkpoint_identity(
+        **common,
+        model_revision="revision-a",
+    )
+    second = build_import_checkpoint_identity(
+        **common,
+        model_revision="revision-b",
+    )
+
+    assert first != second

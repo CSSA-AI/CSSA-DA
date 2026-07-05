@@ -76,15 +76,21 @@ earlier embeddings. All batches in one import run reuse a single PostgreSQL
 connection.
 
 Local progress is stored in `data/import_checkpoint.json`. Its identity includes
-the dataset fingerprint, embedding model, table, sanitized database target and
-batch size. A changed identity starts a new import automatically. To deliberately
-rerun an unchanged completed import:
+the dataset fingerprint, embedding model and revision, table, sanitized database
+target and batch size. A changed identity starts a new import automatically. To
+deliberately rerun an unchanged completed import:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pipelines import-knowledge-base --reset-checkpoint
 ```
 
 For the complete workflow, use `--reset-import-checkpoint`.
+
+The embedding model revision is pinned in `app/core/config/rag-config.yaml` so
+imports and retrieval use the same immutable model files. If that revision is
+changed, rebuild the existing knowledge-base embeddings before serving queries;
+resetting the checkpoint alone does not replace rows skipped by the importer's
+conflict handling.
 
 ## Knowledge base local workflow
 

@@ -18,6 +18,7 @@ class ImportCheckpointIdentity:
     target_id: str
     batch_size: int
     record_count: int
+    model_revision: str | None = None
 
 
 @dataclass(frozen=True)
@@ -205,6 +206,7 @@ class ImportCheckpointManager:
                     checkpoint.identity.dataset_fingerprint
                 ),
                 "model_name": checkpoint.identity.model_name,
+                "model_revision": checkpoint.identity.model_revision,
                 "table_name": checkpoint.identity.table_name,
                 "target_id": checkpoint.identity.target_id,
             },
@@ -218,6 +220,7 @@ def build_import_checkpoint_identity(
     table_name: str,
     target_id: str,
     batch_size: int,
+    model_revision: str | None = None,
 ) -> ImportCheckpointIdentity:
     return ImportCheckpointIdentity(
         dataset_fingerprint=fingerprint_records(records),
@@ -226,6 +229,7 @@ def build_import_checkpoint_identity(
         target_id=target_id,
         batch_size=batch_size,
         record_count=len(records),
+        model_revision=model_revision,
     )
 
 
