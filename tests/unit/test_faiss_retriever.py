@@ -42,6 +42,7 @@ class TestFAISSRetrieverUnit(unittest.TestCase):
     @patch("app.services.rag.retriever.faiss_retriever.rag_config", {
         "retriever": {
             "embedding_model": "default-embedding-model",
+            "embedding_revision": "revision-123",
             "top_k": 5
         },
         "faiss": {
@@ -55,7 +56,11 @@ class TestFAISSRetrieverUnit(unittest.TestCase):
         retriever = FAISSRetriever(input_list=self.articles)
 
         self.assertEqual(retriever.model_name, "default-embedding-model")
-        mock_st.assert_called_once_with("default-embedding-model")
+        self.assertEqual(retriever.model_revision, "revision-123")
+        mock_st.assert_called_once_with(
+            "default-embedding-model",
+            revision="revision-123",
+        )
 
     def test_init_raises_type_error_when_input_not_article_list(self):
         with self.assertRaises(TypeError):

@@ -14,6 +14,7 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
     @patch("app.services.rag.retriever.pg_retriever.rag_config", {
         "retriever": {
             "embedding_model": "fake-embedding-model",
+            "embedding_revision": "revision-123",
             "top_k": 5,
         },
         "pgvector": {
@@ -29,19 +30,24 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
         )
 
         self.assertEqual(retriever.model_name, "fake-embedding-model")
+        self.assertEqual(retriever.model_revision, "revision-123")
         self.assertEqual(retriever.table_name, "knowledge_base")
         self.assertEqual(retriever.conn, mock_conn)
 
         mock_connect.assert_called_once_with(
             "postgresql://test:test@localhost:5432/testdb"
         )
-        mock_st.assert_called_once_with("fake-embedding-model")
+        mock_st.assert_called_once_with(
+            "fake-embedding-model",
+            revision="revision-123",
+        )
 
     @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
     @patch("app.services.rag.retriever.pg_retriever.psycopg2.connect")
     @patch("app.services.rag.retriever.pg_retriever.rag_config", {
         "retriever": {
             "embedding_model": "yaml-model",
+            "embedding_revision": "yaml-revision",
             "top_k": 5,
         },
         "pgvector": {
@@ -59,6 +65,7 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
         )
 
         self.assertEqual(retriever.model_name, "manual-model")
+        self.assertIsNone(retriever.model_revision)
         self.assertEqual(retriever.table_name, "manual_table")
         mock_st.assert_called_once_with("manual-model")
 

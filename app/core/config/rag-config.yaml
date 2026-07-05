@@ -1,5 +1,6 @@
 retriever:
   embedding_model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+  embedding_revision: e8f8c211226b894fcb81acc59f3b34ba3efd5f42
   embedding_dim: 384
   top_k: 5
 

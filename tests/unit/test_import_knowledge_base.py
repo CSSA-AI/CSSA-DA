@@ -336,18 +336,23 @@ def test_local_import_loads_file_and_constructs_model(
             DATABASE_URL,
             input_file=input_file,
             model_name="test-model",
+            model_revision="revision-123",
         )
         cached_result = run_local_import(
             DATABASE_URL,
             input_file=input_file,
             model_name="test-model",
+            model_revision="revision-123",
         )
     finally:
         shutil.rmtree(temp_dir)
 
     assert result == ImportResult(attempted_count=1, inserted_count=1)
     assert cached_result == result
-    mock_sentence_transformer.assert_called_once_with("test-model")
+    mock_sentence_transformer.assert_called_once_with(
+        "test-model",
+        revision="revision-123",
+    )
     mock_loader_class.assert_called_once_with(
         DATABASE_URL,
         "knowledge_base",

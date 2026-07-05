@@ -236,6 +236,7 @@ def run_local_import(
     *,
     input_file: Path = DEFAULT_KNOWLEDGE_BASE_INPUT,
     model_name: str | None = None,
+    model_revision: str | None = None,
     table_name: str | None = None,
     limit: int | None = None,
     batch_size: int = 100,
@@ -252,7 +253,15 @@ def run_local_import(
         records = records[:limit]
 
     _validate_import_records(records)
-    model_name = model_name or rag_config["retriever"]["embedding_model"]
+    configured_model_name = rag_config["retriever"]["embedding_model"]
+    model_name = model_name or configured_model_name
+    if (
+        model_revision is None
+        and model_name == configured_model_name
+    ):
+        model_revision = rag_config["retriever"].get(
+            "embedding_revision"
+        )
     table_name = table_name or rag_config["pgvector"]["table_name"]
     checkpoint_store = JsonImportCheckpointStore(
         checkpoint_file
@@ -267,6 +276,7 @@ def run_local_import(
         table_name=table_name,
         target_id=database_target_id(database_url),
         batch_size=batch_size,
+        model_revision=model_revision,
     )
     checkpoint_manager = ImportCheckpointManager(
         checkpoint_store,
@@ -288,7 +298,12 @@ def run_local_import(
 
     from sentence_transformers import SentenceTransformer
 
-    embedder = SentenceTransformer(model_name)
+    model_kwargs = (
+        {"revision": model_revision}
+        if model_revision
+        else {}
+    )
+    embedder = SentenceTransformer(model_name, **model_kwargs)
     with PostgresKnowledgeBaseLoader(
         database_url,
         table_name,
