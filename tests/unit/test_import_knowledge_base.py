@@ -356,6 +356,8 @@ def test_local_import_loads_file_and_constructs_model(
     mock_loader_class.assert_called_once_with(
         DATABASE_URL,
         "knowledge_base",
+        embedding_model="test-model",
+        embedding_revision="revision-123",
         expected_embedding_dim=384,
     )
     loader.insert_batch.assert_called_once()

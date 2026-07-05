@@ -16,6 +16,8 @@ if os.getenv("RUN_INTEGRATION_TESTS") != "1":
 
 
 TEST_EMBEDDING = [0.1] * 384
+EMBEDDING_MODEL = "test-embedding-model"
+EMBEDDING_REVISION = "revision-123"
 
 
 @pytest.fixture(scope="function", autouse=True)
@@ -33,10 +35,13 @@ def seed_knowledge_base(test_database_url, clean_knowledge_base):
                     created_at,
                     tags,
                     link,
+                    embedding_model,
+                    embedding_revision,
                     embedding
                 )
                 VALUES (
-                    %s, %s, %s, %s, %s, %s, NOW(), %s::jsonb, %s, %s::vector
+                    %s, %s, %s, %s, %s, %s, NOW(), %s::jsonb, %s,
+                    %s, %s, %s::vector
                 );
             """, (
                 "How do I apply for special consideration?",
@@ -47,8 +52,31 @@ def seed_knowledge_base(test_database_url, clean_knowledge_base):
                 "en",
                 Json(["unimelb", "special consideration"]),
                 "https://students.unimelb.edu.au",
+                EMBEDDING_MODEL,
+                EMBEDDING_REVISION,
                 TEST_EMBEDDING,
             ))
+            cur.execute(
+                """
+                INSERT INTO knowledge_base (
+                    question_text,
+                    content,
+                    link,
+                    embedding_model,
+                    embedding_revision,
+                    embedding
+                )
+                VALUES (%s, %s, %s, %s, %s, %s::vector);
+                """,
+                (
+                    "Incompatible embedding",
+                    "This row must not be retrieved.",
+                    "https://example.com/incompatible",
+                    EMBEDDING_MODEL,
+                    "different-revision",
+                    TEST_EMBEDDING,
+                ),
+            )
 
         conn.commit()
 
@@ -75,6 +103,8 @@ def test_rag_pipeline_end_to_end(test_database_url):
     retriever = PGVectorRetriever.__new__(PGVectorRetriever)
     retriever.conn = psycopg2.connect(test_database_url)
     retriever.table_name = "knowledge_base"
+    retriever.model_name = EMBEDDING_MODEL
+    retriever.model_revision = EMBEDDING_REVISION
     retriever.model = FakeEmbeddingModel()
 
     reranker = FakeReranker()
@@ -98,6 +128,11 @@ def test_rag_pipeline_end_to_end(test_database_url):
         assert "fake answer" in state["answer"]
         assert len(state["answer"].strip()) > 0
         assert state["search_results"]
+        assert len(state["search_results"]) == 1
+        assert (
+            state["search_results"][0].article.text
+            != "This row must not be retrieved."
+        )
 
     finally:
         retriever.close()

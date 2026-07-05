@@ -307,6 +307,8 @@ def run_local_import(
     with PostgresKnowledgeBaseLoader(
         database_url,
         table_name,
+        embedding_model=model_name,
+        embedding_revision=model_revision,
         expected_embedding_dim=rag_config["retriever"]["embedding_dim"],
     ) as loader:
         return _import_validated_records(

@@ -12,10 +12,16 @@ class PostgresKnowledgeBaseLoader:
         database_url: str,
         table_name: str,
         *,
+        embedding_model: str,
+        embedding_revision: str | None = None,
         expected_embedding_dim: int | None = None,
     ):
+        if not embedding_model.strip():
+            raise ValueError("embedding_model cannot be empty")
         self.database_url = database_url
         self.table_name = table_name
+        self.embedding_model = embedding_model
+        self.embedding_revision = embedding_revision
         self.expected_embedding_dim = expected_embedding_dim
         self.connection = None
 
@@ -51,7 +57,12 @@ class PostgresKnowledgeBaseLoader:
             )
 
         insert_sql = _build_insert_sql(self.table_name)
-        rows = _build_rows(records, embeddings)
+        rows = _build_rows(
+            records,
+            embeddings,
+            embedding_model=self.embedding_model,
+            embedding_revision=self.embedding_revision,
+        )
 
         try:
             with self.connection.cursor() as cursor:
@@ -71,6 +82,8 @@ def insert_records(
     database_url: str,
     table_name: str,
     *,
+    embedding_model: str,
+    embedding_revision: str | None = None,
     expected_embedding_dim: int | None = None,
 ) -> int:
     _validate_batch(records, embeddings, expected_embedding_dim)
@@ -80,6 +93,8 @@ def insert_records(
     with PostgresKnowledgeBaseLoader(
         database_url,
         table_name,
+        embedding_model=embedding_model,
+        embedding_revision=embedding_revision,
         expected_embedding_dim=expected_embedding_dim,
     ) as loader:
         return loader.insert_batch(records, embeddings)
@@ -129,10 +144,12 @@ def _build_insert_sql(table_name: str):
             created_at,
             tags,
             link,
+            embedding_model,
+            embedding_revision,
             embedding
         )
         VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s::vector
+            %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s::vector
         )
         ON CONFLICT (link, question_text) DO NOTHING
     """).format(table_name=sql.Identifier(table_name))
@@ -141,6 +158,9 @@ def _build_insert_sql(table_name: str):
 def _build_rows(
     records: list[dict[str, Any]],
     embeddings: list[list[float]],
+    *,
+    embedding_model: str,
+    embedding_revision: str | None,
 ) -> list[tuple[Any, ...]]:
     return [
         (
@@ -153,6 +173,8 @@ def _build_rows(
             record.get("created_at"),
             json.dumps(record.get("tags", []), ensure_ascii=False),
             record.get("link"),
+            embedding_model,
+            embedding_revision,
             embedding,
         )
         for record, embedding in zip(records, embeddings)
