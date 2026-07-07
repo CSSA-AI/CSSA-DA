@@ -151,7 +151,26 @@ def _build_insert_sql(table_name: str):
         VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s::vector
         )
-        ON CONFLICT (link, question_text) DO NOTHING
+        ON CONFLICT (link, question_text) DO UPDATE SET
+            content = EXCLUDED.content,
+            source = EXCLUDED.source,
+            author = EXCLUDED.author,
+            post_date = EXCLUDED.post_date,
+            language = EXCLUDED.language,
+            created_at = EXCLUDED.created_at,
+            tags = EXCLUDED.tags,
+            embedding_model = EXCLUDED.embedding_model,
+            embedding_revision = EXCLUDED.embedding_revision,
+            embedding = EXCLUDED.embedding
+        WHERE {table_name}.content IS DISTINCT FROM EXCLUDED.content
+            OR {table_name}.source IS DISTINCT FROM EXCLUDED.source
+            OR {table_name}.author IS DISTINCT FROM EXCLUDED.author
+            OR {table_name}.post_date IS DISTINCT FROM EXCLUDED.post_date
+            OR {table_name}.language IS DISTINCT FROM EXCLUDED.language
+            OR {table_name}.created_at IS DISTINCT FROM EXCLUDED.created_at
+            OR {table_name}.tags IS DISTINCT FROM EXCLUDED.tags
+            OR {table_name}.embedding_model IS DISTINCT FROM EXCLUDED.embedding_model
+            OR {table_name}.embedding_revision IS DISTINCT FROM EXCLUDED.embedding_revision
     """).format(table_name=sql.Identifier(table_name))
 
 

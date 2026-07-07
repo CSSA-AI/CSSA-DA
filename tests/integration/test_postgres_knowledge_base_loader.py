@@ -97,3 +97,50 @@ def test_loader_ignores_duplicate_record(test_database_url):
     assert first_inserted == 1
     assert second_inserted == 0
     assert row_count == 1
+
+
+def test_loader_updates_existing_record_when_source_or_embedding_revision_changes(
+    test_database_url,
+):
+    record = _knowledge_base_record()
+    updated_record = {
+        **record,
+        "content": "Apply through the updated university portal.",
+        "tags": ["unimelb", "special consideration", "updated"],
+    }
+
+    first_inserted = insert_records(
+        records=[record],
+        embeddings=[TEST_EMBEDDING],
+        database_url=test_database_url,
+        table_name="knowledge_base",
+        embedding_model=EMBEDDING_MODEL,
+        embedding_revision="revision-old",
+        expected_embedding_dim=384,
+    )
+    second_inserted = insert_records(
+        records=[updated_record],
+        embeddings=[[0.2] * 384],
+        database_url=test_database_url,
+        table_name="knowledge_base",
+        embedding_model=EMBEDDING_MODEL,
+        embedding_revision="revision-new",
+        expected_embedding_dim=384,
+    )
+
+    with psycopg2.connect(test_database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*), MAX(content), MAX(tags::text), MAX(embedding_revision)
+                FROM knowledge_base;
+                """
+            )
+            row_count, content, tags, embedding_revision = cur.fetchone()
+
+    assert first_inserted == 1
+    assert second_inserted == 1
+    assert row_count == 1
+    assert content == updated_record["content"]
+    assert "updated" in tags
+    assert embedding_revision == "revision-new"

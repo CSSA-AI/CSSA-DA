@@ -88,9 +88,8 @@ For the complete workflow, use `--reset-import-checkpoint`.
 
 The embedding model revision is pinned in `app/core/config/rag-config.yaml` so
 imports and retrieval use the same immutable model files. If that revision is
-changed, rebuild the existing knowledge-base embeddings before serving queries;
-resetting the checkpoint alone does not replace rows skipped by the importer's
-conflict handling.
+changed, reset the import checkpoint and rerun the import before serving
+queries so existing rows are refreshed with the new embedding provenance.
 
 ## Knowledge base local workflow
 
@@ -125,10 +124,12 @@ $env:DATABASE_URL='postgresql://rag_user:rag_password@localhost:5432/rag_vectord
 
 Knowledge-base imports are idempotent by `(link, question_text)`.
 
-Running the importer again skips rows that already exist:
+Running the importer again skips unchanged rows, but updates existing rows when
+source fields or embedding provenance changed:
 
 ```sql
-ON CONFLICT (link, question_text) DO NOTHING
+ON CONFLICT (link, question_text) DO UPDATE ...
+WHERE existing values are different from incoming values
 ```
 
 The unique index is managed by Alembic migration
