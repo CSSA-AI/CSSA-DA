@@ -67,13 +67,13 @@ class PostgresKnowledgeBaseLoader:
         try:
             with self.connection.cursor() as cursor:
                 cursor.executemany(insert_sql, rows)
-                inserted = cursor.rowcount
+                affected = cursor.rowcount
             self.connection.commit()
         except Exception:
             self.connection.rollback()
             raise
 
-        return inserted
+        return affected
 
 
 def insert_records(

@@ -55,7 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--batch-size",
         type=int,
         default=100,
-        help="Number of records to embed and insert per batch.",
+        help="Number of records to embed and load per batch.",
     )
     import_command.add_argument(
         "--checkpoint-file",
@@ -179,7 +179,7 @@ def _run_command(
                 "event": "command_completed",
                 "stage": args.command,
                 "record_count": result.attempted_count,
-                "inserted_count": result.inserted_count,
+                "affected_count": result.affected_count,
             },
         )
     elif args.command == "run-wechat-pipeline":
@@ -204,7 +204,7 @@ def _run_command(
                 "event": "command_completed",
                 "stage": args.command,
                 "record_count": result.transformed_count,
-                "inserted_count": result.inserted_count,
+                "affected_count": result.affected_count,
             },
         )
 

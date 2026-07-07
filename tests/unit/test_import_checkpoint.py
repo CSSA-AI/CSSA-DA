@@ -56,7 +56,7 @@ def test_json_checkpoint_store_round_trip():
     checkpoint = ImportCheckpoint(
         identity=_identity(),
         next_batch_index=2,
-        inserted_count=200,
+        affected_count=200,
         status="failed",
         error="database unavailable",
     )
@@ -69,6 +69,43 @@ def test_json_checkpoint_store_round_trip():
 
         store.clear()
         assert store.load() is None
+    finally:
+        shutil.rmtree(temp_dir)
+
+
+def test_json_checkpoint_store_reads_legacy_inserted_count():
+    temp_dir = Path(__file__).parent / ".tmp_import_checkpoint"
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir)
+    temp_dir.mkdir()
+    checkpoint_file = temp_dir / "import_checkpoint.json"
+    checkpoint_file.write_text(
+        """
+{
+  "identity": {
+    "dataset_fingerprint": "abc123",
+    "model_name": "test-model",
+    "table_name": "knowledge_base",
+    "target_id": "postgresql://localhost:5432/testdb",
+    "batch_size": 100,
+    "record_count": 10,
+    "model_revision": "revision-123"
+  },
+  "next_batch_index": 2,
+  "inserted_count": 200,
+  "status": "running",
+  "error": null
+}
+""",
+        encoding="utf-8",
+    )
+    store = JsonImportCheckpointStore(checkpoint_file)
+
+    try:
+        checkpoint = store.load()
+
+        assert checkpoint is not None
+        assert checkpoint.affected_count == 200
     finally:
         shutil.rmtree(temp_dir)
 

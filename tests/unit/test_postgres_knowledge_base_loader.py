@@ -25,7 +25,7 @@ def _record(index=1):
 
 @patch("pipelines.loaders.postgres_knowledge_base.psycopg2.connect")
 def test_empty_batch_returns_zero_without_connecting(mock_connect):
-    inserted = insert_records(
+    affected = insert_records(
         [],
         [],
         DATABASE_URL,
@@ -33,7 +33,7 @@ def test_empty_batch_returns_zero_without_connecting(mock_connect):
         embedding_model=EMBEDDING_MODEL,
     )
 
-    assert inserted == 0
+    assert affected == 0
     mock_connect.assert_not_called()
 
 
@@ -108,17 +108,17 @@ def test_context_loader_reuses_one_connection_for_batches(mock_connect):
         embedding_revision=EMBEDDING_REVISION,
         expected_embedding_dim=2,
     ) as loader:
-        first_inserted = loader.insert_batch(
+        first_affected = loader.insert_batch(
             [_record(1)],
             [[0.1, 0.2]],
         )
-        second_inserted = loader.insert_batch(
+        second_affected = loader.insert_batch(
             [_record(2)],
             [[0.3, 0.4]],
         )
 
-    assert first_inserted == 1
-    assert second_inserted == 1
+    assert first_affected == 1
+    assert second_affected == 1
     mock_connect.assert_called_once_with(DATABASE_URL)
     assert cursor.executemany.call_count == 2
     first_row = cursor.executemany.call_args_list[0].args[1][0]

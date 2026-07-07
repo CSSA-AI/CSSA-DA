@@ -25,7 +25,7 @@ class ImportCheckpointIdentity:
 class ImportCheckpoint:
     identity: ImportCheckpointIdentity
     next_batch_index: int = 0
-    inserted_count: int = 0
+    affected_count: int = 0
     status: str = "running"
     error: str | None = None
 
@@ -52,7 +52,10 @@ class JsonImportCheckpointStore:
         return ImportCheckpoint(
             identity=ImportCheckpointIdentity(**payload["identity"]),
             next_batch_index=payload["next_batch_index"],
-            inserted_count=payload["inserted_count"],
+            affected_count=payload.get(
+                "affected_count",
+                payload.get("inserted_count", 0),
+            ),
             status=payload["status"],
             error=payload.get("error"),
         )
@@ -134,12 +137,12 @@ class ImportCheckpointManager:
         checkpoint: ImportCheckpoint,
         *,
         next_batch_index: int,
-        inserted_count: int,
+        affected_count: int,
     ) -> ImportCheckpoint:
         checkpoint = replace(
             checkpoint,
             next_batch_index=next_batch_index,
-            inserted_count=inserted_count,
+            affected_count=affected_count,
             status="running",
             error=None,
         )
@@ -151,13 +154,13 @@ class ImportCheckpointManager:
         checkpoint: ImportCheckpoint,
         *,
         next_batch_index: int,
-        inserted_count: int,
+        affected_count: int,
         error: Exception,
     ) -> ImportCheckpoint:
         checkpoint = replace(
             checkpoint,
             next_batch_index=next_batch_index,
-            inserted_count=inserted_count,
+            affected_count=affected_count,
             status="failed",
             error=str(error),
         )
@@ -169,12 +172,12 @@ class ImportCheckpointManager:
         self,
         checkpoint: ImportCheckpoint,
         *,
-        inserted_count: int,
+        affected_count: int,
     ) -> ImportCheckpoint:
         checkpoint = replace(
             checkpoint,
             next_batch_index=self.batch_count,
-            inserted_count=inserted_count,
+            affected_count=affected_count,
             status="completed",
             error=None,
         )
@@ -199,7 +202,7 @@ class ImportCheckpointManager:
                 "event": event,
                 "stage": "import",
                 "batch_count": self.batch_count,
-                "inserted_count": checkpoint.inserted_count,
+                "affected_count": checkpoint.affected_count,
                 "checkpoint_status": checkpoint.status,
                 "next_batch_index": checkpoint.next_batch_index,
                 "dataset_fingerprint": (

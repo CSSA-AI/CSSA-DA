@@ -53,7 +53,7 @@ def test_local_pipeline_runs_stages_and_returns_report():
             "pipelines.orchestration.wechat_pipeline.run_local_import",
             return_value=ImportResult(
                 attempted_count=9,
-                inserted_count=8,
+                affected_count=8,
             ),
         ) as import_records,
         patch(
@@ -73,7 +73,7 @@ def test_local_pipeline_runs_stages_and_returns_report():
         skipped_count=2,
         dropped_count=1,
         attempted_import_count=9,
-        inserted_count=8,
+        affected_count=8,
         raw_output_location="test-data/wechat_articles_all.json",
         processed_output_file=(
             data_dir / "wechat_articles_processed.json"

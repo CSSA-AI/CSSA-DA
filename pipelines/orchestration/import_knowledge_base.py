@@ -49,7 +49,7 @@ class KnowledgeBaseValidationError(ValueError):
 @dataclass(frozen=True)
 class ImportResult:
     attempted_count: int
-    inserted_count: int
+    affected_count: int
 
 
 def import_knowledge_base(
@@ -86,7 +86,7 @@ def import_knowledge_base(
     if checkpoint is not None and checkpoint.status == "completed":
         return ImportResult(
             attempted_count=len(records),
-            inserted_count=checkpoint.inserted_count,
+            affected_count=checkpoint.affected_count,
         )
 
     return _import_validated_records(
@@ -155,11 +155,11 @@ def _import_validated_records(
         if checkpoint_manager is not None and checkpoint is not None:
             checkpoint_manager.mark_completed(
                 checkpoint,
-                inserted_count=checkpoint.inserted_count,
+                affected_count=checkpoint.affected_count,
             )
-        return ImportResult(attempted_count=0, inserted_count=0)
+        return ImportResult(attempted_count=0, affected_count=0)
 
-    inserted_count = checkpoint.inserted_count if checkpoint else 0
+    affected_count = checkpoint.affected_count if checkpoint else 0
     batch_count = math.ceil(len(records) / batch_size)
     start_batch_index = (
         checkpoint.next_batch_index if checkpoint else 0
@@ -179,7 +179,7 @@ def _import_validated_records(
         )
         try:
             embeddings = encode_records(batch, embedder)
-            batch_inserted_count = loader.insert_batch(batch, embeddings)
+            batch_affected_count = loader.insert_batch(batch, embeddings)
         except Exception as error:
             logger.exception(
                 "Import batch failed",
@@ -196,16 +196,16 @@ def _import_validated_records(
                 checkpoint = checkpoint_manager.mark_failed(
                     checkpoint,
                     next_batch_index=batch_index,
-                    inserted_count=inserted_count,
+                    affected_count=affected_count,
                     error=error,
                 )
             raise
-        inserted_count += batch_inserted_count
+        affected_count += batch_affected_count
         if checkpoint_manager is not None and checkpoint is not None:
             checkpoint = checkpoint_manager.mark_batch_completed(
                 checkpoint,
                 next_batch_index=batch_index + 1,
-                inserted_count=inserted_count,
+                affected_count=affected_count,
             )
         logger.info(
             "Import batch completed",
@@ -215,19 +215,19 @@ def _import_validated_records(
                 "batch_number": batch_index + 1,
                 "batch_count": batch_count,
                 "record_count": len(batch),
-                "inserted_count": batch_inserted_count,
+                "affected_count": batch_affected_count,
             },
         )
 
     if checkpoint_manager is not None and checkpoint is not None:
         checkpoint_manager.mark_completed(
             checkpoint,
-            inserted_count=inserted_count,
+            affected_count=affected_count,
         )
 
     return ImportResult(
         attempted_count=len(records),
-        inserted_count=inserted_count,
+        affected_count=affected_count,
     )
 
 
@@ -287,14 +287,14 @@ def run_local_import(
     if checkpoint is not None and checkpoint.status == "completed":
         return ImportResult(
             attempted_count=len(records),
-            inserted_count=checkpoint.inserted_count,
+            affected_count=checkpoint.affected_count,
         )
     if not records:
         checkpoint_manager.mark_completed(
             checkpoint,
-            inserted_count=checkpoint.inserted_count,
+            affected_count=checkpoint.affected_count,
         )
-        return ImportResult(attempted_count=0, inserted_count=0)
+        return ImportResult(attempted_count=0, affected_count=0)
 
     from sentence_transformers import SentenceTransformer
 

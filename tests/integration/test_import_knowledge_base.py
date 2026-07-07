@@ -81,7 +81,7 @@ def test_import_pipeline_validates_embeds_and_loads(test_database_url):
             )
             stored = cursor.fetchone()
 
-    assert result == ImportResult(attempted_count=1, inserted_count=1)
+    assert result == ImportResult(attempted_count=1, affected_count=1)
     assert embedder.encoded_texts == [
         (
             "How do I apply for special consideration? 1\n\n"
@@ -128,11 +128,11 @@ def test_batched_import_is_idempotent(test_database_url):
 
     assert first_result == ImportResult(
         attempted_count=2,
-        inserted_count=2,
+        affected_count=2,
     )
     assert second_result == ImportResult(
         attempted_count=2,
-        inserted_count=0,
+        affected_count=0,
     )
     assert len(embedder.encoded_batches) == 2
     assert row_count == 2
@@ -186,7 +186,7 @@ def test_failed_import_resumes_after_last_committed_batch(
 
     assert result == ImportResult(
         attempted_count=3,
-        inserted_count=3,
+        affected_count=3,
     )
     assert len(resumed_embedder.encoded_batches) == 1
     assert len(resumed_embedder.encoded_batches[0]) == 1

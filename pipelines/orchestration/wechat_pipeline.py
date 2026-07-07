@@ -26,7 +26,7 @@ class WechatPipelineRunResult:
     skipped_count: int
     dropped_count: int
     attempted_import_count: int
-    inserted_count: int
+    affected_count: int
     raw_output_location: str
     processed_output_file: Path
 
@@ -97,7 +97,7 @@ def run_local_wechat_pipeline(
             ),
             lambda result: {
                 "record_count": result.attempted_count,
-                "inserted_count": result.inserted_count,
+                "affected_count": result.affected_count,
             },
         )
 
@@ -108,7 +108,7 @@ def run_local_wechat_pipeline(
             skipped_count=transform_result.stats.skipped_count,
             dropped_count=transform_result.stats.dropped_count,
             attempted_import_count=import_result.attempted_count,
-            inserted_count=import_result.inserted_count,
+            affected_count=import_result.affected_count,
             raw_output_location=harvest_result.output_location,
             processed_output_file=processed_output_file,
         )
@@ -121,7 +121,7 @@ def run_local_wechat_pipeline(
                     6,
                 ),
                 "record_count": result.transformed_count,
-                "inserted_count": result.inserted_count,
+                "affected_count": result.affected_count,
             },
         )
         return result

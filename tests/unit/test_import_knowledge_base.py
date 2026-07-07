@@ -58,7 +58,7 @@ def test_import_uses_injected_embedder():
         loader,
     )
 
-    assert result == ImportResult(attempted_count=1, inserted_count=1)
+    assert result == ImportResult(attempted_count=1, affected_count=1)
     embedder.encode.assert_called_once_with(
         [
             "How do I apply?\n\n"
@@ -94,7 +94,7 @@ def test_empty_import_avoids_embedding_and_database():
 
     result = import_knowledge_base([], embedder, loader)
 
-    assert result == ImportResult(attempted_count=0, inserted_count=0)
+    assert result == ImportResult(attempted_count=0, affected_count=0)
     embedder.encode.assert_not_called()
     loader.insert_batch.assert_not_called()
 
@@ -123,7 +123,7 @@ def test_import_processes_records_in_configured_batches():
 
     assert result == ImportResult(
         attempted_count=205,
-        inserted_count=205,
+        affected_count=205,
     )
     assert [len(call.args[0]) for call in loader.insert_batch.call_args_list] == [
         100,
@@ -202,7 +202,7 @@ def test_import_resumes_after_failed_batch_without_reembedding():
     failed_checkpoint = checkpoint_store.load()
     assert failed_checkpoint.status == "failed"
     assert failed_checkpoint.next_batch_index == 1
-    assert failed_checkpoint.inserted_count == 2
+    assert failed_checkpoint.affected_count == 2
 
     resumed_embedder = MagicMock()
     resumed_embedder.encode.return_value = np.array([[0.1] * 384])
@@ -220,7 +220,7 @@ def test_import_resumes_after_failed_batch_without_reembedding():
 
     assert result == ImportResult(
         attempted_count=3,
-        inserted_count=3,
+        affected_count=3,
     )
     resumed_embedder.encode.assert_called_once()
     assert len(resumed_embedder.encode.call_args.args[0]) == 1
@@ -290,7 +290,7 @@ def test_changed_dataset_starts_a_new_checkpoint():
         checkpoint_identity=changed_identity,
     )
 
-    assert result.inserted_count == 1
+    assert result.affected_count == 1
     changed_embedder.encode.assert_called_once()
     changed_loader.insert_batch.assert_called_once()
     assert store.load().identity == changed_identity
@@ -347,7 +347,7 @@ def test_local_import_loads_file_and_constructs_model(
     finally:
         shutil.rmtree(temp_dir)
 
-    assert result == ImportResult(attempted_count=1, inserted_count=1)
+    assert result == ImportResult(attempted_count=1, affected_count=1)
     assert cached_result == result
     mock_sentence_transformer.assert_called_once_with(
         "test-model",

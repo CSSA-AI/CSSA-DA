@@ -20,7 +20,7 @@ def test_json_formatter_includes_run_and_event_fields():
     record.event = "batch_completed"
     record.stage = "import"
     record.batch_number = 2
-    record.inserted_count = 100
+    record.affected_count = 100
 
     with pipeline_run_context("run-123"):
         payload = json.loads(JsonLogFormatter().format(record))
@@ -29,4 +29,4 @@ def test_json_formatter_includes_run_and_event_fields():
     assert payload["event"] == "batch_completed"
     assert payload["stage"] == "import"
     assert payload["batch_number"] == 2
-    assert payload["inserted_count"] == 100
+    assert payload["affected_count"] == 100
