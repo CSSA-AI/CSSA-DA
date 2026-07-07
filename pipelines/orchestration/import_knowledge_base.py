@@ -179,7 +179,7 @@ def _import_validated_records(
         )
         try:
             embeddings = encode_records(batch, embedder)
-            batch_affected_count = loader.insert_batch(batch, embeddings)
+            batch_affected_count = loader.load_batch(batch, embeddings)
         except Exception as error:
             logger.exception(
                 "Import batch failed",

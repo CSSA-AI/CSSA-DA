@@ -199,8 +199,8 @@ class _FailOnSecondBatchLoader:
         self.loader = loader
         self.call_count = 0
 
-    def insert_batch(self, records, embeddings):
+    def load_batch(self, records, embeddings):
         self.call_count += 1
         if self.call_count == 2:
             raise RuntimeError("simulated batch failure")
-        return self.loader.insert_batch(records, embeddings)
+        return self.loader.load_batch(records, embeddings)

@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 import psycopg2
 import pytest
 
-from pipelines.loaders.postgres_knowledge_base import insert_records
+from pipelines.loaders.postgres_knowledge_base import load_records
 
 
 pytestmark = pytest.mark.integration
@@ -35,7 +35,7 @@ def _knowledge_base_record():
 def test_loader_inserts_knowledge_base_record(test_database_url):
     record = _knowledge_base_record()
 
-    affected = insert_records(
+    affected = load_records(
         records=[record],
         embeddings=[TEST_EMBEDDING],
         database_url=test_database_url,
@@ -72,7 +72,7 @@ def test_loader_inserts_knowledge_base_record(test_database_url):
 def test_loader_ignores_duplicate_record(test_database_url):
     record = _knowledge_base_record()
 
-    first_affected = insert_records(
+    first_affected = load_records(
         records=[record],
         embeddings=[TEST_EMBEDDING],
         database_url=test_database_url,
@@ -80,7 +80,7 @@ def test_loader_ignores_duplicate_record(test_database_url):
         embedding_model=EMBEDDING_MODEL,
         expected_embedding_dim=384,
     )
-    second_affected = insert_records(
+    second_affected = load_records(
         records=[record],
         embeddings=[TEST_EMBEDDING],
         database_url=test_database_url,
@@ -109,7 +109,7 @@ def test_loader_updates_existing_record_when_source_or_embedding_revision_change
         "tags": ["unimelb", "special consideration", "updated"],
     }
 
-    first_affected = insert_records(
+    first_affected = load_records(
         records=[record],
         embeddings=[TEST_EMBEDDING],
         database_url=test_database_url,
@@ -118,7 +118,7 @@ def test_loader_updates_existing_record_when_source_or_embedding_revision_change
         embedding_revision="revision-old",
         expected_embedding_dim=384,
     )
-    second_affected = insert_records(
+    second_affected = load_records(
         records=[updated_record],
         embeddings=[[0.2] * 384],
         database_url=test_database_url,
