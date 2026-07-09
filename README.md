@@ -131,7 +131,8 @@ OPENAI_API_KEY=sk-...
 docker compose --profile cpu up --build
 ```
 
-This starts PostgreSQL and the FastAPI service. Open `http://localhost:8000/docs`.
+This starts PostgreSQL, applies Alembic migrations through the `migrate-cpu`
+service, and then starts the FastAPI service. Open `http://localhost:8000/docs`.
 Use the `gpu` profile instead on a machine with a supported NVIDIA GPU. See
 [docker-command.md](docker-command.md) for detailed Docker usage.
 
@@ -141,12 +142,11 @@ Database schema is managed by Alembic migrations. Local knowledge-base rows are
 rebuilt from processed files in `data/`, not from FAISS artifacts:
 
 ```bash
-docker compose up -d postgres
-export DATABASE_URL=postgresql://rag_user:rag_password@localhost:5432/rag_vectordb
-alembic upgrade head
-python -m pipelines transform-wechat
-python -m pipelines import-knowledge-base --reset-checkpoint
-python -m pipelines.orchestration.smoke_test_retrieval --query "墨尔本 校招"
+docker compose --profile pipeline run --rm migrate-cpu
+docker compose --profile pipeline run --rm --no-deps pipeline-cpu transform-wechat
+docker compose --profile pipeline run --rm pipeline-cpu import-knowledge-base --reset-checkpoint
+docker compose --profile pipeline run --rm pipeline-cpu \
+  python -m pipelines.orchestration.smoke_test_retrieval --query "墨尔本 校招"
 ```
 
 For Docker-based pipeline runs, see [pipelines/README.md](pipelines/README.md).

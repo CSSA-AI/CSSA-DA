@@ -36,6 +36,7 @@ services:
       retries: 5
 
   api-cpu:
+    image: cssa-da-cpu:latest
     build:
       context: .
       dockerfile: Dockerfile.cpu
@@ -43,8 +44,8 @@ services:
     profiles: ["cpu"]
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate-cpu:
+        condition: service_completed_successfully
     ports:
       - "8000:8000"
     environment:
@@ -54,14 +55,32 @@ services:
     volumes:
       - huggingface_cache:/root/.cache/huggingface
 
+  migrate-cpu:
+    image: cssa-da-cpu:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
+    container_name: rag_migrate_cpu
+    profiles: ["cpu", "gpu", "pipeline"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    entrypoint: ["python", "-m", "alembic"]
+    command: ["upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql://rag_user:rag_password@postgres:5432/rag_vectordb
+
   pipeline-cpu:
+    image: cssa-da-cpu:latest
     build:
       context: .
       dockerfile: Dockerfile.cpu
     profiles: ["pipeline"]
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate-cpu:
+        condition: service_completed_successfully
     healthcheck:
       disable: true
     entrypoint: ["python", "-m", "pipelines"]
@@ -83,8 +102,8 @@ services:
     profiles: ["gpu"]
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate-cpu:
+        condition: service_completed_successfully
     ports:
       - "8000:8000"
     environment:

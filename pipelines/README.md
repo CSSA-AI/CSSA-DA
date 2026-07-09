@@ -43,7 +43,7 @@ cache and Docker PostgreSQL network:
 
 ```powershell
 $env:WECHAT_API_KEY='<wechat-api-key>'
-docker compose --profile pipeline run --rm --entrypoint alembic pipeline-cpu upgrade head
+docker compose --profile pipeline run --rm migrate-cpu
 docker compose --profile pipeline run --rm pipeline-cpu run-wechat-pipeline
 ```
 
@@ -109,6 +109,9 @@ docker compose up -d postgres
 # 4. Apply database migrations.
 $env:DATABASE_URL='postgresql://rag_user:rag_password@localhost:5432/rag_vectordb'
 .\.venv\Scripts\python.exe -m alembic upgrade head
+
+# Or apply migrations through Docker.
+docker compose --profile pipeline run --rm migrate-cpu
 
 # 5. Smoke-test one row first.
 .\.venv\Scripts\python.exe -m pipelines import-knowledge-base --limit 1
