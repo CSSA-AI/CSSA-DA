@@ -10,7 +10,7 @@ A Retrieval-Augmented Generation (RAG) chatbot designed for Chinese students and
 User Query
     │
     ▼
-[Retriever]   ──  FAISS semantic search over article question embeddings
+[Retriever]   ──  PostgreSQL + pgvector semantic search over `knowledge_base`
     │
     ▼
 [Reranker]    ──  CrossEncoder re-ranking (LoRA fine-tuning supported)
@@ -22,7 +22,7 @@ User Query
 Answer + Source Articles
 ```
 
-The pipeline is orchestrated in [app/services/rag/orchestrator.py](app/services/rag/orchestrator.py) and exposed via a Streamlit demo at [scripts/demo.py](scripts/demo.py).
+The RAG pipeline is orchestrated in [app/services/rag/orchestrator.py](app/services/rag/orchestrator.py) and exposed through the FastAPI app in [app/main.py](app/main.py). PostgreSQL is the source of truth for `knowledge_base`; the Streamlit demo at [scripts/demo.py](scripts/demo.py) is legacy/dev-only and still uses FAISS.
 
 ---
 
@@ -52,7 +52,8 @@ CSSA-DA/
 │           ├── orchestrator.py              # Wires retriever → reranker → generator
 │           ├── retriever/
 │           │   ├── base.py                  # Abstract base class
-│           │   └── faiss_retriever.py       # FAISS + SentenceTransformer semantic search
+│           │   ├── pg_retriever.py          # PostgreSQL + pgvector semantic search
+│           │   └── faiss_retriever.py       # Legacy/dev-only FAISS retriever
 │           ├── reranker/
 │           │   ├── base.py                  # Abstract base class
 │           │   ├── cross_encoder.py         # CrossEncoder with optional LoRA adapter
@@ -79,8 +80,8 @@ CSSA-DA/
 ├── data/                                    # Local data files (not committed to git)
 │   ├── demo_data.json                       # Merged article dataset used by demo
 │   ├── qa_clean_data.json                   # Cleaned QA pairs for training
-│   ├── qa_faiss_index_bert.index            # Saved FAISS index (BERT embeddings)
-│   ├── qa_faiss_index_trans.index           # Saved FAISS index (transformer embeddings)
+│   ├── wechat_articles_processed.json       # Processed records used to rebuild knowledge_base
+│   ├── faiss/                               # Legacy/dev-only FAISS artifacts
 │   └── ...                                  # Raw scraped JSONs per source
 │
 ├── tests/
@@ -134,6 +135,22 @@ This starts PostgreSQL and the FastAPI service. Open `http://localhost:8000/docs
 Use the `gpu` profile instead on a machine with a supported NVIDIA GPU. See
 [docker-command.md](docker-command.md) for detailed Docker usage.
 
+### 4. Rebuild the local knowledge base
+
+Database schema is managed by Alembic migrations. Local knowledge-base rows are
+rebuilt from processed files in `data/`, not from FAISS artifacts:
+
+```bash
+docker compose up -d postgres
+export DATABASE_URL=postgresql://rag_user:rag_password@localhost:5432/rag_vectordb
+alembic upgrade head
+python -m pipelines transform-wechat
+python -m pipelines import-knowledge-base --reset-checkpoint
+python -m pipelines.orchestration.smoke_test_retrieval --query "墨尔本 校招"
+```
+
+For Docker-based pipeline runs, see [pipelines/README.md](pipelines/README.md).
+
 ---
 
 ## Running the Demo
@@ -158,9 +175,10 @@ to submit a message to the RAG pipeline.
 
 ## Key Components
 
-### Retriever ([app/services/rag/retriever/faiss_retriever.py](app/services/rag/retriever/faiss_retriever.py))
-- Encodes article questions using SentenceTransformers
-- Stores and searches embeddings with FAISS
+### Retriever ([app/services/rag/retriever/pg_retriever.py](app/services/rag/retriever/pg_retriever.py))
+- Encodes user queries using the pinned SentenceTransformer model
+- Searches PostgreSQL `knowledge_base` embeddings with pgvector
+- Filters rows by embedding model and revision so retrieval matches the imported vectors
 - Returns ranked `SearchResult` objects (article + similarity score)
 
 ### Reranker ([app/services/rag/reranker/cross_encoder.py](app/services/rag/reranker/cross_encoder.py))
@@ -177,7 +195,7 @@ The optional `LangChainRAGAdapter` wraps the framework-independent components as
 LCEL runnables and returns shared pipeline state containing the answer and sources.
 
 ### Question Generator ([app/services/question_generator/](app/services/question_generator/))
-- Uses GPT to generate natural Chinese questions for each article (used to build the FAISS search index)
+- Uses GPT to generate natural Chinese questions for article/question datasets
 - Detects content patterns (cost, requirements, process, comparison, etc.) to generate relevant question types
 - Configurable via [app/services/question_generator/config.py](app/services/question_generator/config.py)
 

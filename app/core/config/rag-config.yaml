@@ -12,11 +12,6 @@ reranker:
 pgvector:
   table_name: knowledge_base
 
-faiss:
-  index_path: data/faiss/index.faiss
-  embedding_path: data/faiss/question_embeddings.pt
-  idmap_path: data/faiss/id_mapping.json
-
 generator:
   provider: openai
   model_name: gpt-4o-mini

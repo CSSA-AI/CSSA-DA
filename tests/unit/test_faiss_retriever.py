@@ -143,6 +143,42 @@ class TestFAISSRetrieverUnit(unittest.TestCase):
         self.assertTrue(retriever._is_built)
         self.assertEqual(retriever.index.ntotal, 3)
 
+    @patch("app.services.rag.retriever.faiss_retriever.rag_config", {
+        "retriever": {
+            "embedding_model": "fake-model",
+            "top_k": 2
+        }
+    })
+    @patch("app.services.rag.retriever.faiss_retriever.faiss.write_index")
+    @patch("app.services.rag.retriever.faiss_retriever.torch.save")
+    @patch("app.services.rag.retriever.faiss_retriever.SentenceTransformer")
+    def test_save_all_uses_legacy_defaults_without_faiss_config(
+        self,
+        mock_st,
+        mock_torch_save,
+        mock_write_index,
+    ):
+        retriever = FAISSRetriever(input_list=self.articles)
+        retriever.question_embeddings = torch.tensor([
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [0.5, 0.5]
+        ])
+        retriever.index = MagicMock()
+
+        with patch("builtins.open", unittest.mock.mock_open()):
+            retriever.save_all()
+
+        mock_torch_save.assert_called_once()
+        self.assertEqual(
+            mock_torch_save.call_args.args[1],
+            "data/faiss/question_embeddings.pt",
+        )
+        mock_write_index.assert_called_once_with(
+            retriever.index,
+            "data/faiss/index.faiss",
+        )
+
     @patch("app.services.rag.retriever.faiss_retriever.SentenceTransformer")
     def test_encode_query_returns_numpy_float32(self, mock_st):
         mock_model = MagicMock()
