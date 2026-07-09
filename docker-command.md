@@ -56,6 +56,15 @@ Then start the API:
 docker compose --profile cpu up --build
 ```
 
+Smoke-test the running API:
+
+```bash
+python ops/smoke_test_api.py --message "墨尔本 校招"
+```
+
+Use `--health-only` when you only want to verify the server is reachable without
+calling the RAG chain.
+
 ## Common commands
 
 ```bash

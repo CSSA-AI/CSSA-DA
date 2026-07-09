@@ -1,0 +1,83 @@
+from ops.smoke_test_api import smoke_test_api
+
+
+def test_smoke_test_api_checks_health_and_chat(monkeypatch):
+    calls = []
+
+    def fake_request_json(method, url, *, payload=None, timeout=30):
+        calls.append((method, url, payload, timeout))
+        if url.endswith("/health"):
+            return {"status": "ok"}
+        return {
+            "answer": "Here is an answer.",
+            "sources": [{"article": {"link": "https://example.com"}}],
+        }
+
+    monkeypatch.setattr(
+        "ops.smoke_test_api.request_json",
+        fake_request_json,
+    )
+
+    exit_code = smoke_test_api(
+        "http://localhost:8000/",
+        message="墨尔本 校招",
+        top_k=2,
+        rerank_top_k=1,
+        timeout=5,
+    )
+
+    assert exit_code == 0
+    assert calls == [
+        ("GET", "http://localhost:8000/health", None, 5),
+        (
+            "POST",
+            "http://localhost:8000/chat",
+            {
+                "message": "墨尔本 校招",
+                "top_k": 2,
+                "rerank_top_k": 1,
+            },
+            5,
+        ),
+    ]
+
+
+def test_smoke_test_api_can_check_health_only(monkeypatch):
+    calls = []
+
+    def fake_request_json(method, url, *, payload=None, timeout=30):
+        calls.append((method, url))
+        return {"status": "ok"}
+
+    monkeypatch.setattr(
+        "ops.smoke_test_api.request_json",
+        fake_request_json,
+    )
+
+    exit_code = smoke_test_api(
+        "http://localhost:8000",
+        message="ignored",
+        health_only=True,
+    )
+
+    assert exit_code == 0
+    assert calls == [("GET", "http://localhost:8000/health")]
+
+
+def test_smoke_test_api_fails_without_sources(monkeypatch):
+    def fake_request_json(method, url, *, payload=None, timeout=30):
+        if url.endswith("/health"):
+            return {"status": "ok"}
+        return {"answer": "No sources.", "sources": []}
+
+    monkeypatch.setattr(
+        "ops.smoke_test_api.request_json",
+        fake_request_json,
+    )
+
+    exit_code = smoke_test_api(
+        "http://localhost:8000",
+        message="墨尔本 校招",
+    )
+
+    assert exit_code == 1

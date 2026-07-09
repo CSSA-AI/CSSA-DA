@@ -147,6 +147,8 @@ docker compose --profile pipeline run --rm --no-deps pipeline-cpu transform-wech
 docker compose --profile pipeline run --rm pipeline-cpu import-knowledge-base --reset-checkpoint
 docker compose --profile pipeline run --rm pipeline-cpu \
   python -m pipelines.orchestration.smoke_test_retrieval --query "墨尔本 校招"
+docker compose --profile cpu up --build
+python ops/smoke_test_api.py --message "墨尔本 校招"
 ```
 
 For Docker-based pipeline runs, see [pipelines/README.md](pipelines/README.md).
