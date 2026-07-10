@@ -14,7 +14,6 @@ pgvector
 
 # 向量检索
 numpy
-faiss-cpu
 torch
 sentence-transformers
 peft

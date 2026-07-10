@@ -22,7 +22,7 @@ User Query
 Answer + Source Articles
 ```
 
-The RAG pipeline is orchestrated in [app/services/rag/orchestrator.py](app/services/rag/orchestrator.py) and exposed through the FastAPI app in [app/main.py](app/main.py). PostgreSQL is the source of truth for `knowledge_base`; the Streamlit demo at [scripts/demo.py](scripts/demo.py) is legacy/dev-only and still uses FAISS.
+The RAG pipeline is orchestrated in [app/services/rag/orchestrator.py](app/services/rag/orchestrator.py) and exposed through the FastAPI app in [app/main.py](app/main.py). PostgreSQL is the source of truth for `knowledge_base`.
 
 ---
 
@@ -52,8 +52,7 @@ CSSA-DA/
 │           ├── orchestrator.py              # Wires retriever → reranker → generator
 │           ├── retriever/
 │           │   ├── base.py                  # Abstract base class
-│           │   ├── pg_retriever.py          # PostgreSQL + pgvector semantic search
-│           │   └── faiss_retriever.py       # Legacy/dev-only FAISS retriever
+│           │   └── pg_retriever.py          # PostgreSQL + pgvector semantic search
 │           ├── reranker/
 │           │   ├── base.py                  # Abstract base class
 │           │   ├── cross_encoder.py         # CrossEncoder with optional LoRA adapter
@@ -64,11 +63,9 @@ CSSA-DA/
 │           │   └── chatgpt_generator.py     # OpenAI SDK generation + streaming
 │           ├── eval/                        # Evaluation module (WIP)
 │           └── tests/
-│               ├── test_faiss_retriever.py
-│               └── test_orchertrator.py
+│               └── test_orchestrator.py
 │
 ├── scripts/
-│   ├── demo.py                              # Streamlit web demo
 │   ├── merge_json.py                        # Merge multiple JSON data files
 │   ├── run_question_generator.py            # CLI launcher for question generation
 │   └── chunking/                            # Web scrapers and chunking notebooks
@@ -78,10 +75,8 @@ CSSA-DA/
 │       └── myoffer_harvester.ipynb
 │
 ├── data/                                    # Local data files (not committed to git)
-│   ├── demo_data.json                       # Merged article dataset used by demo
 │   ├── qa_clean_data.json                   # Cleaned QA pairs for training
 │   ├── wechat_articles_processed.json       # Processed records used to rebuild knowledge_base
-│   ├── faiss/                               # Legacy/dev-only FAISS artifacts
 │   └── ...                                  # Raw scraped JSONs per source
 │
 ├── tests/
@@ -145,7 +140,7 @@ Use the `gpu` profile instead on a machine with a supported NVIDIA GPU. See
 ### 4. Rebuild the local knowledge base
 
 Database schema is managed by Alembic migrations. Local knowledge-base rows are
-rebuilt from processed files in `data/`, not from FAISS artifacts:
+rebuilt from processed files in `data/`:
 
 ```bash
 docker compose --profile pipeline run --rm migrate-cpu
@@ -160,15 +155,9 @@ python ops/smoke_test_api.py --message "墨尔本 校招"
 
 For Docker-based pipeline runs, see [pipelines/README.md](pipelines/README.md).
 
----
-
-## Running the Demo
-
-```bash
-streamlit run scripts/demo.py
-```
-
-This launches a chat UI at `http://localhost:8501` with streaming responses and source attribution.
+PostgreSQL is the canonical RAG store. The API dependency wiring uses
+`PGVectorRetriever`, and readiness checks inspect PostgreSQL rows for the active
+embedding model/revision.
 
 ### Running the API
 
