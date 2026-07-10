@@ -30,6 +30,21 @@ commands below when the database is empty or the processed data changes.
 The first `/chat` request downloads the configured Hugging Face models. Docker
 stores them in the `huggingface_cache` volume so later starts can reuse them.
 
+## Check configuration
+
+Use this before starting a runtime profile or debugging missing environment
+variables:
+
+```bash
+python ops/check_config.py --profile api
+python ops/check_config.py --profile pipeline
+python ops/check_config.py --profile harvester
+python ops/check_config.py --profile all --json
+```
+
+The command reports whether required variables are configured without printing
+secret values.
+
 ## Rebuild local knowledge base through Docker
 
 Use this after changing pipeline code, processing new data, or resetting the

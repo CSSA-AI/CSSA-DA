@@ -125,6 +125,12 @@ Copy `.env.example` to `.env` and fill in:
 OPENAI_API_KEY=sk-...
 ```
 
+Check runtime configuration without printing secret values:
+
+```bash
+python ops/check_config.py --profile api
+```
+
 ### 3. Docker
 
 ```bash
