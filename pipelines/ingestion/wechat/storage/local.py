@@ -47,9 +47,15 @@ class JsonFileCheckpointStore:
 
 
 class JsonChunkArticleSink:
-    def __init__(self, temp_dir: Path, final_file: Path):
+    def __init__(
+        self,
+        temp_dir: Path,
+        final_file: Path,
+        current_file: Path | None = None,
+    ):
         self.temp_dir = temp_dir
         self.final_file = final_file
+        self.current_file = current_file
 
     def write_batch(
         self,
@@ -84,6 +90,14 @@ class JsonChunkArticleSink:
         with temporary_file.open("w", encoding="utf-8") as file:
             json.dump(articles, file, ensure_ascii=False, indent=2)
         temporary_file.replace(self.final_file)
+
+        if self.current_file is not None:
+            self.current_file.parent.mkdir(parents=True, exist_ok=True)
+            temporary_current_file = self.current_file.with_suffix(
+                f"{self.current_file.suffix}.tmp"
+            )
+            shutil.copyfile(self.final_file, temporary_current_file)
+            temporary_current_file.replace(self.current_file)
 
         if self.temp_dir.exists():
             shutil.rmtree(self.temp_dir)

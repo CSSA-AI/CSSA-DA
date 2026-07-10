@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -39,7 +40,10 @@ def test_local_pipeline_runs_stages_and_returns_report():
         patch(
             "pipelines.orchestration.wechat_pipeline.run_local_harvest",
             return_value=HarvestResult(
-                output_location="test-data/wechat_articles_all.json",
+                output_location=(
+                    "test-data/raw/wechat/"
+                    "wechat_articles_20260710T010203Z.json"
+                ),
                 articles_written=12,
                 total_saved=12,
                 valid_count=10,
@@ -60,11 +64,20 @@ def test_local_pipeline_runs_stages_and_returns_report():
             "pipelines.orchestration.wechat_pipeline.logger"
         ) as pipeline_logger,
     ):
-        result = run_local_wechat_pipeline(
-            DATABASE_URL,
-            data_dir=data_dir,
-            run_id="run-123",
-        )
+        with patch(
+            "pipelines.orchestration.wechat_pipeline.datetime"
+        ) as fake_datetime:
+            fake_datetime.now.return_value = datetime(
+                2026, 7, 10, 1, 2, 3, tzinfo=timezone.utc
+            )
+            fake_datetime.side_effect = (
+                lambda *args, **kwargs: datetime(*args, **kwargs)
+            )
+            result = run_local_wechat_pipeline(
+                DATABASE_URL,
+                data_dir=data_dir,
+                run_id="run-123",
+            )
 
     assert result == WechatPipelineRunResult(
         run_id="run-123",
@@ -74,21 +87,34 @@ def test_local_pipeline_runs_stages_and_returns_report():
         dropped_count=1,
         attempted_import_count=9,
         affected_count=8,
-        raw_output_location="test-data/wechat_articles_all.json",
+        raw_output_location=(
+            "test-data/raw/wechat/"
+            "wechat_articles_20260710T010203Z.json"
+        ),
         processed_output_file=(
-            data_dir / "wechat_articles_processed.json"
+            data_dir / "current" / "wechat_articles_processed.json"
         ),
     )
     assert result.rejected_count == 3
-    harvest.assert_called_once_with(config=None, data_dir=data_dir)
+    harvest.assert_called_once_with(
+        config=None,
+        data_dir=data_dir,
+        run_started_at=datetime(
+            2026, 7, 10, 1, 2, 3, tzinfo=timezone.utc
+        ),
+    )
     transform.assert_called_once_with(
-        input_file=data_dir / "wechat_articles_all.json",
-        output_file=data_dir / "wechat_articles_processed.json",
+        input_file=data_dir / "current" / "wechat_articles_all.json",
+        output_file=data_dir / "current" / "wechat_articles_processed.json",
+        data_dir=data_dir,
         created_at=None,
+        run_started_at=datetime(
+            2026, 7, 10, 1, 2, 3, tzinfo=timezone.utc
+        ),
     )
     import_records.assert_called_once_with(
         database_url=DATABASE_URL,
-        input_file=data_dir / "wechat_articles_processed.json",
+        input_file=data_dir / "current" / "wechat_articles_processed.json",
         model_name=None,
         model_revision=None,
         table_name=None,

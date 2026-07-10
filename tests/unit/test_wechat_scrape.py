@@ -71,7 +71,17 @@ def test_local_checkpoint_store_round_trip(test_workspace):
 def test_local_article_sink_is_ordered_and_idempotent(test_workspace):
     sink = JsonChunkArticleSink(
         temp_dir=test_workspace / "temp_chunks",
-        final_file=test_workspace / "wechat_articles_all.json",
+        final_file=(
+            test_workspace
+            / "raw"
+            / "wechat"
+            / "wechat_articles_20260710T010203Z.json"
+        ),
+        current_file=(
+            test_workspace
+            / "current"
+            / "wechat_articles_all.json"
+        ),
     )
     sink.write_batch(20, [{"title": "old second"}])
     sink.write_batch(0, [{"title": "first"}])
@@ -79,12 +89,23 @@ def test_local_article_sink_is_ordered_and_idempotent(test_workspace):
 
     output = sink.finalize()
     articles = json.loads(
-        (test_workspace / "wechat_articles_all.json").read_text(
-            encoding="utf-8"
-        )
+        (
+            test_workspace
+            / "raw"
+            / "wechat"
+            / "wechat_articles_20260710T010203Z.json"
+        ).read_text(encoding="utf-8")
+    )
+    current_articles = json.loads(
+        (
+            test_workspace
+            / "current"
+            / "wechat_articles_all.json"
+        ).read_text(encoding="utf-8")
     )
 
     assert articles == [{"title": "first"}, {"title": "second"}]
+    assert current_articles == articles
     assert output.article_count == 2
     assert not (test_workspace / "temp_chunks").exists()
 

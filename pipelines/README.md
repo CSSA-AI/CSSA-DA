@@ -23,6 +23,28 @@ step is implemented in:
 pipelines/transform/wechat_articles.py
 ```
 
+## Local data layout
+
+WeChat ingestion writes durable raw snapshots and updates a stable current file:
+
+```text
+data/raw/wechat/wechat_articles_<timestamp>.json
+data/current/wechat_articles_all.json
+```
+
+The transform stage does the same for knowledge-base input:
+
+```text
+data/processed/knowledge_base/wechat_articles_processed_<timestamp>.json
+data/current/wechat_articles_processed.json
+```
+
+Pipeline commands read from `data/current` by default. This gives local
+development a stable path while preserving timestamped source snapshots for
+debugging, reruns and future S3-style storage. During migration, transform also
+falls back to the legacy `data/wechat_articles_all.json` file if the new current
+raw file does not exist.
+
 ## Complete local workflow
 
 To run harvesting, transformation, validation, embedding and import as one

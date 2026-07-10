@@ -81,6 +81,26 @@ Use `--health-only` when you only want to verify the server is reachable without
 checking database readiness. Use `--ready-only` to check `/health` and `/ready`
 without calling the RAG chain.
 
+For a repeatable local production rehearsal, run:
+
+```bash
+python ops/rehearse_local_stack.py
+```
+
+By default this applies migrations, transforms local WeChat data, imports one
+knowledge-base row, starts the API, then checks `/health` and `/ready`. Use
+`--full-import` to import all rows, and `--include-chat` when you also want to
+call `/chat`.
+
+The default rehearsal intentionally does not harvest from WeChat. It rebuilds
+from existing raw data under `data/`, which makes the flow repeatable after the
+short-lived WeChat credential expires. When you have a fresh manually collected
+WeChat key and want to test source capture too, run:
+
+```bash
+WECHAT_API_KEY='<fresh-wechat-key>' python ops/rehearse_local_stack.py --include-ingestion
+```
+
 If `/ready` is not ready, inspect the database contents:
 
 ```bash
