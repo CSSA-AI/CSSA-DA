@@ -66,6 +66,13 @@ Use `--health-only` when you only want to verify the server is reachable without
 checking database readiness. Use `--ready-only` to check `/health` and `/ready`
 without calling the RAG chain.
 
+If `/ready` is not ready, inspect the database contents:
+
+```bash
+python ops/db_status.py
+python ops/db_status.py --json
+```
+
 ## Common commands
 
 ```bash

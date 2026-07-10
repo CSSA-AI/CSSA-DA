@@ -148,6 +148,7 @@ docker compose --profile pipeline run --rm pipeline-cpu import-knowledge-base --
 docker compose --profile pipeline run --rm pipeline-cpu \
   python -m pipelines.orchestration.smoke_test_retrieval --query "墨尔本 校招"
 docker compose --profile cpu up --build
+python ops/db_status.py
 python ops/smoke_test_api.py --message "墨尔本 校招"
 ```
 
