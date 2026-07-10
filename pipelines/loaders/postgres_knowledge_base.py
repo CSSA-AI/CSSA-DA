@@ -39,7 +39,7 @@ class PostgresKnowledgeBaseLoader:
             self.connection.close()
             self.connection = None
 
-    def insert_batch(
+    def load_batch(
         self,
         records: list[dict[str, Any]],
         embeddings: list[list[float]],
@@ -67,16 +67,23 @@ class PostgresKnowledgeBaseLoader:
         try:
             with self.connection.cursor() as cursor:
                 cursor.executemany(insert_sql, rows)
-                inserted = cursor.rowcount
+                affected = cursor.rowcount
             self.connection.commit()
         except Exception:
             self.connection.rollback()
             raise
 
-        return inserted
+        return affected
+
+    def insert_batch(
+        self,
+        records: list[dict[str, Any]],
+        embeddings: list[list[float]],
+    ) -> int:
+        return self.load_batch(records, embeddings)
 
 
-def insert_records(
+def load_records(
     records: list[dict[str, Any]],
     embeddings: list[list[float]],
     database_url: str,
@@ -97,7 +104,28 @@ def insert_records(
         embedding_revision=embedding_revision,
         expected_embedding_dim=expected_embedding_dim,
     ) as loader:
-        return loader.insert_batch(records, embeddings)
+        return loader.load_batch(records, embeddings)
+
+
+def insert_records(
+    records: list[dict[str, Any]],
+    embeddings: list[list[float]],
+    database_url: str,
+    table_name: str,
+    *,
+    embedding_model: str,
+    embedding_revision: str | None = None,
+    expected_embedding_dim: int | None = None,
+) -> int:
+    return load_records(
+        records,
+        embeddings,
+        database_url,
+        table_name,
+        embedding_model=embedding_model,
+        embedding_revision=embedding_revision,
+        expected_embedding_dim=expected_embedding_dim,
+    )
 
 
 def _validate_batch(

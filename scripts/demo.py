@@ -20,7 +20,7 @@ from app.services.rag.generator.chatgpt_generator import ChatGPTGenerator
 st.set_page_config(page_title="墨大留学助手 (RAG Demo)", page_icon="🎓")
 
 st.title("CSSA RAG Chatbot")
-st.caption("Powered by: FAISS + CrossEncoder + ChatGPT")
+st.caption("Legacy/dev demo powered by: FAISS + CrossEncoder + ChatGPT")
 
 # --- 1. 初始化核心系统 (使用缓存，防止每次刷新都重载模型) ---
 @st.cache_resource

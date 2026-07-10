@@ -11,6 +11,13 @@ from app.schemas.search_result import SearchResult
 from app.services.rag.retriever.base import BaseRetriever
 
 
+LEGACY_FAISS_CONFIG = {
+    "index_path": "data/faiss/index.faiss",
+    "embedding_path": "data/faiss/question_embeddings.pt",
+    "idmap_path": "data/faiss/id_mapping.json",
+}
+
+
 class FAISSRetriever(BaseRetriever):
     def __init__(
         self,
@@ -121,7 +128,7 @@ class FAISSRetriever(BaseRetriever):
         index_path: Optional[str] = None,
         idmap_path: Optional[str] = None,
     ):
-        faiss_config = rag_config["faiss"]
+        faiss_config = rag_config.get("faiss", LEGACY_FAISS_CONFIG)
 
         embed_path = embed_path or faiss_config["embedding_path"]
         index_path = index_path or faiss_config["index_path"]
@@ -142,7 +149,8 @@ class FAISSRetriever(BaseRetriever):
             )
 
     def load_index(self, index_path: Optional[str] = None):
-        index_path = index_path or rag_config["faiss"]["index_path"]
+        faiss_config = rag_config.get("faiss", LEGACY_FAISS_CONFIG)
+        index_path = index_path or faiss_config["index_path"]
 
         self.index = faiss.read_index(index_path)
         self._is_built = True

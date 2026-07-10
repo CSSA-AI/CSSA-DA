@@ -19,7 +19,7 @@ STRUCTURED_FIELDS = (
     "record_count",
     "batch_number",
     "batch_count",
-    "inserted_count",
+    "affected_count",
     "error_count",
     "error_type",
     "checkpoint_status",

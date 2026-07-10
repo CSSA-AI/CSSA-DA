@@ -22,8 +22,91 @@ Open:
 - API health: <http://localhost:8000/health>
 - Interactive API docs: <http://localhost:8000/docs>
 
+The `cpu` and `gpu` profiles run the `migrate-cpu` service before starting the
+API, so Alembic migrations are applied to PostgreSQL automatically. `/chat`
+expects `knowledge_base` rows to already exist; rebuild them with the pipeline
+commands below when the database is empty or the processed data changes.
+
 The first `/chat` request downloads the configured Hugging Face models. Docker
 stores them in the `huggingface_cache` volume so later starts can reuse them.
+
+## Check configuration
+
+Use this before starting a runtime profile or debugging missing environment
+variables:
+
+```bash
+python ops/check_config.py --profile api
+python ops/check_config.py --profile pipeline
+python ops/check_config.py --profile harvester
+python ops/check_config.py --profile all --json
+```
+
+The command reports whether required variables are configured without printing
+secret values.
+
+## Rebuild local knowledge base through Docker
+
+Use this after changing pipeline code, processing new data, or resetting the
+database volume:
+
+```bash
+# 1. Start Postgres and run migrations
+docker compose --profile pipeline run --rm migrate-cpu
+
+# 2. Rebuild processed records from local data
+docker compose --profile pipeline run --rm --no-deps pipeline-cpu transform-wechat
+
+# 3. Load records into PostgreSQL knowledge_base
+docker compose --profile pipeline run --rm pipeline-cpu import-knowledge-base --reset-checkpoint
+
+# 4. Smoke-test pgvector retrieval
+docker compose --profile pipeline run --rm pipeline-cpu \
+  python -m pipelines.orchestration.smoke_test_retrieval --query "墨尔本 校招"
+```
+
+Then start the API:
+
+```bash
+docker compose --profile cpu up --build
+```
+
+Smoke-test the running API:
+
+```bash
+python ops/smoke_test_api.py --message "墨尔本 校招"
+```
+
+Use `--health-only` when you only want to verify the server is reachable without
+checking database readiness. Use `--ready-only` to check `/health` and `/ready`
+without calling the RAG chain.
+
+For a repeatable local production rehearsal, run:
+
+```bash
+python ops/rehearse_local_stack.py
+```
+
+By default this applies migrations, transforms local WeChat data, imports one
+knowledge-base row, starts the API, then checks `/health` and `/ready`. Use
+`--full-import` to import all rows, and `--include-chat` when you also want to
+call `/chat`.
+
+The default rehearsal intentionally does not harvest from WeChat. It rebuilds
+from existing raw data under `data/`, which makes the flow repeatable after the
+short-lived WeChat credential expires. When you have a fresh manually collected
+WeChat key and want to test source capture too, run:
+
+```bash
+WECHAT_API_KEY='<fresh-wechat-key>' python ops/rehearse_local_stack.py --include-ingestion
+```
+
+If `/ready` is not ready, inspect the database contents:
+
+```bash
+python ops/db_status.py
+python ops/db_status.py --json
+```
 
 ## Common commands
 
@@ -59,9 +142,8 @@ docker compose --profile cpu down --volumes
 # Start only the local database
 docker compose up -d postgres
 
-# Apply database migrations
-DATABASE_URL=postgresql://rag_user:rag_password@localhost:5432/rag_vectordb \
-  python -m alembic upgrade head
+# Apply database migrations through Docker
+docker compose --profile pipeline run --rm migrate-cpu
 
 # Inspect the database manually
 docker exec -it rag_postgres_db psql -U rag_user -d rag_vectordb

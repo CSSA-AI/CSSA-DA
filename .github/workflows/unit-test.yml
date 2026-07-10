@@ -37,9 +37,23 @@ jobs:
         run: |
           cp .env.example .env || true
           echo "OPENAI_API_KEY=dummy-key-for-ci" >> .env
+          echo "DATABASE_URL=postgresql://test:test@localhost:5432/testdb" >> .env
+          echo "WECHAT_API_KEY=dummy-wechat-key-for-ci" >> .env
+
+      - name: Validate runtime config contract
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/testdb
+          OPENAI_API_KEY: dummy-key-for-ci
+          WECHAT_API_KEY: dummy-wechat-key-for-ci
+        run: |
+          python ops/check_config.py --profile api
+          python ops/check_config.py --profile pipeline
+          python ops/check_config.py --profile harvester
 
       - name: Run unit tests
         env:
           OPENAI_API_KEY: dummy-key-for-ci
+          DATABASE_URL: postgresql://test:test@localhost:5432/testdb
+          WECHAT_API_KEY: dummy-wechat-key-for-ci
         run: |
           pytest tests/unit -q

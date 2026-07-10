@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 import psycopg2
 import pytest
 
-from pipelines.loaders.postgres_knowledge_base import insert_records
+from pipelines.loaders.postgres_knowledge_base import load_records
 
 
 pytestmark = pytest.mark.integration
@@ -35,7 +35,7 @@ def _knowledge_base_record():
 def test_loader_inserts_knowledge_base_record(test_database_url):
     record = _knowledge_base_record()
 
-    inserted = insert_records(
+    affected = load_records(
         records=[record],
         embeddings=[TEST_EMBEDDING],
         database_url=test_database_url,
@@ -56,7 +56,7 @@ def test_loader_inserts_knowledge_base_record(test_database_url):
             )
             stored = cur.fetchone()
 
-    assert inserted == 1
+    assert affected == 1
     assert stored == (
         record["question_text"],
         record["content"],
@@ -72,7 +72,7 @@ def test_loader_inserts_knowledge_base_record(test_database_url):
 def test_loader_ignores_duplicate_record(test_database_url):
     record = _knowledge_base_record()
 
-    first_inserted = insert_records(
+    first_affected = load_records(
         records=[record],
         embeddings=[TEST_EMBEDDING],
         database_url=test_database_url,
@@ -80,7 +80,7 @@ def test_loader_ignores_duplicate_record(test_database_url):
         embedding_model=EMBEDDING_MODEL,
         expected_embedding_dim=384,
     )
-    second_inserted = insert_records(
+    second_affected = load_records(
         records=[record],
         embeddings=[TEST_EMBEDDING],
         database_url=test_database_url,
@@ -94,8 +94,8 @@ def test_loader_ignores_duplicate_record(test_database_url):
             cur.execute("SELECT COUNT(*) FROM knowledge_base;")
             row_count = cur.fetchone()[0]
 
-    assert first_inserted == 1
-    assert second_inserted == 0
+    assert first_affected == 1
+    assert second_affected == 0
     assert row_count == 1
 
 
@@ -109,7 +109,7 @@ def test_loader_updates_existing_record_when_source_or_embedding_revision_change
         "tags": ["unimelb", "special consideration", "updated"],
     }
 
-    first_inserted = insert_records(
+    first_affected = load_records(
         records=[record],
         embeddings=[TEST_EMBEDDING],
         database_url=test_database_url,
@@ -118,7 +118,7 @@ def test_loader_updates_existing_record_when_source_or_embedding_revision_change
         embedding_revision="revision-old",
         expected_embedding_dim=384,
     )
-    second_inserted = insert_records(
+    second_affected = load_records(
         records=[updated_record],
         embeddings=[[0.2] * 384],
         database_url=test_database_url,
@@ -138,8 +138,8 @@ def test_loader_updates_existing_record_when_source_or_embedding_revision_change
             )
             row_count, content, tags, embedding_revision = cur.fetchone()
 
-    assert first_inserted == 1
-    assert second_inserted == 1
+    assert first_affected == 1
+    assert second_affected == 1
     assert row_count == 1
     assert content == updated_record["content"]
     assert "updated" in tags

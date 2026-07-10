@@ -1,9 +1,10 @@
 import json
 import shutil
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from pipelines.orchestration.transform_wechat import run_local_transform
+from pipelines.orchestration import transform_wechat as transform_module
 from pipelines.transform import wechat_articles
 
 clean_text = wechat_articles.clean_text
@@ -121,6 +122,12 @@ def test_local_transform_reads_and_writes_json():
 
     input_file = temp_dir / "wechat_articles_all.json"
     output_file = temp_dir / "wechat_articles_processed.json"
+    snapshot_file = (
+        temp_dir
+        / "processed"
+        / "knowledge_base"
+        / "wechat_articles_processed_20260710T010203Z.json"
+    )
 
     input_file.write_text(
         json.dumps(
@@ -144,12 +151,71 @@ def test_local_transform_reads_and_writes_json():
         result = run_local_transform(
             input_file=input_file,
             output_file=output_file,
+            data_dir=temp_dir,
             created_at=date(2026, 7, 4),
+            run_started_at=datetime(
+                2026, 7, 10, 1, 2, 3, tzinfo=timezone.utc
+            ),
         )
         processed = json.loads(output_file.read_text(encoding="utf-8"))
+        snapshot = json.loads(
+            snapshot_file.read_text(encoding="utf-8")
+        )
 
         assert result.stats.output_count == 1
         assert processed == result.records
+        assert snapshot == result.records
         assert not output_file.with_suffix(".json.tmp").exists()
+    finally:
+        shutil.rmtree(temp_dir)
+
+
+def test_local_transform_falls_back_to_legacy_raw_file(monkeypatch):
+    temp_dir = Path(__file__).parent / ".tmp_wechat_process_legacy"
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir)
+    temp_dir.mkdir()
+
+    current_input = temp_dir / "current" / "wechat_articles_all.json"
+    legacy_input = temp_dir / "wechat_articles_all.json"
+    output_file = temp_dir / "current" / "wechat_articles_processed.json"
+
+    monkeypatch.setattr(
+        transform_module,
+        "DEFAULT_WECHAT_RAW_INPUT",
+        current_input,
+    )
+    monkeypatch.setattr(
+        transform_module,
+        "LEGACY_WECHAT_RAW_INPUT",
+        legacy_input,
+    )
+    try:
+        legacy_input.write_text(
+            json.dumps(
+                [
+                    {
+                        "is_valid_for_rag": True,
+                        "title": "Legacy raw article",
+                        "content": (
+                            "This article is long enough for import. " * 4
+                        ),
+                        "date": "2026-04-10",
+                        "link": "https://example.com/legacy",
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        result = run_local_transform(
+            input_file=current_input,
+            output_file=output_file,
+            data_dir=temp_dir,
+            created_at=date(2026, 7, 4),
+        )
+
+        assert result.stats.output_count == 1
+        assert output_file.exists()
     finally:
         shutil.rmtree(temp_dir)

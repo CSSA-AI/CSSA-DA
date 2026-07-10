@@ -56,7 +56,7 @@ def test_transform_wechat_command(mock_process_articles):
 def test_import_knowledge_base_command(mock_run_local_import):
     mock_run_local_import.return_value = ImportResult(
         attempted_count=10,
-        inserted_count=8,
+        affected_count=8,
     )
 
     exit_code = main(
@@ -91,7 +91,7 @@ def test_run_wechat_pipeline_command(mock_run_pipeline):
         skipped_count=2,
         dropped_count=1,
         attempted_import_count=9,
-        inserted_count=8,
+        affected_count=8,
         raw_output_location="data/wechat_articles_all.json",
         processed_output_file=Path(
             "data/wechat_articles_processed.json"

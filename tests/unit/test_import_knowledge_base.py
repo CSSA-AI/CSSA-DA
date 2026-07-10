@@ -49,7 +49,7 @@ def test_import_uses_injected_embedder():
     embedder = MagicMock()
     embedder.encode.return_value = np.array([[0.1] * 384])
     loader = MagicMock()
-    loader.insert_batch.return_value = 1
+    loader.load_batch.return_value = 1
     records = [_valid_record()]
 
     result = import_knowledge_base(
@@ -58,7 +58,7 @@ def test_import_uses_injected_embedder():
         loader,
     )
 
-    assert result == ImportResult(attempted_count=1, inserted_count=1)
+    assert result == ImportResult(attempted_count=1, affected_count=1)
     embedder.encode.assert_called_once_with(
         [
             "How do I apply?\n\n"
@@ -66,7 +66,7 @@ def test_import_uses_injected_embedder():
         ],
         normalize_embeddings=True,
     )
-    loader.insert_batch.assert_called_once_with(
+    loader.load_batch.assert_called_once_with(
         records,
         [[0.1] * 384],
     )
@@ -85,7 +85,7 @@ def test_invalid_records_fail_before_embedding_or_loading():
 
     assert error.value.errors
     embedder.encode.assert_not_called()
-    loader.insert_batch.assert_not_called()
+    loader.load_batch.assert_not_called()
 
 
 def test_empty_import_avoids_embedding_and_database():
@@ -94,9 +94,9 @@ def test_empty_import_avoids_embedding_and_database():
 
     result = import_knowledge_base([], embedder, loader)
 
-    assert result == ImportResult(attempted_count=0, inserted_count=0)
+    assert result == ImportResult(attempted_count=0, affected_count=0)
     embedder.encode.assert_not_called()
-    loader.insert_batch.assert_not_called()
+    loader.load_batch.assert_not_called()
 
 
 def test_import_processes_records_in_configured_batches():
@@ -112,7 +112,7 @@ def test_import_processes_records_in_configured_batches():
         [[0.1] * 384 for _ in texts]
     )
     loader = MagicMock()
-    loader.insert_batch.side_effect = [100, 100, 5]
+    loader.load_batch.side_effect = [100, 100, 5]
 
     result = import_knowledge_base(
         records,
@@ -123,9 +123,9 @@ def test_import_processes_records_in_configured_batches():
 
     assert result == ImportResult(
         attempted_count=205,
-        inserted_count=205,
+        affected_count=205,
     )
-    assert [len(call.args[0]) for call in loader.insert_batch.call_args_list] == [
+    assert [len(call.args[0]) for call in loader.load_batch.call_args_list] == [
         100,
         100,
         5,
@@ -146,7 +146,7 @@ def test_import_stops_after_failed_batch():
         [[0.1] * 384 for _ in texts]
     )
     loader = MagicMock()
-    loader.insert_batch.side_effect = [
+    loader.load_batch.side_effect = [
         2,
         OSError("database unavailable"),
     ]
@@ -159,7 +159,7 @@ def test_import_stops_after_failed_batch():
             batch_size=2,
         )
 
-    assert loader.insert_batch.call_count == 2
+    assert loader.load_batch.call_count == 2
     assert embedder.encode.call_count == 2
 
 
@@ -184,7 +184,7 @@ def test_import_resumes_after_failed_batch_without_reembedding():
         [[0.1] * 384 for _ in texts]
     )
     first_loader = MagicMock()
-    first_loader.insert_batch.side_effect = [
+    first_loader.load_batch.side_effect = [
         2,
         OSError("database unavailable"),
     ]
@@ -202,12 +202,12 @@ def test_import_resumes_after_failed_batch_without_reembedding():
     failed_checkpoint = checkpoint_store.load()
     assert failed_checkpoint.status == "failed"
     assert failed_checkpoint.next_batch_index == 1
-    assert failed_checkpoint.inserted_count == 2
+    assert failed_checkpoint.affected_count == 2
 
     resumed_embedder = MagicMock()
     resumed_embedder.encode.return_value = np.array([[0.1] * 384])
     resumed_loader = MagicMock()
-    resumed_loader.insert_batch.return_value = 1
+    resumed_loader.load_batch.return_value = 1
 
     result = import_knowledge_base(
         records,
@@ -220,11 +220,11 @@ def test_import_resumes_after_failed_batch_without_reembedding():
 
     assert result == ImportResult(
         attempted_count=3,
-        inserted_count=3,
+        affected_count=3,
     )
     resumed_embedder.encode.assert_called_once()
     assert len(resumed_embedder.encode.call_args.args[0]) == 1
-    resumed_loader.insert_batch.assert_called_once()
+    resumed_loader.load_batch.assert_called_once()
 
     completed_embedder = MagicMock()
     completed_loader = MagicMock()
@@ -239,7 +239,7 @@ def test_import_resumes_after_failed_batch_without_reembedding():
 
     assert cached_result == result
     completed_embedder.encode.assert_not_called()
-    completed_loader.insert_batch.assert_not_called()
+    completed_loader.load_batch.assert_not_called()
 
 
 def test_changed_dataset_starts_a_new_checkpoint():
@@ -255,7 +255,7 @@ def test_changed_dataset_starts_a_new_checkpoint():
     first_embedder = MagicMock()
     first_embedder.encode.return_value = np.array([[0.1] * 384])
     first_loader = MagicMock()
-    first_loader.insert_batch.return_value = 1
+    first_loader.load_batch.return_value = 1
     import_knowledge_base(
         first_records,
         first_embedder,
@@ -279,7 +279,7 @@ def test_changed_dataset_starts_a_new_checkpoint():
     changed_embedder = MagicMock()
     changed_embedder.encode.return_value = np.array([[0.2] * 384])
     changed_loader = MagicMock()
-    changed_loader.insert_batch.return_value = 1
+    changed_loader.load_batch.return_value = 1
 
     result = import_knowledge_base(
         changed_records,
@@ -290,9 +290,9 @@ def test_changed_dataset_starts_a_new_checkpoint():
         checkpoint_identity=changed_identity,
     )
 
-    assert result.inserted_count == 1
+    assert result.affected_count == 1
     changed_embedder.encode.assert_called_once()
-    changed_loader.insert_batch.assert_called_once()
+    changed_loader.load_batch.assert_called_once()
     assert store.load().identity == changed_identity
 
 
@@ -328,7 +328,7 @@ def test_local_import_loads_file_and_constructs_model(
     model.encode.return_value = np.array([[0.1] * 384])
     mock_sentence_transformer.return_value = model
     loader = MagicMock()
-    loader.insert_batch.return_value = 1
+    loader.load_batch.return_value = 1
     mock_loader_class.return_value.__enter__.return_value = loader
 
     try:
@@ -347,7 +347,7 @@ def test_local_import_loads_file_and_constructs_model(
     finally:
         shutil.rmtree(temp_dir)
 
-    assert result == ImportResult(attempted_count=1, inserted_count=1)
+    assert result == ImportResult(attempted_count=1, affected_count=1)
     assert cached_result == result
     mock_sentence_transformer.assert_called_once_with(
         "test-model",
@@ -360,4 +360,4 @@ def test_local_import_loads_file_and_constructs_model(
         embedding_revision="revision-123",
         expected_embedding_dim=384,
     )
-    loader.insert_batch.assert_called_once()
+    loader.load_batch.assert_called_once()
