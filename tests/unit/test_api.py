@@ -4,6 +4,7 @@ from app.api.deps import get_rag_orchestrator
 from app.main import app
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
+from app.services.readiness import ReadinessCheck
 
 
 class StubOrchestrator:
@@ -35,6 +36,50 @@ def test_health():
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_ready_returns_200_when_database_and_data_are_ready(monkeypatch):
+    monkeypatch.setattr(
+        "app.main.check_readiness",
+        lambda: ReadinessCheck(
+            status="ready",
+            database="ok",
+            knowledge_base_rows=3,
+            embedding_model="test-model",
+            embedding_revision="revision-123",
+        ),
+    )
+
+    response = client().get("/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ready",
+        "database": "ok",
+        "knowledge_base_rows": 3,
+        "embedding_model": "test-model",
+        "embedding_revision": "revision-123",
+    }
+
+
+def test_ready_returns_503_when_database_or_data_are_not_ready(monkeypatch):
+    monkeypatch.setattr(
+        "app.main.check_readiness",
+        lambda: ReadinessCheck(
+            status="not_ready",
+            database="ok",
+            knowledge_base_rows=0,
+            embedding_model="test-model",
+            embedding_revision="revision-123",
+            reason="knowledge_base has no rows",
+        ),
+    )
+
+    response = client().get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["status"] == "not_ready"
+    assert response.json()["reason"] == "knowledge_base has no rows"
 
 
 def test_chat_returns_answer_and_sources():

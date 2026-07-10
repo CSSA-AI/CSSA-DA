@@ -44,6 +44,7 @@ def smoke_test_api(
     top_k: int = 3,
     rerank_top_k: int = 3,
     health_only: bool = False,
+    ready_only: bool = False,
     timeout: float = 30,
 ) -> int:
     base_url = base_url.rstrip("/")
@@ -59,6 +60,19 @@ def smoke_test_api(
         return 1
 
     if health_only:
+        return 0
+
+    readiness = request_json(
+        "GET",
+        f"{base_url}/ready",
+        timeout=timeout,
+    )
+    print(f"Readiness: {readiness}")
+    if readiness.get("status") != "ready":
+        print("Readiness check did not return status=ready.")
+        return 1
+
+    if ready_only:
         return 0
 
     chat = request_json(
@@ -117,6 +131,11 @@ def main() -> int:
         help="Only check GET /health.",
     )
     parser.add_argument(
+        "--ready-only",
+        action="store_true",
+        help="Check GET /health and GET /ready without calling /chat.",
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
         default=30,
@@ -131,6 +150,7 @@ def main() -> int:
             top_k=args.top_k,
             rerank_top_k=args.rerank_top_k,
             health_only=args.health_only,
+            ready_only=args.ready_only,
             timeout=args.timeout,
         )
     except RuntimeError as error:

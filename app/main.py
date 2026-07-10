@@ -1,10 +1,12 @@
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_rag_orchestrator
 from app.schemas.search_result import SearchResult
+from app.services.readiness import check_readiness
 from app.services.rag.orchestrator import RAGOrchestrator
 
 
@@ -39,6 +41,15 @@ class ChatResponse(BaseModel):
 @app.get("/health", response_model=HealthResponse, tags=["system"])
 def health() -> HealthResponse:
     return HealthResponse()
+
+
+@app.get("/ready", tags=["system"])
+def ready() -> JSONResponse:
+    readiness = check_readiness()
+    return JSONResponse(
+        status_code=200 if readiness.is_ready else 503,
+        content=readiness.to_dict(),
+    )
 
 
 @app.post("/chat", response_model=ChatResponse, tags=["chat"])
