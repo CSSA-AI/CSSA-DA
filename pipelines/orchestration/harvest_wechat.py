@@ -14,7 +14,9 @@ from pipelines.ingestion.wechat.storage import (
 from pipelines.shared.paths import (
     DEFAULT_CURRENT_DATA_DIR,
     DEFAULT_DATA_DIR,
+    DEFAULT_WECHAT_CHECKPOINT_FILE,
     DEFAULT_WECHAT_RAW_DIR,
+    DEFAULT_WECHAT_TEMP_CHUNKS_DIR,
 )
 
 
@@ -45,15 +47,25 @@ def run_local_harvest(
         if data_dir == DEFAULT_DATA_DIR
         else data_dir / "current" / "wechat_articles_all.json"
     )
+    checkpoint_file = (
+        DEFAULT_WECHAT_CHECKPOINT_FILE
+        if data_dir == DEFAULT_DATA_DIR
+        else data_dir / "checkpoints" / "wechat_scraper_state.json"
+    )
+    temp_chunks_dir = (
+        DEFAULT_WECHAT_TEMP_CHUNKS_DIR
+        if data_dir == DEFAULT_DATA_DIR
+        else data_dir / "checkpoints" / "wechat_temp_chunks"
+    )
     checkpoint_store = JsonFileCheckpointStore(
-        data_dir / "scraper_state.json"
+        checkpoint_file
     )
     raw_snapshot_file = build_wechat_raw_snapshot_file(
         data_dir=data_dir,
         run_started_at=run_started_at,
     )
     article_sink = JsonChunkArticleSink(
-        temp_dir=data_dir / "temp_chunks",
+        temp_dir=temp_chunks_dir,
         final_file=raw_snapshot_file,
         current_file=current_file,
     )

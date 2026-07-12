@@ -25,11 +25,27 @@ pipelines/transform/wechat_articles.py
 
 ## Local data layout
 
+Local pipeline artifacts use a layout that maps cleanly to object storage later:
+
+```text
+data/
+  raw/          immutable source snapshots
+  processed/    transformed pipeline outputs
+  current/      stable inputs consumed by the next stage
+  checkpoints/  resumable local pipeline state
+  reports/      future run reports and audit summaries
+```
+
+This maps directly to future cloud paths such as `s3://bucket/raw/...`,
+`s3://bucket/processed/...`, `s3://bucket/current/...`,
+`s3://bucket/checkpoints/...` and `s3://bucket/reports/...`.
+
 WeChat ingestion writes durable raw snapshots and updates a stable current file:
 
 ```text
 data/raw/wechat/wechat_articles_<timestamp>.json
 data/current/wechat_articles_all.json
+data/checkpoints/wechat_scraper_state.json
 ```
 
 The transform stage does the same for knowledge-base input:
@@ -37,6 +53,7 @@ The transform stage does the same for knowledge-base input:
 ```text
 data/processed/knowledge_base/wechat_articles_processed_<timestamp>.json
 data/current/wechat_articles_processed.json
+data/checkpoints/import_knowledge_base.json
 ```
 
 Pipeline commands read from `data/current` by default. This gives local
@@ -44,6 +61,16 @@ development a stable path while preserving timestamped source snapshots for
 debugging, reruns and future S3-style storage. During migration, transform also
 falls back to the legacy `data/wechat_articles_all.json` file if the new current
 raw file does not exist.
+
+Complete pipeline runs also write JSON reports:
+
+```text
+data/reports/pipelines/wechat_pipeline_<run_id>.json
+```
+
+Reports include the run status, start/end timestamps, source/output paths,
+record counts and failure details when a stage raises an error. They are local
+audit files today and map cleanly to future object-storage reports.
 
 ## Complete local workflow
 
@@ -97,10 +124,10 @@ the command; it resumes from the first unfinished batch without regenerating
 earlier embeddings. All batches in one import run reuse a single PostgreSQL
 connection.
 
-Local progress is stored in `data/import_checkpoint.json`. Its identity includes
-the dataset fingerprint, embedding model and revision, table, sanitized database
-target and batch size. A changed identity starts a new import automatically. To
-deliberately rerun an unchanged completed import:
+Local progress is stored in `data/checkpoints/import_knowledge_base.json`. Its
+identity includes the dataset fingerprint, embedding model and revision, table,
+sanitized database target and batch size. A changed identity starts a new import
+automatically. To deliberately rerun an unchanged completed import:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pipelines import-knowledge-base --reset-checkpoint
