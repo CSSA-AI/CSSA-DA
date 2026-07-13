@@ -22,7 +22,10 @@ from pipelines.shared.import_checkpoint import (
     validate_import_checkpoint_identity,
 )
 from pipelines.shared.json_records import load_json_records
-from pipelines.shared.paths import DEFAULT_KNOWLEDGE_BASE_INPUT
+from pipelines.shared.paths import (
+    DEFAULT_KNOWLEDGE_BASE_INPUT,
+    import_checkpoint_file_for,
+)
 from pipelines.validation.knowledge_base_records import validate_records
 
 
@@ -264,8 +267,7 @@ def run_local_import(
         )
     table_name = table_name or rag_config["pgvector"]["table_name"]
     checkpoint_store = JsonImportCheckpointStore(
-        checkpoint_file
-        or input_file.parent / "import_checkpoint.json"
+        checkpoint_file or import_checkpoint_file_for(input_file)
     )
     if reset_checkpoint:
         checkpoint_store.clear()

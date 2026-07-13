@@ -19,7 +19,6 @@ dependencies:
   - ipython
   - pytest
   # 向量检索核心
-  - faiss-cpu>=1.7.4
   # 深度学习基础
   - pytorch
   - torchvision
@@ -65,5 +64,4 @@ dependencies:
       - hanzidentifier           # 繁简识别
 
       # --- Demo 演示 ---
-      - streamlit                # [新增] 刚才给你的 Demo 脚本需要这个
       - python-dotenv            # [新增] 加载 .env 文件中的 API KEY

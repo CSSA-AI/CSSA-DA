@@ -147,6 +147,10 @@ docker compose --profile pipeline run --rm migrate-cpu
 
 # Inspect the database manually
 docker exec -it rag_postgres_db psql -U rag_user -d rag_vectordb
+
+# Backup local knowledge_base data
+docker exec rag_postgres_db pg_dump -U rag_user -d rag_vectordb \
+  --table=knowledge_base --data-only --column-inserts > knowledge_base_backup.sql
 ```
 
 On Windows PowerShell, set `DATABASE_URL` like this:
@@ -162,4 +166,21 @@ For disposable local development data, reset the migrated schema with:
 $env:DATABASE_URL='postgresql://rag_user:rag_password@localhost:5432/rag_vectordb'
 .\.venv\Scripts\python.exe -m alembic downgrade base
 .\.venv\Scripts\python.exe -m alembic upgrade head
+```
+
+Then seed the local database again from `/data`:
+
+```powershell
+.\.venv\Scripts\python.exe -m pipelines transform-wechat
+.\.venv\Scripts\python.exe -m pipelines import-knowledge-base --reset-checkpoint
+.\.venv\Scripts\python.exe ops\db_status.py
+```
+
+For a Docker-only reset, remove the local Postgres volume and rerun the
+pipeline import:
+
+```bash
+docker compose --profile cpu down --volumes
+docker compose --profile pipeline run --rm migrate-cpu
+docker compose --profile pipeline run --rm pipeline-cpu import-knowledge-base --reset-checkpoint
 ```
