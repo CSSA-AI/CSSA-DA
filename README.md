@@ -168,7 +168,8 @@ uvicorn app.main:app --reload
 The API is available at `http://localhost:8000`, with interactive documentation at
 `http://localhost:8000/docs`. Use `GET /health` to check the API process,
 `GET /ready` to check database/RAG data readiness, and `POST /chat` to submit a
-message to the RAG pipeline.
+message to the RAG pipeline. Use `GET /status` to inspect readiness plus latest
+pipeline run metadata without changing readiness semantics.
 
 ---
 

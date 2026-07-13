@@ -2,7 +2,7 @@ import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -40,6 +40,7 @@ def test_local_pipeline_runs_stages_and_returns_report():
     if data_dir.exists():
         shutil.rmtree(data_dir)
     data_dir.mkdir()
+    metadata_loader = MagicMock()
 
     try:
         with (
@@ -83,6 +84,7 @@ def test_local_pipeline_runs_stages_and_returns_report():
                 result = run_local_wechat_pipeline(
                     DATABASE_URL,
                     data_dir=data_dir,
+                    pipeline_run_loader=metadata_loader,
                     run_id="run-123",
                 )
     finally:
@@ -113,6 +115,22 @@ def test_local_pipeline_runs_stages_and_returns_report():
     assert report_payload["transformed_count"] == 9
     assert report_payload["affected_count"] == 8
     assert report_payload["raw_output_location"] == raw_output_location
+    assert [
+        call.args[0].status
+        for call in metadata_loader.upsert_run.call_args_list
+    ] == ["started", "completed"]
+    completed_metadata = metadata_loader.upsert_run.call_args_list[1].args[0]
+    assert completed_metadata.id == "run-123"
+    assert completed_metadata.pipeline_name == "wechat"
+    assert completed_metadata.input_path == str(
+        data_dir / "current" / "wechat_articles_all.json"
+    )
+    assert completed_metadata.output_path == str(
+        data_dir / "current" / "wechat_articles_processed.json"
+    )
+    assert completed_metadata.report_path == str(expected_report_file)
+    assert completed_metadata.record_count == 9
+    assert completed_metadata.affected_count == 8
 
     assert result == WechatPipelineRunResult(
         run_id="run-123",
@@ -169,6 +187,7 @@ def test_local_pipeline_writes_failure_report():
     if data_dir.exists():
         shutil.rmtree(data_dir)
     data_dir.mkdir()
+    metadata_loader = MagicMock()
 
     try:
         with (
@@ -196,6 +215,7 @@ def test_local_pipeline_writes_failure_report():
             run_local_wechat_pipeline(
                 DATABASE_URL,
                 data_dir=data_dir,
+                pipeline_run_loader=metadata_loader,
                 run_id="run-failure",
             )
 
@@ -214,6 +234,17 @@ def test_local_pipeline_writes_failure_report():
     assert report_payload["status"] == "failed"
     assert report_payload["error_type"] == "ValueError"
     assert report_payload["error_message"] == "invalid raw data"
+    assert [
+        call.args[0].status
+        for call in metadata_loader.upsert_run.call_args_list
+    ] == ["started", "failed"]
+    failed_metadata = metadata_loader.upsert_run.call_args_list[1].args[0]
+    assert failed_metadata.id == "run-failure"
+    assert failed_metadata.error_type == "ValueError"
+    assert failed_metadata.error_message == "invalid raw data"
+    assert failed_metadata.report_path.endswith(
+        "wechat_pipeline_run-failure.json"
+    )
     import_records.assert_not_called()
     assert (
         pipeline_logger.exception.call_args.kwargs["extra"]["stage"]

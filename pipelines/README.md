@@ -72,6 +72,11 @@ Reports include the run status, start/end timestamps, source/output paths,
 record counts and failure details when a stage raises an error. They are local
 audit files today and map cleanly to future object-storage reports.
 
+PostgreSQL also has a `pipeline_runs` table for durable run metadata. This table
+is managed by Alembic and stores run status, data freshness signals and report
+locations. The complete WeChat pipeline writes `started`, `completed` and
+`failed` status transitions when run through the CLI with `DATABASE_URL`.
+
 ## Complete local workflow
 
 To run harvesting, transformation, validation, embedding and import as one

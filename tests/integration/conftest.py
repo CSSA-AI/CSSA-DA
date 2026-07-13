@@ -34,4 +34,5 @@ def clean_knowledge_base(test_database_url, migrated_test_database):
     with psycopg2.connect(test_database_url) as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM knowledge_base;")
+            cur.execute("DELETE FROM pipeline_runs;")
         conn.commit()
