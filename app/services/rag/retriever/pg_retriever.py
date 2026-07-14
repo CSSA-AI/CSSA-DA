@@ -1,6 +1,6 @@
-import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
+from psycopg2.pool import ThreadedConnectionPool
 from sentence_transformers import SentenceTransformer
 from typing import List, Optional
 
@@ -17,6 +17,8 @@ class PGVectorRetriever(BaseRetriever):
         model_name: Optional[str] = None,
         model_revision: Optional[str] = None,
         table_name: Optional[str] = None,
+        pool_min_size: Optional[int] = None,
+        pool_max_size: Optional[int] = None,
     ):
         retriever_config = rag_config["retriever"]
         pgvector_config = rag_config["pgvector"]
@@ -30,9 +32,21 @@ class PGVectorRetriever(BaseRetriever):
             model_revision = retriever_config.get("embedding_revision")
         database_url = database_url or settings.DATABASE_URL
         table_name = table_name or pgvector_config["table_name"]
+        pool_min_size = pool_min_size or pgvector_config.get(
+            "pool_min_size", 1
+        )
+        pool_max_size = pool_max_size or pgvector_config.get(
+            "pool_max_size", 5
+        )
 
         if not database_url:
             raise ValueError("DATABASE_URL is required for PGVectorRetriever")
+        if pool_min_size <= 0:
+            raise ValueError("pool_min_size must be greater than zero")
+        if pool_max_size < pool_min_size:
+            raise ValueError(
+                "pool_max_size must be greater than or equal to pool_min_size"
+            )
 
         super().__init__(
             model_name=model_name,
@@ -40,7 +54,11 @@ class PGVectorRetriever(BaseRetriever):
         )
 
         self.table_name = table_name
-        self.conn = psycopg2.connect(database_url)
+        self.pool = ThreadedConnectionPool(
+            minconn=pool_min_size,
+            maxconn=pool_max_size,
+            dsn=database_url,
+        )
         model_kwargs = (
             {"revision": self.model_revision}
             if self.model_revision
@@ -84,18 +102,30 @@ class PGVectorRetriever(BaseRetriever):
             table=sql.Identifier(self.table_name)
         )
 
-        with self.conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute(
-                query_sql,
-                (
-                    vec.tolist(),
-                    self.model_name,
-                    self.model_revision,
-                    vec.tolist(),
-                    top_k,
-                ),
+        connection = self.pool.getconn()
+        discard_connection = False
+        try:
+            with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(
+                    query_sql,
+                    (
+                        vec.tolist(),
+                        self.model_name,
+                        self.model_revision,
+                        vec.tolist(),
+                        top_k,
+                    ),
+                )
+                rows = cursor.fetchall()
+        finally:
+            try:
+                connection.rollback()
+            except Exception:
+                discard_connection = True
+            self.pool.putconn(
+                connection,
+                close=discard_connection or bool(connection.closed),
             )
-            rows = cursor.fetchall()
 
         results = []
 
@@ -123,6 +153,5 @@ class PGVectorRetriever(BaseRetriever):
         return results
 
     def close(self):
-        """Close database connection."""
-        if self.conn:
-            self.conn.close()
+        """Close all database connections owned by the retriever."""
+        self.pool.closeall()

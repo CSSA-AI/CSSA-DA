@@ -1,5 +1,6 @@
 import unittest
 from typing import List
+from unittest.mock import MagicMock
 
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
@@ -98,6 +99,16 @@ class TestRAGOrchestrator(unittest.TestCase):
         article = Article(text="Content", question="Legacy question")
 
         self.assertEqual(article.questions, ["Legacy question"])
+
+    def test_chain_is_built_once(self):
+        self.assertIs(self.orchestrator.as_chain(), self.orchestrator.as_chain())
+
+    def test_close_releases_component_resources(self):
+        self.retriever.close = MagicMock()
+
+        self.orchestrator.close()
+
+        self.retriever.close.assert_called_once_with()
 
 
 if __name__ == "__main__":

@@ -29,6 +29,8 @@ class ChatGPTGenerator(BaseGenerator):
         model_name: Optional[str] = None,
         temperature: Optional[float] = None,
         api_key: Optional[str] = None,
+        max_retries: Optional[int] = None,
+        timeout_seconds: Optional[float] = None,
     ):
         cfg = rag_config["generator"]
 
@@ -36,11 +38,29 @@ class ChatGPTGenerator(BaseGenerator):
         if not api_key:
             raise ValueError("OPENAI_API_KEY is required for ChatGPTGenerator")
 
-        self.client = OpenAI(api_key=api_key)
-
         self.model_name = model_name or cfg["model_name"]
         self.temperature = temperature if temperature is not None else cfg.get("temperature", 0.3)
-        self.max_retries = cfg.get("max_retries", 2)
+        self.max_retries = (
+            max_retries
+            if max_retries is not None
+            else cfg.get("max_retries", 2)
+        )
+        self.timeout_seconds = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else cfg.get("timeout_seconds", 30.0)
+        )
+        if self.max_retries < 0:
+            raise ValueError("max_retries cannot be negative")
+        if self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be greater than zero")
+
+        self.client = OpenAI(
+            api_key=api_key,
+            max_retries=self.max_retries,
+            timeout=self.timeout_seconds,
+        )
+
         self.streaming = cfg.get("streaming", False)
 
         self.system_prompt = cfg["system_prompt"]

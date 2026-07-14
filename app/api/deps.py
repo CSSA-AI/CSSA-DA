@@ -29,3 +29,14 @@ def get_rag_orchestrator() -> RAGOrchestrator:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"RAG service is unavailable: {exc}",
         ) from exc
+
+
+def close_rag_orchestrator() -> None:
+    """Close the cached pipeline without initializing it during shutdown."""
+    if _build_rag_orchestrator.cache_info().currsize == 0:
+        return
+
+    try:
+        _build_rag_orchestrator().close()
+    finally:
+        _build_rag_orchestrator.cache_clear()

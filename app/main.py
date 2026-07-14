@@ -1,20 +1,28 @@
+from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_rag_orchestrator
+from app.api.deps import close_rag_orchestrator, get_rag_orchestrator
 from app.schemas.search_result import SearchResult
 from app.services.readiness import check_readiness
 from app.services.system_status import get_system_status
 from app.services.rag.orchestrator import RAGOrchestrator
 
 
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    yield
+    close_rag_orchestrator()
+
+
 app = FastAPI(
     title="CSSA-DA RAG API",
     version="0.1.0",
     description="RAG chatbot API for Chinese students and scholars in Australia.",
+    lifespan=lifespan,
 )
 
 

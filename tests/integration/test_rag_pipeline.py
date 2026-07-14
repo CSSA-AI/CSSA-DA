@@ -4,6 +4,7 @@ import numpy as np
 import psycopg2
 import pytest
 from psycopg2.extras import Json
+from psycopg2.pool import ThreadedConnectionPool
 
 from app.services.rag.orchestrator import RAGOrchestrator
 from app.services.rag.retriever.pg_retriever import PGVectorRetriever
@@ -101,7 +102,11 @@ class FakeGenerator:
 
 def test_rag_pipeline_end_to_end(test_database_url):
     retriever = PGVectorRetriever.__new__(PGVectorRetriever)
-    retriever.conn = psycopg2.connect(test_database_url)
+    retriever.pool = ThreadedConnectionPool(
+        minconn=1,
+        maxconn=1,
+        dsn=test_database_url,
+    )
     retriever.table_name = "knowledge_base"
     retriever.model_name = EMBEDDING_MODEL
     retriever.model_revision = EMBEDDING_REVISION
