@@ -4,13 +4,23 @@ from __future__ import annotations
 
 from typing import Iterable, List, Optional, Dict, Any
 
-from openai import OpenAI
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    InternalServerError,
+    OpenAI,
+    RateLimitError,
+)
 
 from app.core.config import settings, rag_config
 from app.schemas.search_result import SearchResult
 from app.services.rag.generator.base import BaseGenerator
 from app.services.rag.generator.context_formatter import (
     format_context_from_search_results,
+)
+from app.services.rag.errors import (
+    GenerationTimeoutError,
+    GenerationUnavailableError,
 )
 
 
@@ -117,11 +127,24 @@ class ChatGPTGenerator(BaseGenerator):
             chat_history=chat_history,
         )
 
-        response = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            temperature=self.temperature,
-        )
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=self.temperature,
+            )
+        except APITimeoutError as error:
+            raise GenerationTimeoutError(
+                "OpenAI generation timed out"
+            ) from error
+        except (
+            APIConnectionError,
+            InternalServerError,
+            RateLimitError,
+        ) as error:
+            raise GenerationUnavailableError(
+                "OpenAI generation is unavailable"
+            ) from error
 
         return response.choices[0].message.content or ""
 
@@ -142,14 +165,27 @@ class ChatGPTGenerator(BaseGenerator):
             chat_history=chat_history,
         )
 
-        stream = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            temperature=self.temperature,
-            stream=True,
-        )
+        try:
+            stream = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=self.temperature,
+                stream=True,
+            )
 
-        for chunk in stream:
-            delta = chunk.choices[0].delta.content
-            if delta:
-                yield delta
+            for chunk in stream:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    yield delta
+        except APITimeoutError as error:
+            raise GenerationTimeoutError(
+                "OpenAI generation timed out"
+            ) from error
+        except (
+            APIConnectionError,
+            InternalServerError,
+            RateLimitError,
+        ) as error:
+            raise GenerationUnavailableError(
+                "OpenAI generation is unavailable"
+            ) from error

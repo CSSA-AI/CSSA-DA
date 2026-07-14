@@ -2,6 +2,13 @@ import unittest
 from unittest.mock import MagicMock, patch
 from types import SimpleNamespace
 
+import httpx
+from openai import APIConnectionError, APITimeoutError
+
+from app.services.rag.errors import (
+    GenerationTimeoutError,
+    GenerationUnavailableError,
+)
 from app.services.rag.generator.chatgpt_generator import ChatGPTGenerator
 
 
@@ -137,6 +144,37 @@ class TestChatGPTGenerator(unittest.TestCase):
         self.assertEqual(kwargs["model"], "gpt-test")
         self.assertEqual(kwargs["temperature"], 0.1)
         self.assertIn("messages", kwargs)
+
+    @patch("app.services.rag.generator.chatgpt_generator.OpenAI")
+    @patch("app.services.rag.generator.chatgpt_generator.settings")
+    @patch("app.services.rag.generator.chatgpt_generator.rag_config", {
+        "generator": {
+            "model_name": "gpt-test",
+            "system_prompt": "System prompt",
+        }
+    })
+    def test_generate_text_translates_openai_failures(
+        self,
+        mock_settings,
+        mock_openai,
+    ):
+        mock_settings.OPENAI_API_KEY = "fake-key"
+        mock_client = MagicMock()
+        mock_openai.return_value = mock_client
+        request = httpx.Request("POST", "https://api.openai.com")
+        gen = ChatGPTGenerator()
+
+        mock_client.chat.completions.create.side_effect = APITimeoutError(
+            request=request
+        )
+        with self.assertRaises(GenerationTimeoutError):
+            gen.generate_text("question", [])
+
+        mock_client.chat.completions.create.side_effect = APIConnectionError(
+            request=request
+        )
+        with self.assertRaises(GenerationUnavailableError):
+            gen.generate_text("question", [])
 
     @patch("app.services.rag.generator.chatgpt_generator.OpenAI")
     @patch("app.services.rag.generator.chatgpt_generator.settings")

@@ -1,12 +1,14 @@
+import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
-from psycopg2.pool import ThreadedConnectionPool
+from psycopg2.pool import PoolError, ThreadedConnectionPool
 from sentence_transformers import SentenceTransformer
 from typing import List, Optional
 
 from app.core.config import settings, rag_config
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
+from app.services.rag.errors import RetrievalUnavailableError
 from app.services.rag.retriever.base import BaseRetriever
 
 
@@ -102,7 +104,13 @@ class PGVectorRetriever(BaseRetriever):
             table=sql.Identifier(self.table_name)
         )
 
-        connection = self.pool.getconn()
+        try:
+            connection = self.pool.getconn()
+        except (psycopg2.Error, PoolError) as error:
+            raise RetrievalUnavailableError(
+                "Unable to acquire a database connection"
+            ) from error
+
         discard_connection = False
         try:
             with connection.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -117,6 +125,10 @@ class PGVectorRetriever(BaseRetriever):
                     ),
                 )
                 rows = cursor.fetchall()
+        except psycopg2.Error as error:
+            raise RetrievalUnavailableError(
+                "Knowledge-base query failed"
+            ) from error
         finally:
             try:
                 connection.rollback()

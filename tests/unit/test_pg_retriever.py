@@ -1,9 +1,12 @@
 import unittest
 from unittest.mock import patch, MagicMock
 import numpy as np
+from psycopg2 import OperationalError
+from psycopg2.pool import PoolError
 
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
+from app.services.rag.errors import RetrievalUnavailableError
 from app.services.rag.retriever.pg_retriever import PGVectorRetriever
 
 
@@ -281,6 +284,72 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
             retriever.search("student visa")
 
         mock_pool.putconn.assert_called_once_with(mock_conn, close=True)
+
+    @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
+    @patch("app.services.rag.retriever.pg_retriever.ThreadedConnectionPool")
+    @patch("app.services.rag.retriever.pg_retriever.rag_config", {
+        "retriever": {
+            "embedding_model": "fake-embedding-model",
+            "top_k": 5,
+        },
+        "pgvector": {
+            "table_name": "knowledge_base",
+        },
+    })
+    def test_search_translates_connection_pool_failure(
+        self,
+        mock_pool_class,
+        mock_st,
+    ):
+        mock_model = MagicMock()
+        mock_model.encode.return_value = np.array([[0.1, 0.2, 0.3]])
+        mock_st.return_value = mock_model
+        mock_pool = MagicMock()
+        mock_pool.getconn.side_effect = PoolError("pool exhausted")
+        mock_pool_class.return_value = mock_pool
+        retriever = PGVectorRetriever(
+            database_url="postgresql://test:test@localhost:5432/testdb"
+        )
+
+        with self.assertRaises(RetrievalUnavailableError):
+            retriever.search("student visa")
+
+    @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
+    @patch("app.services.rag.retriever.pg_retriever.ThreadedConnectionPool")
+    @patch("app.services.rag.retriever.pg_retriever.rag_config", {
+        "retriever": {
+            "embedding_model": "fake-embedding-model",
+            "top_k": 5,
+        },
+        "pgvector": {
+            "table_name": "knowledge_base",
+        },
+    })
+    def test_search_translates_database_query_failure(
+        self,
+        mock_pool_class,
+        mock_st,
+    ):
+        mock_model = MagicMock()
+        mock_model.encode.return_value = np.array([[0.1, 0.2, 0.3]])
+        mock_st.return_value = mock_model
+        mock_cursor = MagicMock()
+        mock_cursor.execute.side_effect = OperationalError("database lost")
+        mock_conn = MagicMock()
+        mock_conn.closed = 0
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+        mock_pool = MagicMock()
+        mock_pool.getconn.return_value = mock_conn
+        mock_pool_class.return_value = mock_pool
+        retriever = PGVectorRetriever(
+            database_url="postgresql://test:test@localhost:5432/testdb"
+        )
+
+        with self.assertRaises(RetrievalUnavailableError):
+            retriever.search("student visa")
+
+        mock_conn.rollback.assert_called_once_with()
+        mock_pool.putconn.assert_called_once_with(mock_conn, close=False)
 
     @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
     @patch("app.services.rag.retriever.pg_retriever.ThreadedConnectionPool")

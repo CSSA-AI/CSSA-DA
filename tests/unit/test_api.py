@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_rag_orchestrator
@@ -5,6 +6,11 @@ from app.main import app
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
 from app.services.readiness import ReadinessCheck
+from app.services.rag.errors import (
+    GenerationTimeoutError,
+    GenerationUnavailableError,
+    RetrievalUnavailableError,
+)
 from app.services.system_status import (
     PipelineMetadataStatus,
     SystemStatus,
@@ -28,6 +34,14 @@ class StubOrchestrator:
                 )
             ],
         )
+
+
+class FailingOrchestrator:
+    def __init__(self, error):
+        self.error = error
+
+    def run(self, query, **kwargs):
+        raise self.error
 
 
 def client() -> TestClient:
@@ -139,3 +153,42 @@ def test_chat_rejects_an_empty_message():
     response = client().post("/chat", json={"message": ""})
 
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("error", "status_code", "error_code"),
+    [
+        (
+            RetrievalUnavailableError("database URL must stay private"),
+            503,
+            "retrieval_unavailable",
+        ),
+        (
+            GenerationUnavailableError("provider details must stay private"),
+            503,
+            "generation_unavailable",
+        ),
+        (
+            GenerationTimeoutError("provider timeout details"),
+            504,
+            "generation_timeout",
+        ),
+    ],
+)
+def test_chat_returns_safe_service_errors(
+    error,
+    status_code,
+    error_code,
+):
+    app.dependency_overrides[get_rag_orchestrator] = lambda: (
+        FailingOrchestrator(error)
+    )
+
+    response = TestClient(app).post(
+        "/chat",
+        json={"message": "How do I enrol?"},
+    )
+
+    assert response.status_code == status_code
+    assert response.json()["error"]["code"] == error_code
+    assert str(error) not in response.text
