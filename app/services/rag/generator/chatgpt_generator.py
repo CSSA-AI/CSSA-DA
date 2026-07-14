@@ -4,13 +4,23 @@ from __future__ import annotations
 
 from typing import Iterable, List, Optional, Dict, Any
 
-from openai import OpenAI
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    InternalServerError,
+    OpenAI,
+    RateLimitError,
+)
 
 from app.core.config import settings, rag_config
 from app.schemas.search_result import SearchResult
 from app.services.rag.generator.base import BaseGenerator
 from app.services.rag.generator.context_formatter import (
     format_context_from_search_results,
+)
+from app.services.rag.errors import (
+    GenerationTimeoutError,
+    GenerationUnavailableError,
 )
 
 
@@ -29,6 +39,8 @@ class ChatGPTGenerator(BaseGenerator):
         model_name: Optional[str] = None,
         temperature: Optional[float] = None,
         api_key: Optional[str] = None,
+        max_retries: Optional[int] = None,
+        timeout_seconds: Optional[float] = None,
     ):
         cfg = rag_config["generator"]
 
@@ -36,11 +48,29 @@ class ChatGPTGenerator(BaseGenerator):
         if not api_key:
             raise ValueError("OPENAI_API_KEY is required for ChatGPTGenerator")
 
-        self.client = OpenAI(api_key=api_key)
-
         self.model_name = model_name or cfg["model_name"]
         self.temperature = temperature if temperature is not None else cfg.get("temperature", 0.3)
-        self.max_retries = cfg.get("max_retries", 2)
+        self.max_retries = (
+            max_retries
+            if max_retries is not None
+            else cfg.get("max_retries", 2)
+        )
+        self.timeout_seconds = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else cfg.get("timeout_seconds", 30.0)
+        )
+        if self.max_retries < 0:
+            raise ValueError("max_retries cannot be negative")
+        if self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be greater than zero")
+
+        self.client = OpenAI(
+            api_key=api_key,
+            max_retries=self.max_retries,
+            timeout=self.timeout_seconds,
+        )
+
         self.streaming = cfg.get("streaming", False)
 
         self.system_prompt = cfg["system_prompt"]
@@ -97,11 +127,24 @@ class ChatGPTGenerator(BaseGenerator):
             chat_history=chat_history,
         )
 
-        response = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            temperature=self.temperature,
-        )
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=self.temperature,
+            )
+        except APITimeoutError as error:
+            raise GenerationTimeoutError(
+                "OpenAI generation timed out"
+            ) from error
+        except (
+            APIConnectionError,
+            InternalServerError,
+            RateLimitError,
+        ) as error:
+            raise GenerationUnavailableError(
+                "OpenAI generation is unavailable"
+            ) from error
 
         return response.choices[0].message.content or ""
 
@@ -122,14 +165,27 @@ class ChatGPTGenerator(BaseGenerator):
             chat_history=chat_history,
         )
 
-        stream = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            temperature=self.temperature,
-            stream=True,
-        )
+        try:
+            stream = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=self.temperature,
+                stream=True,
+            )
 
-        for chunk in stream:
-            delta = chunk.choices[0].delta.content
-            if delta:
-                yield delta
+            for chunk in stream:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    yield delta
+        except APITimeoutError as error:
+            raise GenerationTimeoutError(
+                "OpenAI generation timed out"
+            ) from error
+        except (
+            APIConnectionError,
+            InternalServerError,
+            RateLimitError,
+        ) as error:
+            raise GenerationUnavailableError(
+                "OpenAI generation is unavailable"
+            ) from error

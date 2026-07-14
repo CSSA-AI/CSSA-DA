@@ -4,6 +4,7 @@ from datetime import date
 import numpy as np
 import psycopg2
 import pytest
+from psycopg2.pool import ThreadedConnectionPool
 
 from app.services.rag.retriever.pg_retriever import PGVectorRetriever
 from pipelines.loaders.postgres_knowledge_base import (
@@ -65,7 +66,11 @@ def test_wechat_transform_import_and_retrieve(test_database_url):
         )
 
     retriever = PGVectorRetriever.__new__(PGVectorRetriever)
-    retriever.conn = psycopg2.connect(test_database_url)
+    retriever.pool = ThreadedConnectionPool(
+        minconn=1,
+        maxconn=1,
+        dsn=test_database_url,
+    )
     retriever.table_name = "knowledge_base"
     retriever.model_name = EMBEDDING_MODEL
     retriever.model_revision = EMBEDDING_REVISION

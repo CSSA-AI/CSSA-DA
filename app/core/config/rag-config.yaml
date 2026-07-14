@@ -11,12 +11,15 @@ reranker:
 
 pgvector:
   table_name: knowledge_base
+  pool_min_size: 1
+  pool_max_size: 5
 
 generator:
   provider: openai
   model_name: gpt-4o-mini
   temperature: 0.3
   max_retries: 2
+  timeout_seconds: 30.0
   streaming: false
 
   system_prompt: |

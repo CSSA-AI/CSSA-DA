@@ -4,7 +4,13 @@ from ops import check_config
 
 
 def clear_env(monkeypatch):
-    for name in ("ENV", "DATABASE_URL", "OPENAI_API_KEY", "WECHAT_API_KEY"):
+    for name in (
+        "ENV",
+        "DATABASE_URL",
+        "OPENAI_API_KEY",
+        "CHAT_API_KEY",
+        "WECHAT_API_KEY",
+    ):
         monkeypatch.delenv(name, raising=False)
         monkeypatch.setattr(check_config.settings, name, None)
 
@@ -21,6 +27,8 @@ def test_api_profile_requires_database_and_openai(monkeypatch):
     assert variables["DATABASE_URL"].configured is True
     assert variables["OPENAI_API_KEY"].required is True
     assert variables["OPENAI_API_KEY"].configured is False
+    assert variables["CHAT_API_KEY"].required is True
+    assert variables["CHAT_API_KEY"].configured is False
     assert variables["WECHAT_API_KEY"].required is False
 
 
@@ -34,6 +42,7 @@ def test_pipeline_profile_only_requires_database(monkeypatch):
     variables = {item.name: item for item in status.variables}
     assert variables["DATABASE_URL"].required is True
     assert variables["OPENAI_API_KEY"].required is False
+    assert variables["CHAT_API_KEY"].required is False
     assert variables["WECHAT_API_KEY"].required is False
 
 
@@ -54,12 +63,14 @@ def test_all_profile_requires_every_external_service(monkeypatch):
     clear_env(monkeypatch)
     monkeypatch.setenv("DATABASE_URL", "postgresql://example")
     monkeypatch.setenv("OPENAI_API_KEY", "secret-openai-key")
+    monkeypatch.setenv("CHAT_API_KEY", "secret-chat-key")
     monkeypatch.setenv("WECHAT_API_KEY", "secret-wechat-key")
 
     status = check_config.check_config("all")
 
     assert status.ok is True
     assert "secret-openai-key" not in str(status.to_dict())
+    assert "secret-chat-key" not in str(status.to_dict())
     assert "secret-wechat-key" not in str(status.to_dict())
 
 

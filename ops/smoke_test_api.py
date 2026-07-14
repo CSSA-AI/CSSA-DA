@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -10,15 +11,21 @@ def request_json(
     url: str,
     *,
     payload: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
     timeout: float = 30,
 ) -> dict[str, Any]:
     body = None
-    headers = {"Accept": "application/json"}
+    request_headers = {"Accept": "application/json", **(headers or {})}
     if payload is not None:
         body = json.dumps(payload).encode("utf-8")
-        headers["Content-Type"] = "application/json"
+        request_headers["Content-Type"] = "application/json"
 
-    request = Request(url, data=body, headers=headers, method=method)
+    request = Request(
+        url,
+        data=body,
+        headers=request_headers,
+        method=method,
+    )
 
     try:
         with urlopen(request, timeout=timeout) as response:
@@ -45,6 +52,7 @@ def smoke_test_api(
     rerank_top_k: int = 3,
     health_only: bool = False,
     ready_only: bool = False,
+    api_key: str | None = None,
     timeout: float = 30,
 ) -> int:
     base_url = base_url.rstrip("/")
@@ -83,6 +91,7 @@ def smoke_test_api(
             "top_k": top_k,
             "rerank_top_k": rerank_top_k,
         },
+        headers={"X-API-Key": api_key} if api_key else None,
         timeout=timeout,
     )
     print(f"Answer length: {len(chat.get('answer', ''))}")
@@ -136,6 +145,11 @@ def main() -> int:
         help="Check GET /health and GET /ready without calling /chat.",
     )
     parser.add_argument(
+        "--api-key",
+        default=os.getenv("CHAT_API_KEY"),
+        help="Internal chat API key. Defaults to CHAT_API_KEY.",
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
         default=30,
@@ -151,6 +165,7 @@ def main() -> int:
             rerank_top_k=args.rerank_top_k,
             health_only=args.health_only,
             ready_only=args.ready_only,
+            api_key=args.api_key,
             timeout=args.timeout,
         )
     except RuntimeError as error:

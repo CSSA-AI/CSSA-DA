@@ -51,6 +51,7 @@ services:
     environment:
       ENV: ${ENV:-dev}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CHAT_API_KEY: ${CHAT_API_KEY:-}
       DATABASE_URL: postgresql://rag_user:rag_password@postgres:5432/rag_vectordb
     volumes:
       - huggingface_cache:/root/.cache/huggingface
@@ -109,6 +110,7 @@ services:
     environment:
       ENV: ${ENV:-dev}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CHAT_API_KEY: ${CHAT_API_KEY:-}
       DATABASE_URL: postgresql://rag_user:rag_password@postgres:5432/rag_vectordb
     volumes:
       - huggingface_cache:/root/.cache/huggingface
