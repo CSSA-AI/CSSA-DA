@@ -20,6 +20,8 @@ docker compose --profile gpu up --build
 Open:
 
 - API health: <http://localhost:8000/health>
+- API readiness: <http://localhost:8000/ready>
+- API/data status: <http://localhost:8000/status>
 - Interactive API docs: <http://localhost:8000/docs>
 
 The `cpu` and `gpu` profiles run the `migrate-cpu` service before starting the

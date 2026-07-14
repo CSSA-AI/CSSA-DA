@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import get_rag_orchestrator
 from app.schemas.search_result import SearchResult
 from app.services.readiness import check_readiness
+from app.services.system_status import get_system_status
 from app.services.rag.orchestrator import RAGOrchestrator
 
 
@@ -50,6 +51,11 @@ def ready() -> JSONResponse:
         status_code=200 if readiness.is_ready else 503,
         content=readiness.to_dict(),
     )
+
+
+@app.get("/status", tags=["system"])
+def status() -> dict:
+    return get_system_status().to_dict()
 
 
 @app.post("/chat", response_model=ChatResponse, tags=["chat"])

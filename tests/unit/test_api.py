@@ -5,6 +5,10 @@ from app.main import app
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
 from app.services.readiness import ReadinessCheck
+from app.services.system_status import (
+    PipelineMetadataStatus,
+    SystemStatus,
+)
 
 
 class StubOrchestrator:
@@ -80,6 +84,37 @@ def test_ready_returns_503_when_database_or_data_are_not_ready(monkeypatch):
     assert response.status_code == 503
     assert response.json()["status"] == "not_ready"
     assert response.json()["reason"] == "knowledge_base has no rows"
+
+
+def test_status_reports_readiness_and_pipeline_metadata(monkeypatch):
+    monkeypatch.setattr(
+        "app.main.get_system_status",
+        lambda: SystemStatus(
+            api="ok",
+            rag_ready=True,
+            readiness=ReadinessCheck(
+                status="ready",
+                database="ok",
+                knowledge_base_rows=3,
+                embedding_model="test-model",
+                embedding_revision="revision-123",
+            ),
+            pipeline_metadata=PipelineMetadataStatus(
+                latest_run=None,
+            ),
+        ),
+    )
+
+    response = client().get("/status")
+
+    assert response.status_code == 200
+    assert response.json()["api"] == "ok"
+    assert response.json()["rag_ready"] is True
+    assert response.json()["readiness"]["status"] == "ready"
+    assert response.json()["pipeline_metadata"] == {
+        "available": True,
+        "latest_run": None,
+    }
 
 
 def test_chat_returns_answer_and_sources():

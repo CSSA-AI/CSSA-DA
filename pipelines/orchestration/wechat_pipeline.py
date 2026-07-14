@@ -4,10 +4,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 from pipelines.ingestion.wechat import WechatHarvesterConfig
+from pipelines.loaders.postgres_pipeline_runs import PipelineRunRecord
 from pipelines.orchestration.harvest_wechat import run_local_harvest
 from pipelines.orchestration.import_knowledge_base import run_local_import
 from pipelines.orchestration.transform_wechat import run_local_transform
@@ -21,6 +22,10 @@ from pipelines.shared.reports import write_json_report
 
 
 logger = logging.getLogger(__name__)
+
+
+class PipelineRunMetadataLoader(Protocol):
+    def upsert_run(self, record: PipelineRunRecord) -> int: ...
 
 
 @dataclass(frozen=True)
@@ -53,6 +58,7 @@ def run_local_wechat_pipeline(
     batch_size: int = 100,
     import_checkpoint_file: Path | None = None,
     reset_import_checkpoint: bool = False,
+    pipeline_run_loader: PipelineRunMetadataLoader | None = None,
     run_id: str | None = None,
 ) -> WechatPipelineRunResult:
     run_id = run_id or str(uuid4())
@@ -77,6 +83,16 @@ def run_local_wechat_pipeline(
         logger.info(
             "WeChat pipeline started",
             extra={"event": "pipeline_started"},
+        )
+        _upsert_pipeline_run_metadata(
+            pipeline_run_loader,
+            PipelineRunRecord(
+                id=run_id,
+                pipeline_name="wechat",
+                status="started",
+                started_at=run_started_at,
+                input_path=str(raw_output_file),
+            ),
         )
 
         try:
@@ -122,13 +138,29 @@ def run_local_wechat_pipeline(
                 },
             )
         except Exception as error:
-            _write_wechat_pipeline_report(
+            finished_at = datetime.now(timezone.utc)
+            report_file = _write_wechat_pipeline_report(
                 data_dir=data_dir,
                 run_id=run_id,
                 status="failed",
                 started_at=run_started_at,
-                finished_at=datetime.now(timezone.utc),
+                finished_at=finished_at,
                 error=error,
+            )
+            _upsert_pipeline_run_metadata(
+                pipeline_run_loader,
+                PipelineRunRecord(
+                    id=run_id,
+                    pipeline_name="wechat",
+                    status="failed",
+                    started_at=run_started_at,
+                    finished_at=finished_at,
+                    input_path=str(raw_output_file),
+                    output_path=str(processed_output_file),
+                    report_path=str(report_file),
+                    error_type=type(error).__name__,
+                    error_message=str(error),
+                ),
             )
             raise
 
@@ -143,15 +175,31 @@ def run_local_wechat_pipeline(
             raw_output_location=harvest_result.output_location,
             processed_output_file=processed_output_file,
         )
+        finished_at = datetime.now(timezone.utc)
         report_file = _write_wechat_pipeline_report(
             data_dir=data_dir,
             run_id=run_id,
             status="completed",
             started_at=run_started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=finished_at,
             result=result,
         )
         result = replace(result, report_file=report_file)
+        _upsert_pipeline_run_metadata(
+            pipeline_run_loader,
+            PipelineRunRecord(
+                id=run_id,
+                pipeline_name="wechat",
+                status="completed",
+                started_at=run_started_at,
+                finished_at=finished_at,
+                input_path=str(raw_output_file),
+                output_path=str(processed_output_file),
+                report_path=str(report_file),
+                record_count=result.transformed_count,
+                affected_count=result.affected_count,
+            ),
+        )
         logger.info(
             "WeChat pipeline completed",
             extra={
@@ -165,6 +213,15 @@ def run_local_wechat_pipeline(
             },
         )
         return result
+
+
+def _upsert_pipeline_run_metadata(
+    loader: PipelineRunMetadataLoader | None,
+    record: PipelineRunRecord,
+) -> None:
+    if loader is None:
+        return
+    loader.upsert_run(record)
 
 
 def _pipeline_reports_dir(data_dir: Path) -> Path:

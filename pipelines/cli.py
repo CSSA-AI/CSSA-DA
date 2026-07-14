@@ -183,6 +183,9 @@ def _run_command(
             },
         )
     elif args.command == "run-wechat-pipeline":
+        from pipelines.loaders.postgres_pipeline_runs import (
+            PostgresPipelineRunLoader,
+        )
         from pipelines.orchestration.wechat_pipeline import (
             run_local_wechat_pipeline,
         )
@@ -196,6 +199,9 @@ def _run_command(
             database_url=args.database_url,
             batch_size=args.batch_size,
             reset_import_checkpoint=args.reset_import_checkpoint,
+            pipeline_run_loader=PostgresPipelineRunLoader(
+                args.database_url
+            ),
             run_id=run_id,
         )
         logger.info(

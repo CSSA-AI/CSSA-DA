@@ -83,7 +83,11 @@ def test_import_knowledge_base_command(mock_run_local_import):
 @patch(
     "pipelines.orchestration.wechat_pipeline.run_local_wechat_pipeline"
 )
-def test_run_wechat_pipeline_command(mock_run_pipeline):
+@patch("pipelines.loaders.postgres_pipeline_runs.PostgresPipelineRunLoader")
+def test_run_wechat_pipeline_command(
+    mock_pipeline_run_loader_class,
+    mock_run_pipeline,
+):
     mock_run_pipeline.return_value = WechatPipelineRunResult(
         run_id="run-123",
         harvested_count=12,
@@ -108,11 +112,17 @@ def test_run_wechat_pipeline_command(mock_run_pipeline):
     )
 
     assert exit_code == 0
+    mock_pipeline_run_loader_class.assert_called_once_with(
+        "postgresql://test:test@localhost:5432/testdb"
+    )
     mock_run_pipeline.assert_called_once_with(
         database_url=(
             "postgresql://test:test@localhost:5432/testdb"
         ),
         batch_size=100,
         reset_import_checkpoint=True,
+        pipeline_run_loader=(
+            mock_pipeline_run_loader_class.return_value
+        ),
         run_id=ANY,
     )
