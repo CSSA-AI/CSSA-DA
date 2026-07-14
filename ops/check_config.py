@@ -14,10 +14,15 @@ from app.core.config import rag_config, settings
 
 
 PROFILE_REQUIREMENTS = {
-    "api": ("DATABASE_URL", "OPENAI_API_KEY"),
+    "api": ("DATABASE_URL", "OPENAI_API_KEY", "CHAT_API_KEY"),
     "pipeline": ("DATABASE_URL",),
     "harvester": ("WECHAT_API_KEY",),
-    "all": ("DATABASE_URL", "OPENAI_API_KEY", "WECHAT_API_KEY"),
+    "all": (
+        "DATABASE_URL",
+        "OPENAI_API_KEY",
+        "CHAT_API_KEY",
+        "WECHAT_API_KEY",
+    ),
 }
 
 
@@ -56,7 +61,13 @@ def check_config(profile: str = "all") -> ConfigStatus:
         raise ValueError(f"profile must be one of: {valid_profiles}")
 
     required_names = set(PROFILE_REQUIREMENTS[profile])
-    known_names = ("ENV", "DATABASE_URL", "OPENAI_API_KEY", "WECHAT_API_KEY")
+    known_names = (
+        "ENV",
+        "DATABASE_URL",
+        "OPENAI_API_KEY",
+        "CHAT_API_KEY",
+        "WECHAT_API_KEY",
+    )
     variables = [
         EnvVarStatus(
             name=name,

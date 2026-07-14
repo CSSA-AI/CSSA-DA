@@ -1,7 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_rag_orchestrator
+from app.api.deps import get_rag_orchestrator, require_internal_api_key
+from app.core.config import settings
 from app.main import app
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
@@ -46,7 +47,15 @@ class FailingOrchestrator:
 
 def client() -> TestClient:
     app.dependency_overrides[get_rag_orchestrator] = lambda: StubOrchestrator()
+    app.dependency_overrides[require_internal_api_key] = lambda: None
     return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def clear_dependency_overrides():
+    app.dependency_overrides.clear()
+    yield
+    app.dependency_overrides.clear()
 
 
 def test_health():
@@ -155,6 +164,66 @@ def test_chat_rejects_an_empty_message():
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize("provided_api_key", [None, "wrong-key"])
+def test_chat_rejects_invalid_or_missing_api_key(
+    monkeypatch,
+    provided_api_key,
+):
+    monkeypatch.setattr(settings, "CHAT_API_KEY", "expected-key")
+    app.dependency_overrides[get_rag_orchestrator] = lambda: StubOrchestrator()
+    headers = (
+        {"X-API-Key": provided_api_key}
+        if provided_api_key is not None
+        else {}
+    )
+
+    response = TestClient(app).post(
+        "/chat",
+        headers=headers,
+        json={"message": "How do I enrol?"},
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid or missing API key"}
+
+
+def test_chat_returns_503_when_api_key_is_not_configured(monkeypatch):
+    monkeypatch.setattr(settings, "CHAT_API_KEY", None)
+    app.dependency_overrides[get_rag_orchestrator] = lambda: StubOrchestrator()
+
+    response = TestClient(app).post(
+        "/chat",
+        headers={"X-API-Key": "any-key"},
+        json={"message": "How do I enrol?"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "API authentication is not configured"
+    }
+
+
+def test_chat_accepts_configured_api_key(monkeypatch):
+    monkeypatch.setattr(settings, "CHAT_API_KEY", "expected-key")
+    app.dependency_overrides[get_rag_orchestrator] = lambda: StubOrchestrator()
+
+    response = TestClient(app).post(
+        "/chat",
+        headers={"X-API-Key": "expected-key"},
+        json={"message": "How do I enrol?"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_status_requires_api_key(monkeypatch):
+    monkeypatch.setattr(settings, "CHAT_API_KEY", "expected-key")
+
+    response = TestClient(app).get("/status")
+
+    assert response.status_code == 401
+
+
 @pytest.mark.parametrize(
     ("error", "status_code", "error_code"),
     [
@@ -183,6 +252,7 @@ def test_chat_returns_safe_service_errors(
     app.dependency_overrides[get_rag_orchestrator] = lambda: (
         FailingOrchestrator(error)
     )
+    app.dependency_overrides[require_internal_api_key] = lambda: None
 
     response = TestClient(app).post(
         "/chat",

@@ -4,8 +4,15 @@ from ops.smoke_test_api import smoke_test_api
 def test_smoke_test_api_checks_health_and_chat(monkeypatch):
     calls = []
 
-    def fake_request_json(method, url, *, payload=None, timeout=30):
-        calls.append((method, url, payload, timeout))
+    def fake_request_json(
+        method,
+        url,
+        *,
+        payload=None,
+        headers=None,
+        timeout=30,
+    ):
+        calls.append((method, url, payload, headers, timeout))
         if url.endswith("/health"):
             return {"status": "ok"}
         if url.endswith("/ready"):
@@ -25,13 +32,14 @@ def test_smoke_test_api_checks_health_and_chat(monkeypatch):
         message="墨尔本 校招",
         top_k=2,
         rerank_top_k=1,
+        api_key="test-chat-key",
         timeout=5,
     )
 
     assert exit_code == 0
     assert calls == [
-        ("GET", "http://localhost:8000/health", None, 5),
-        ("GET", "http://localhost:8000/ready", None, 5),
+        ("GET", "http://localhost:8000/health", None, None, 5),
+        ("GET", "http://localhost:8000/ready", None, None, 5),
         (
             "POST",
             "http://localhost:8000/chat",
@@ -40,6 +48,7 @@ def test_smoke_test_api_checks_health_and_chat(monkeypatch):
                 "top_k": 2,
                 "rerank_top_k": 1,
             },
+            {"X-API-Key": "test-chat-key"},
             5,
         ),
     ]
@@ -48,7 +57,9 @@ def test_smoke_test_api_checks_health_and_chat(monkeypatch):
 def test_smoke_test_api_can_check_health_only(monkeypatch):
     calls = []
 
-    def fake_request_json(method, url, *, payload=None, timeout=30):
+    def fake_request_json(
+        method, url, *, payload=None, headers=None, timeout=30
+    ):
         calls.append((method, url))
         return {"status": "ok"}
 
@@ -70,7 +81,9 @@ def test_smoke_test_api_can_check_health_only(monkeypatch):
 def test_smoke_test_api_can_check_ready_only(monkeypatch):
     calls = []
 
-    def fake_request_json(method, url, *, payload=None, timeout=30):
+    def fake_request_json(
+        method, url, *, payload=None, headers=None, timeout=30
+    ):
         calls.append((method, url))
         if url.endswith("/health"):
             return {"status": "ok"}
@@ -95,7 +108,9 @@ def test_smoke_test_api_can_check_ready_only(monkeypatch):
 
 
 def test_smoke_test_api_fails_when_not_ready(monkeypatch):
-    def fake_request_json(method, url, *, payload=None, timeout=30):
+    def fake_request_json(
+        method, url, *, payload=None, headers=None, timeout=30
+    ):
         if url.endswith("/health"):
             return {"status": "ok"}
         return {"status": "not_ready", "reason": "no rows"}
@@ -114,7 +129,9 @@ def test_smoke_test_api_fails_when_not_ready(monkeypatch):
 
 
 def test_smoke_test_api_fails_without_sources(monkeypatch):
-    def fake_request_json(method, url, *, payload=None, timeout=30):
+    def fake_request_json(
+        method, url, *, payload=None, headers=None, timeout=30
+    ):
         if url.endswith("/health"):
             return {"status": "ok"}
         if url.endswith("/ready"):

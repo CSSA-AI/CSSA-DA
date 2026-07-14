@@ -6,7 +6,11 @@ from fastapi import Depends, FastAPI, Request, status as http_status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from app.api.deps import close_rag_orchestrator, get_rag_orchestrator
+from app.api.deps import (
+    close_rag_orchestrator,
+    get_rag_orchestrator,
+    require_internal_api_key,
+)
 from app.schemas.search_result import SearchResult
 from app.services.readiness import check_readiness
 from app.services.system_status import get_system_status
@@ -125,13 +129,16 @@ def ready() -> JSONResponse:
 
 
 @app.get("/status", tags=["system"])
-def status() -> dict:
+def status(
+    _: Annotated[None, Depends(require_internal_api_key)],
+) -> dict:
     return get_system_status().to_dict()
 
 
 @app.post("/chat", response_model=ChatResponse, tags=["chat"])
 def chat(
     request: ChatRequest,
+    _: Annotated[None, Depends(require_internal_api_key)],
     orchestrator: Annotated[RAGOrchestrator, Depends(get_rag_orchestrator)],
 ) -> ChatResponse:
     answer, sources = orchestrator.run(

@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     ENV: str = "dev"
 
     OPENAI_API_KEY: str | None = None
+    CHAT_API_KEY: str | None = None
     WECHAT_API_KEY: str | None = None
     DATABASE_URL: str | None = None
 
