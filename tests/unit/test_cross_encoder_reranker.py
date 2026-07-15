@@ -1,12 +1,19 @@
 import unittest
 from unittest.mock import patch, MagicMock
 
+from app.core.config import rag_config
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
 from app.services.rag.reranker.cross_encoder_reranker import CrossEncoderReranker
 
 
 class TestCrossEncoderRerankerUnit(unittest.TestCase):
+    def test_default_config_pins_model_revision(self):
+        self.assertEqual(
+            rag_config["reranker"]["model_revision"],
+            "7b0235231ca2674cb8ca8f022859a6eba2b1c968",
+        )
+
     def setUp(self):
         self.search_results = [
             SearchResult(
@@ -29,6 +36,7 @@ class TestCrossEncoderRerankerUnit(unittest.TestCase):
     @patch("app.services.rag.reranker.cross_encoder_reranker.rag_config", {
         "reranker": {
             "model_name": "fake-cross-encoder",
+            "model_revision": "fake-revision",
             "top_k": 2,
             "adapter_path": None,
         }
@@ -38,7 +46,10 @@ class TestCrossEncoderRerankerUnit(unittest.TestCase):
         reranker = CrossEncoderReranker()
 
         self.assertIsNotNone(reranker.model)
-        mock_cross_encoder.assert_called_once_with("fake-cross-encoder")
+        mock_cross_encoder.assert_called_once_with(
+            "fake-cross-encoder",
+            revision="fake-revision",
+        )
 
     @patch("app.services.rag.reranker.cross_encoder_reranker.rag_config", {
         "reranker": {
@@ -52,6 +63,23 @@ class TestCrossEncoderRerankerUnit(unittest.TestCase):
         reranker = CrossEncoderReranker(model_name="manual-cross-encoder")
 
         mock_cross_encoder.assert_called_once_with("manual-cross-encoder")
+
+    @patch("app.services.rag.reranker.cross_encoder_reranker.rag_config", {
+        "reranker": {
+            "model_name": "fake-cross-encoder",
+            "model_revision": "fake-revision",
+            "top_k": 2,
+            "adapter_path": None,
+        }
+    })
+    @patch("app.services.rag.reranker.cross_encoder_reranker.CrossEncoder")
+    def test_init_allows_manual_revision_override(self, mock_cross_encoder):
+        CrossEncoderReranker(model_revision="manual-revision")
+
+        mock_cross_encoder.assert_called_once_with(
+            "fake-cross-encoder",
+            revision="manual-revision",
+        )
 
     @patch("app.services.rag.reranker.cross_encoder_reranker.rag_config", {
         "reranker": {

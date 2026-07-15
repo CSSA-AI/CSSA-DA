@@ -11,16 +11,21 @@ class CrossEncoderReranker(BaseReranker):
     def __init__(
         self,
         model_name: Optional[str] = None,
+        model_revision: Optional[str] = None,
         adapter_path: Optional[str] = None,
     ):
         reranker_config = rag_config["reranker"]
 
-        model_name = model_name or reranker_config["model_name"]
+        if model_name is None:
+            model_name = reranker_config["model_name"]
+            model_revision = model_revision or reranker_config.get("model_revision")
+
         adapter_path = adapter_path or reranker_config.get("adapter_path")
 
         super().__init__()
 
-        self.model = CrossEncoder(model_name)
+        model_kwargs = {"revision": model_revision} if model_revision else {}
+        self.model = CrossEncoder(model_name, **model_kwargs)
 
         # LoRA adapter（可选）
         if adapter_path:
