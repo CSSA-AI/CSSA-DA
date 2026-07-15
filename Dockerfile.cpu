@@ -15,6 +15,15 @@ RUN conda env create -f environment_cpu.yml
 
 ENV PATH=/opt/conda/envs/cssa-ai/bin:$PATH
 
+# Download pinned model artifacts in a cacheable image layer.
+COPY ops/__init__.py ops/download_models.py ./ops/
+COPY app/core/__init__.py ./app/core/
+COPY app/core/config ./app/core/config
+RUN --mount=type=cache,target=/root/.cache/huggingface \
+    python ops/download_models.py --target-dir /models
+
+ENV MODEL_DIR=/models
+
 # 复制你的所有代码
 COPY . .
 
