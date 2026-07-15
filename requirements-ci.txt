@@ -16,6 +16,7 @@ pgvector
 numpy
 torch
 sentence-transformers
+huggingface-hub
 peft
 
 # LangChain（generator 测试）

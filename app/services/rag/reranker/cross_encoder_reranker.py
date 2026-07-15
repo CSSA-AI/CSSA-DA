@@ -2,7 +2,7 @@ from typing import List, Optional
 from sentence_transformers import CrossEncoder
 from peft import PeftModel
 
-from app.core.config import rag_config
+from app.core.config import rag_config, settings
 from app.schemas.search_result import SearchResult
 from .base import BaseReranker
 
@@ -11,16 +11,32 @@ class CrossEncoderReranker(BaseReranker):
     def __init__(
         self,
         model_name: Optional[str] = None,
+        model_revision: Optional[str] = None,
         adapter_path: Optional[str] = None,
     ):
         reranker_config = rag_config["reranker"]
 
-        model_name = model_name or reranker_config["model_name"]
+        uses_configured_model = model_name is None
+        if uses_configured_model:
+            model_name = reranker_config["model_name"]
+            model_revision = model_revision or reranker_config.get("model_revision")
+
         adapter_path = adapter_path or reranker_config.get("adapter_path")
 
         super().__init__()
 
-        self.model = CrossEncoder(model_name)
+        local_model_path = (
+            settings.local_model_path("reranker")
+            if uses_configured_model
+            else None
+        )
+        model_source = str(local_model_path) if local_model_path else model_name
+        model_kwargs = {}
+        if local_model_path:
+            model_kwargs["local_files_only"] = True
+        elif model_revision:
+            model_kwargs["revision"] = model_revision
+        self.model = CrossEncoder(model_source, **model_kwargs)
 
         # LoRA adapter（可选）
         if adapter_path:

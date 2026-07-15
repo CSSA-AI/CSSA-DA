@@ -30,6 +30,7 @@ dependencies:
   - pip:
       # --- RAG 核心组件 ---
       - sentence_transformers    # Embedding 模型
+      - huggingface_hub          # Model artifact downloads
       - rank-bm25==0.2.2         # 关键词检索 (BM25)
       - accelerate==1.6.0        # 模型加速
       - peft                     # [新增] 你的 Reranker 代码用到了 LoRA 微调加载

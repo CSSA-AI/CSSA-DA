@@ -23,6 +23,7 @@ coverage.xml
 htmlcov
 
 tests
+models
 *.ipynb
 *.log
 
