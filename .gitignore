@@ -18,6 +18,9 @@ cssa-ci/
 /data/import_checkpoint.json
 /data/import_checkpoint.json.tmp
 
+# Local model artifacts
+/models/
+
 # Tool caches and coverage
 .ruff_cache/
 .mypy_cache/
