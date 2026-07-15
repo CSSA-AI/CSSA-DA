@@ -26,6 +26,7 @@ class PGVectorRetriever(BaseRetriever):
         pgvector_config = rag_config["pgvector"]
 
         configured_model_name = retriever_config["embedding_model"]
+        uses_configured_model = model_name is None
         model_name = model_name or configured_model_name
         if (
             model_revision is None
@@ -49,6 +50,11 @@ class PGVectorRetriever(BaseRetriever):
             raise ValueError(
                 "pool_max_size must be greater than or equal to pool_min_size"
             )
+        local_model_path = (
+            settings.local_model_path("embedding")
+            if uses_configured_model
+            else None
+        )
 
         super().__init__(
             model_name=model_name,
@@ -61,13 +67,18 @@ class PGVectorRetriever(BaseRetriever):
             maxconn=pool_max_size,
             dsn=database_url,
         )
-        model_kwargs = (
-            {"revision": self.model_revision}
-            if self.model_revision
-            else {}
+        model_source = (
+            str(local_model_path)
+            if local_model_path
+            else self.model_name
         )
+        model_kwargs = {}
+        if local_model_path:
+            model_kwargs["local_files_only"] = True
+        elif self.model_revision:
+            model_kwargs["revision"] = self.model_revision
         self.model = SentenceTransformer(
-            self.model_name,
+            model_source,
             **model_kwargs,
         )
 

@@ -1,13 +1,41 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch, MagicMock
 
-from app.core.config import rag_config
+from app.core.config import rag_config, settings
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
 from app.services.rag.reranker.cross_encoder_reranker import CrossEncoderReranker
 
 
 class TestCrossEncoderRerankerUnit(unittest.TestCase):
+    @patch("app.services.rag.reranker.cross_encoder_reranker.rag_config", {
+        "reranker": {
+            "model_name": "fake-cross-encoder",
+            "model_revision": "fake-revision",
+            "top_k": 2,
+            "adapter_path": None,
+        }
+    })
+    @patch("app.services.rag.reranker.cross_encoder_reranker.CrossEncoder")
+    def test_init_loads_configured_model_from_local_directory(
+        self,
+        mock_cross_encoder,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            model_dir = Path(temp_dir)
+            reranker_dir = model_dir / "reranker"
+            reranker_dir.mkdir()
+
+            with patch.object(settings, "MODEL_DIR", model_dir):
+                CrossEncoderReranker()
+
+        mock_cross_encoder.assert_called_once_with(
+            str(reranker_dir.resolve()),
+            local_files_only=True,
+        )
+
     def test_default_config_pins_model_revision(self):
         self.assertEqual(
             rag_config["reranker"]["model_revision"],

@@ -22,6 +22,17 @@ class Settings(BaseSettings):
     CHAT_API_KEY: str | None = None
     WECHAT_API_KEY: str | None = None
     DATABASE_URL: str | None = None
+    MODEL_DIR: Path | None = None
+
+    def local_model_path(self, model_name: str) -> Path | None:
+        if self.MODEL_DIR is None:
+            return None
+
+        model_path = (self.MODEL_DIR / model_name).resolve()
+        if not model_path.is_dir():
+            raise FileNotFoundError(f"Local model directory not found: {model_path}")
+
+        return model_path
 
 
 def load_yaml_config(path: Path = RAG_CONFIG_PATH) -> dict[str, Any]:

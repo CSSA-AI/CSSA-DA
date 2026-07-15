@@ -1,9 +1,12 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch, MagicMock
 import numpy as np
 from psycopg2 import OperationalError
 from psycopg2.pool import PoolError
 
+from app.core.config import settings
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
 from app.services.rag.errors import RetrievalUnavailableError
@@ -11,6 +14,41 @@ from app.services.rag.retriever.pg_retriever import PGVectorRetriever
 
 
 class TestPGVectorRetrieverUnit(unittest.TestCase):
+
+    @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
+    @patch("app.services.rag.retriever.pg_retriever.ThreadedConnectionPool")
+    @patch("app.services.rag.retriever.pg_retriever.rag_config", {
+        "retriever": {
+            "embedding_model": "fake-embedding-model",
+            "embedding_revision": "revision-123",
+            "top_k": 5,
+        },
+        "pgvector": {
+            "table_name": "knowledge_base",
+        },
+    })
+    def test_init_loads_configured_model_from_local_directory(
+        self,
+        mock_pool_class,
+        mock_st,
+    ):
+        with TemporaryDirectory() as temp_dir:
+            model_dir = Path(temp_dir)
+            embedding_dir = model_dir / "embedding"
+            embedding_dir.mkdir()
+
+            with patch.object(settings, "MODEL_DIR", model_dir):
+                retriever = PGVectorRetriever(
+                    database_url="postgresql://test:test@localhost:5432/testdb"
+                )
+
+        self.assertEqual(retriever.model_name, "fake-embedding-model")
+        self.assertEqual(retriever.model_revision, "revision-123")
+        mock_st.assert_called_once_with(
+            str(embedding_dir.resolve()),
+            local_files_only=True,
+        )
+
 
     @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
     @patch("app.services.rag.retriever.pg_retriever.ThreadedConnectionPool")
