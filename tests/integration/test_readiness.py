@@ -5,6 +5,8 @@ import pytest
 from psycopg2.extras import Json
 
 from app.core.config import rag_config
+from app.services import readiness
+from app.services.rag.model_registry import ModelRegistryStatus
 from app.services.readiness import check_readiness
 
 
@@ -26,8 +28,17 @@ def test_readiness_reports_not_ready_when_knowledge_base_is_empty(
 
 def test_readiness_reports_ready_for_active_embedding_provenance(
     test_database_url,
+    monkeypatch,
 ):
     retriever_config = rag_config["retriever"]
+    monkeypatch.setattr(
+        readiness.model_registry,
+        "status",
+        lambda: ModelRegistryStatus(
+            embedding="ready",
+            reranker="ready",
+        ),
+    )
 
     with psycopg2.connect(test_database_url) as conn:
         with conn.cursor() as cur:
