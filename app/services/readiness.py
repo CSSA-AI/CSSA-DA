@@ -5,6 +5,10 @@ import psycopg2
 from psycopg2 import sql
 
 from app.core.config import rag_config, settings
+from app.services.rag.model_registry import (
+    ModelRegistryStatus,
+    model_registry,
+)
 
 
 @dataclass(frozen=True)
@@ -14,6 +18,7 @@ class ReadinessCheck:
     knowledge_base_rows: int
     embedding_model: str
     embedding_revision: str | None
+    models: ModelRegistryStatus
     reason: str | None = None
 
     @property
@@ -27,6 +32,7 @@ class ReadinessCheck:
             "knowledge_base_rows": self.knowledge_base_rows,
             "embedding_model": self.embedding_model,
             "embedding_revision": self.embedding_revision,
+            "models": self.models.to_dict(),
         }
         if self.reason:
             payload["reason"] = self.reason
@@ -40,6 +46,7 @@ def check_readiness(database_url: str | None = None) -> ReadinessCheck:
     embedding_revision = retriever_config.get("embedding_revision")
     table_name = pgvector_config["table_name"]
     database_url = database_url or settings.DATABASE_URL
+    model_status = model_registry.status()
 
     if not database_url:
         return ReadinessCheck(
@@ -48,6 +55,7 @@ def check_readiness(database_url: str | None = None) -> ReadinessCheck:
             knowledge_base_rows=0,
             embedding_model=embedding_model,
             embedding_revision=embedding_revision,
+            models=model_status,
             reason="DATABASE_URL is not configured",
         )
 
@@ -63,6 +71,7 @@ def check_readiness(database_url: str | None = None) -> ReadinessCheck:
                         knowledge_base_rows=0,
                         embedding_model=embedding_model,
                         embedding_revision=embedding_revision,
+                        models=model_status,
                         reason=f"{table_name} table does not exist",
                     )
 
@@ -83,6 +92,7 @@ def check_readiness(database_url: str | None = None) -> ReadinessCheck:
             knowledge_base_rows=0,
             embedding_model=embedding_model,
             embedding_revision=embedding_revision,
+            models=model_status,
             reason=str(error),
         )
 
@@ -93,10 +103,22 @@ def check_readiness(database_url: str | None = None) -> ReadinessCheck:
             knowledge_base_rows=0,
             embedding_model=embedding_model,
             embedding_revision=embedding_revision,
+            models=model_status,
             reason=(
                 "knowledge_base has no rows for the active embedding "
                 "model/revision"
             ),
+        )
+
+    if not model_status.is_ready:
+        return ReadinessCheck(
+            status="not_ready",
+            database="ok",
+            knowledge_base_rows=row_count,
+            embedding_model=embedding_model,
+            embedding_revision=embedding_revision,
+            models=model_status,
+            reason="RAG models are not ready",
         )
 
     return ReadinessCheck(
@@ -105,4 +127,5 @@ def check_readiness(database_url: str | None = None) -> ReadinessCheck:
         knowledge_base_rows=row_count,
         embedding_model=embedding_model,
         embedding_revision=embedding_revision,
+        models=model_status,
     )

@@ -45,6 +45,55 @@ def test_reranker_model_is_loaded_once(monkeypatch):
     assert load_count == 1
 
 
+def test_preload_models_loads_both_models(monkeypatch):
+    registry = model_registry.ModelRegistry()
+    get_embedding_model = MagicMock(return_value=object())
+    get_reranker_model = MagicMock(return_value=object())
+    monkeypatch.setattr(
+        registry,
+        "get_embedding_model",
+        get_embedding_model,
+    )
+    monkeypatch.setattr(
+        registry,
+        "get_reranker_model",
+        get_reranker_model,
+    )
+
+    registry.preload_models()
+
+    get_embedding_model.assert_called_once_with()
+    get_reranker_model.assert_called_once_with()
+
+
+def test_preload_models_records_failure_and_tries_both_models(monkeypatch):
+    registry = model_registry.ModelRegistry()
+    monkeypatch.setattr(
+        registry,
+        "_load_embedding_model",
+        MagicMock(side_effect=RuntimeError("embedding failed")),
+    )
+    reranker_model = object()
+    monkeypatch.setattr(
+        registry,
+        "_load_reranker_model",
+        MagicMock(return_value=reranker_model),
+    )
+
+    try:
+        registry.preload_models()
+    except model_registry.ModelPreloadError:
+        pass
+    else:
+        raise AssertionError("ModelPreloadError was not raised")
+
+    status = registry.status()
+    assert status.state == "failed"
+    assert status.embedding == "failed"
+    assert status.reranker == "ready"
+    assert registry.get_reranker_model() is reranker_model
+
+
 def test_load_embedding_model_uses_local_directory(tmp_path, monkeypatch):
     embedding_dir = tmp_path / "embedding"
     embedding_dir.mkdir()

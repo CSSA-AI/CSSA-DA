@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from app.services import system_status
+from app.services.rag.model_registry import ModelRegistryStatus
 
 
 class FakeCursor:
@@ -95,6 +96,10 @@ def test_system_status_keeps_rag_readiness_separate_from_pipeline(
             knowledge_base_rows=10,
             embedding_model="test-model",
             embedding_revision="revision-123",
+            models=ModelRegistryStatus(
+                embedding="ready",
+                reranker="ready",
+            ),
         ),
     )
     monkeypatch.setattr(

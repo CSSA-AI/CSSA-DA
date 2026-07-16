@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 import logging
 from typing import Annotated, Literal
@@ -21,6 +22,7 @@ from app.services.rag.errors import (
     RAGServiceError,
     RetrievalUnavailableError,
 )
+from app.services.rag.model_registry import model_registry
 
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,10 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    try:
+        await asyncio.to_thread(model_registry.preload_models)
+    except Exception:
+        logger.exception("RAG model preload failed")
     yield
     close_rag_orchestrator()
 

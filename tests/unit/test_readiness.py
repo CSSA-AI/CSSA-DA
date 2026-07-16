@@ -1,4 +1,19 @@
+import pytest
+
 from app.services import readiness
+from app.services.rag.model_registry import ModelRegistryStatus
+
+
+@pytest.fixture(autouse=True)
+def ready_models(monkeypatch):
+    monkeypatch.setattr(
+        readiness.model_registry,
+        "status",
+        lambda: ModelRegistryStatus(
+            embedding="ready",
+            reranker="ready",
+        ),
+    )
 
 
 class FakeCursor:
@@ -91,6 +106,30 @@ def test_check_readiness_reports_ready_with_matching_rows(monkeypatch):
     assert result.database == "ok"
     assert result.knowledge_base_rows == 12
     assert result.reason is None
+
+
+def test_check_readiness_rejects_failed_models(monkeypatch):
+    cursor = FakeCursor(["knowledge_base", 12])
+    monkeypatch.setattr(
+        readiness.psycopg2,
+        "connect",
+        lambda database_url: FakeConnection(cursor),
+    )
+    monkeypatch.setattr(
+        readiness.model_registry,
+        "status",
+        lambda: ModelRegistryStatus(
+            embedding="ready",
+            reranker="failed",
+        ),
+    )
+
+    result = readiness.check_readiness("postgresql://test")
+
+    assert result.status == "not_ready"
+    assert result.database == "ok"
+    assert result.models.state == "failed"
+    assert result.reason == "RAG models are not ready"
 
 
 def test_check_readiness_reports_unavailable_database(monkeypatch):

@@ -1,5 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
+from unittest.mock import MagicMock
 
 from app.api.deps import get_rag_orchestrator, require_internal_api_key
 from app.core.config import settings
@@ -12,6 +13,7 @@ from app.services.rag.errors import (
     GenerationUnavailableError,
     RetrievalUnavailableError,
 )
+from app.services.rag.model_registry import ModelRegistryStatus, model_registry
 from app.services.system_status import (
     PipelineMetadataStatus,
     SystemStatus,
@@ -74,6 +76,10 @@ def test_ready_returns_200_when_database_and_data_are_ready(monkeypatch):
             knowledge_base_rows=3,
             embedding_model="test-model",
             embedding_revision="revision-123",
+            models=ModelRegistryStatus(
+                embedding="ready",
+                reranker="ready",
+            ),
         ),
     )
 
@@ -86,7 +92,40 @@ def test_ready_returns_200_when_database_and_data_are_ready(monkeypatch):
         "knowledge_base_rows": 3,
         "embedding_model": "test-model",
         "embedding_revision": "revision-123",
+        "models": {
+            "status": "ready",
+            "embedding": "ready",
+            "reranker": "ready",
+        },
     }
+
+
+def test_lifespan_preloads_models(monkeypatch):
+    preload_models = MagicMock()
+    monkeypatch.setattr(
+        model_registry,
+        "preload_models",
+        preload_models,
+    )
+
+    with TestClient(app) as test_client:
+        response = test_client.get("/health")
+
+    assert response.status_code == 200
+    preload_models.assert_called_once_with()
+
+
+def test_model_preload_failure_does_not_break_health(monkeypatch):
+    monkeypatch.setattr(
+        model_registry,
+        "preload_models",
+        MagicMock(side_effect=RuntimeError("model failed")),
+    )
+
+    with TestClient(app) as test_client:
+        response = test_client.get("/health")
+
+    assert response.status_code == 200
 
 
 def test_ready_returns_503_when_database_or_data_are_not_ready(monkeypatch):
@@ -98,6 +137,10 @@ def test_ready_returns_503_when_database_or_data_are_not_ready(monkeypatch):
             knowledge_base_rows=0,
             embedding_model="test-model",
             embedding_revision="revision-123",
+            models=ModelRegistryStatus(
+                embedding="ready",
+                reranker="ready",
+            ),
             reason="knowledge_base has no rows",
         ),
     )
@@ -121,6 +164,10 @@ def test_status_reports_readiness_and_pipeline_metadata(monkeypatch):
                 knowledge_base_rows=3,
                 embedding_model="test-model",
                 embedding_revision="revision-123",
+                models=ModelRegistryStatus(
+                    embedding="ready",
+                    reranker="ready",
+                ),
             ),
             pipeline_metadata=PipelineMetadataStatus(
                 latest_run=None,
