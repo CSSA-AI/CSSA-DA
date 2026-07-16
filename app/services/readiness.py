@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import logging
 from typing import Any
 
 import psycopg2
@@ -9,6 +10,9 @@ from app.services.rag.model_registry import (
     ModelRegistryStatus,
     model_registry,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -85,7 +89,8 @@ def check_readiness(database_url: str | None = None) -> ReadinessCheck:
                     (embedding_model, embedding_revision),
                 )
                 row_count = cursor.fetchone()[0]
-    except Exception as error:
+    except Exception:
+        logger.exception("Database readiness check failed")
         return ReadinessCheck(
             status="not_ready",
             database="unavailable",
@@ -93,7 +98,7 @@ def check_readiness(database_url: str | None = None) -> ReadinessCheck:
             embedding_model=embedding_model,
             embedding_revision=embedding_revision,
             models=model_status,
-            reason=str(error),
+            reason="Database is unavailable",
         )
 
     if row_count == 0:

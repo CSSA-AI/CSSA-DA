@@ -132,12 +132,13 @@ def test_check_readiness_rejects_failed_models(monkeypatch):
     assert result.reason == "RAG models are not ready"
 
 
-def test_check_readiness_reports_unavailable_database(monkeypatch):
+def test_check_readiness_reports_unavailable_database(monkeypatch, caplog):
+    internal_error = "connection refused for internal-db.example:5432"
     monkeypatch.setattr(
         readiness.psycopg2,
         "connect",
         lambda database_url: (_ for _ in ()).throw(
-            RuntimeError("connection refused")
+            RuntimeError(internal_error)
         ),
     )
 
@@ -145,4 +146,7 @@ def test_check_readiness_reports_unavailable_database(monkeypatch):
 
     assert result.status == "not_ready"
     assert result.database == "unavailable"
-    assert result.reason == "connection refused"
+    assert result.reason == "Database is unavailable"
+    assert internal_error not in str(result.to_dict())
+    assert "Database readiness check failed" in caplog.text
+    assert internal_error in caplog.text
