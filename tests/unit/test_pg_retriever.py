@@ -1,21 +1,27 @@
 import unittest
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from unittest.mock import patch, MagicMock
 import numpy as np
 from psycopg2 import OperationalError
 from psycopg2.pool import PoolError
 
-from app.core.config import settings
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
 from app.services.rag.errors import RetrievalUnavailableError
+from app.services.rag.model_registry import model_registry
 from app.services.rag.retriever.pg_retriever import PGVectorRetriever
 
 
 class TestPGVectorRetrieverUnit(unittest.TestCase):
+    def setUp(self):
+        self.shared_embedding_model = MagicMock()
+        patcher = patch.object(
+            model_registry,
+            "get_embedding_model",
+            return_value=self.shared_embedding_model,
+        )
+        self.mock_get_embedding_model = patcher.start()
+        self.addCleanup(patcher.stop)
 
-    @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
     @patch("app.services.rag.retriever.pg_retriever.ThreadedConnectionPool")
     @patch("app.services.rag.retriever.pg_retriever.rag_config", {
         "retriever": {
@@ -27,27 +33,18 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
             "table_name": "knowledge_base",
         },
     })
-    def test_init_loads_configured_model_from_local_directory(
+    def test_init_uses_shared_configured_model(
         self,
         mock_pool_class,
-        mock_st,
     ):
-        with TemporaryDirectory() as temp_dir:
-            model_dir = Path(temp_dir)
-            embedding_dir = model_dir / "embedding"
-            embedding_dir.mkdir()
-
-            with patch.object(settings, "MODEL_DIR", model_dir):
-                retriever = PGVectorRetriever(
-                    database_url="postgresql://test:test@localhost:5432/testdb"
-                )
+        retriever = PGVectorRetriever(
+            database_url="postgresql://test:test@localhost:5432/testdb"
+        )
 
         self.assertEqual(retriever.model_name, "fake-embedding-model")
         self.assertEqual(retriever.model_revision, "revision-123")
-        mock_st.assert_called_once_with(
-            str(embedding_dir.resolve()),
-            local_files_only=True,
-        )
+        self.assertIs(retriever.model, self.shared_embedding_model)
+        self.mock_get_embedding_model.assert_called_once_with()
 
 
     @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
@@ -81,10 +78,8 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
             maxconn=5,
             dsn="postgresql://test:test@localhost:5432/testdb",
         )
-        mock_st.assert_called_once_with(
-            "fake-embedding-model",
-            revision="revision-123",
-        )
+        self.assertIs(retriever.model, self.shared_embedding_model)
+        self.mock_get_embedding_model.assert_called_once_with()
 
     @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
     @patch("app.services.rag.retriever.pg_retriever.ThreadedConnectionPool")
@@ -110,6 +105,7 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
         self.assertIsNone(retriever.model_revision)
         self.assertEqual(retriever.table_name, "manual_table")
         mock_st.assert_called_once_with("manual-model")
+        self.mock_get_embedding_model.assert_not_called()
 
     @patch("app.services.rag.retriever.pg_retriever.settings")
     @patch("app.services.rag.retriever.pg_retriever.rag_config", {
@@ -139,9 +135,8 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
         },
     })
     def test_encode_query(self, mock_pool_class, mock_st):
-        mock_model = MagicMock()
+        mock_model = self.shared_embedding_model
         mock_model.encode.return_value = np.array([[0.1, 0.2, 0.3]])
-        mock_st.return_value = mock_model
         mock_pool_class.return_value = MagicMock()
 
         retriever = PGVectorRetriever(
@@ -169,9 +164,8 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
         },
     })
     def test_search_returns_search_results(self, mock_pool_class, mock_st):
-        mock_model = MagicMock()
+        mock_model = self.shared_embedding_model
         mock_model.encode.return_value = np.array([[0.1, 0.2, 0.3]])
-        mock_st.return_value = mock_model
 
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = [
@@ -258,9 +252,8 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
         },
     })
     def test_search_manual_top_k_overrides_config(self, mock_pool_class, mock_st):
-        mock_model = MagicMock()
+        mock_model = self.shared_embedding_model
         mock_model.encode.return_value = np.array([[0.1, 0.2, 0.3]])
-        mock_st.return_value = mock_model
 
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = []
@@ -300,9 +293,8 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
         mock_pool_class,
         mock_st,
     ):
-        mock_model = MagicMock()
+        mock_model = self.shared_embedding_model
         mock_model.encode.return_value = np.array([[0.1, 0.2, 0.3]])
-        mock_st.return_value = mock_model
 
         mock_cursor = MagicMock()
         mock_cursor.execute.side_effect = RuntimeError("query failed")
@@ -339,9 +331,8 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
         mock_pool_class,
         mock_st,
     ):
-        mock_model = MagicMock()
+        mock_model = self.shared_embedding_model
         mock_model.encode.return_value = np.array([[0.1, 0.2, 0.3]])
-        mock_st.return_value = mock_model
         mock_pool = MagicMock()
         mock_pool.getconn.side_effect = PoolError("pool exhausted")
         mock_pool_class.return_value = mock_pool
@@ -368,9 +359,8 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
         mock_pool_class,
         mock_st,
     ):
-        mock_model = MagicMock()
+        mock_model = self.shared_embedding_model
         mock_model.encode.return_value = np.array([[0.1, 0.2, 0.3]])
-        mock_st.return_value = mock_model
         mock_cursor = MagicMock()
         mock_cursor.execute.side_effect = OperationalError("database lost")
         mock_conn = MagicMock()

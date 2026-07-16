@@ -1,11 +1,10 @@
 import unittest
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from unittest.mock import patch, MagicMock
 
-from app.core.config import rag_config, settings
+from app.core.config import rag_config
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
+from app.services.rag.model_registry import model_registry
 from app.services.rag.reranker.cross_encoder_reranker import CrossEncoderReranker
 
 
@@ -18,23 +17,11 @@ class TestCrossEncoderRerankerUnit(unittest.TestCase):
             "adapter_path": None,
         }
     })
-    @patch("app.services.rag.reranker.cross_encoder_reranker.CrossEncoder")
-    def test_init_loads_configured_model_from_local_directory(
-        self,
-        mock_cross_encoder,
-    ):
-        with TemporaryDirectory() as temp_dir:
-            model_dir = Path(temp_dir)
-            reranker_dir = model_dir / "reranker"
-            reranker_dir.mkdir()
+    def test_init_uses_shared_configured_model(self):
+        reranker = CrossEncoderReranker()
 
-            with patch.object(settings, "MODEL_DIR", model_dir):
-                CrossEncoderReranker()
-
-        mock_cross_encoder.assert_called_once_with(
-            str(reranker_dir.resolve()),
-            local_files_only=True,
-        )
+        self.assertIs(reranker.model, self.shared_reranker_model)
+        self.mock_get_reranker_model.assert_called_once_with()
 
     def test_default_config_pins_model_revision(self):
         self.assertEqual(
@@ -43,6 +30,14 @@ class TestCrossEncoderRerankerUnit(unittest.TestCase):
         )
 
     def setUp(self):
+        self.shared_reranker_model = MagicMock()
+        patcher = patch.object(
+            model_registry,
+            "get_reranker_model",
+            return_value=self.shared_reranker_model,
+        )
+        self.mock_get_reranker_model = patcher.start()
+        self.addCleanup(patcher.stop)
         self.search_results = [
             SearchResult(
                 article=Article(text="Student visa application info", questions=["student visa"]),
@@ -73,11 +68,9 @@ class TestCrossEncoderRerankerUnit(unittest.TestCase):
     def test_init_uses_model_from_rag_config(self, mock_cross_encoder):
         reranker = CrossEncoderReranker()
 
-        self.assertIsNotNone(reranker.model)
-        mock_cross_encoder.assert_called_once_with(
-            "fake-cross-encoder",
-            revision="fake-revision",
-        )
+        self.assertIs(reranker.model, self.shared_reranker_model)
+        self.mock_get_reranker_model.assert_called_once_with()
+        mock_cross_encoder.assert_not_called()
 
     @patch("app.services.rag.reranker.cross_encoder_reranker.rag_config", {
         "reranker": {
@@ -91,6 +84,7 @@ class TestCrossEncoderRerankerUnit(unittest.TestCase):
         reranker = CrossEncoderReranker(model_name="manual-cross-encoder")
 
         mock_cross_encoder.assert_called_once_with("manual-cross-encoder")
+        self.mock_get_reranker_model.assert_not_called()
 
     @patch("app.services.rag.reranker.cross_encoder_reranker.rag_config", {
         "reranker": {
@@ -116,28 +110,11 @@ class TestCrossEncoderRerankerUnit(unittest.TestCase):
             "adapter_path": "fake-adapter-path",
         }
     })
-    @patch("app.services.rag.reranker.cross_encoder_reranker.PeftModel")
-    @patch("app.services.rag.reranker.cross_encoder_reranker.CrossEncoder")
-    def test_init_loads_adapter_when_adapter_path_exists(
-        self,
-        mock_cross_encoder,
-        mock_peft_model,
-    ):
-        mock_model = MagicMock()
-        original_inner_model = MagicMock()
-        mock_model.model = original_inner_model
-        mock_cross_encoder.return_value = mock_model
-
-        mock_adapter_model = MagicMock()
-        mock_peft_model.from_pretrained.return_value = mock_adapter_model
-
+    def test_init_uses_shared_model_with_configured_adapter(self):
         reranker = CrossEncoderReranker()
 
-        mock_peft_model.from_pretrained.assert_called_once_with(
-            original_inner_model,
-            "fake-adapter-path",
-        )
-        self.assertEqual(reranker.model.model, mock_adapter_model)
+        self.assertIs(reranker.model, self.shared_reranker_model)
+        self.mock_get_reranker_model.assert_called_once_with()
 
     @patch("app.services.rag.reranker.cross_encoder_reranker.rag_config", {
         "reranker": {
@@ -163,9 +140,8 @@ class TestCrossEncoderRerankerUnit(unittest.TestCase):
     })
     @patch("app.services.rag.reranker.cross_encoder_reranker.CrossEncoder")
     def test_rerank_scores_sorts_and_updates_rank(self, mock_cross_encoder):
-        mock_model = MagicMock()
+        mock_model = self.shared_reranker_model
         mock_model.predict.return_value = [0.2, 0.9, 0.5]
-        mock_cross_encoder.return_value = mock_model
 
         reranker = CrossEncoderReranker()
 
@@ -200,9 +176,8 @@ class TestCrossEncoderRerankerUnit(unittest.TestCase):
     })
     @patch("app.services.rag.reranker.cross_encoder_reranker.CrossEncoder")
     def test_rerank_uses_default_top_k_from_rag_config(self, mock_cross_encoder):
-        mock_model = MagicMock()
+        mock_model = self.shared_reranker_model
         mock_model.predict.return_value = [0.2, 0.9, 0.5]
-        mock_cross_encoder.return_value = mock_model
 
         reranker = CrossEncoderReranker()
 
@@ -222,9 +197,8 @@ class TestCrossEncoderRerankerUnit(unittest.TestCase):
     })
     @patch("app.services.rag.reranker.cross_encoder_reranker.CrossEncoder")
     def test_rerank_does_not_mutate_original_results(self, mock_cross_encoder):
-        mock_model = MagicMock()
+        mock_model = self.shared_reranker_model
         mock_model.predict.return_value = [0.2, 0.9, 0.5]
-        mock_cross_encoder.return_value = mock_model
 
         original_scores = [result.score for result in self.search_results]
         original_ranks = [result.rank for result in self.search_results]

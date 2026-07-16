@@ -2,8 +2,9 @@ from typing import List, Optional
 from sentence_transformers import CrossEncoder
 from peft import PeftModel
 
-from app.core.config import rag_config, settings
+from app.core.config import rag_config
 from app.schemas.search_result import SearchResult
+from app.services.rag.model_registry import model_registry
 from .base import BaseReranker
 
 
@@ -16,8 +17,12 @@ class CrossEncoderReranker(BaseReranker):
     ):
         reranker_config = rag_config["reranker"]
 
-        uses_configured_model = model_name is None
-        if uses_configured_model:
+        uses_configured_model = (
+            model_name is None
+            and model_revision is None
+            and adapter_path is None
+        )
+        if model_name is None:
             model_name = reranker_config["model_name"]
             model_revision = model_revision or reranker_config.get("model_revision")
 
@@ -25,21 +30,14 @@ class CrossEncoderReranker(BaseReranker):
 
         super().__init__()
 
-        local_model_path = (
-            settings.local_model_path("reranker")
-            if uses_configured_model
-            else None
-        )
-        model_source = str(local_model_path) if local_model_path else model_name
-        model_kwargs = {}
-        if local_model_path:
-            model_kwargs["local_files_only"] = True
-        elif model_revision:
-            model_kwargs["revision"] = model_revision
-        self.model = CrossEncoder(model_source, **model_kwargs)
+        if uses_configured_model:
+            self.model = model_registry.get_reranker_model()
+        else:
+            model_kwargs = {"revision": model_revision} if model_revision else {}
+            self.model = CrossEncoder(model_name, **model_kwargs)
 
         # LoRA adapter（可选）
-        if adapter_path:
+        if adapter_path and not uses_configured_model:
             self.model.model = PeftModel.from_pretrained(
                 self.model.model,
                 adapter_path
