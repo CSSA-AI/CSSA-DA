@@ -27,6 +27,13 @@ ENV MODEL_DIR=/models
 # 复制你的所有代码
 COPY . .
 
+RUN groupadd --system appuser && \
+    useradd --system --gid appuser --create-home appuser
+
+ENV HOME=/home/appuser
+
+USER appuser
+
 # 保持容器运行
 EXPOSE 8000
 
