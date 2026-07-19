@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     WECHAT_API_KEY: str | None = None
     DATABASE_URL: str | None = None
     MODEL_DIR: Path | None = None
+    LOG_LEVEL: str = "INFO"
 
     def local_model_path(self, model_name: str) -> Path | None:
         if self.MODEL_DIR is None:

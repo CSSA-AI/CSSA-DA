@@ -11,6 +11,8 @@ from app.api.deps import (
     get_rag_orchestrator,
     require_internal_api_key,
 )
+from app.core.config import settings
+from app.core.logging import configure_app_logging
 from app.schemas.search_result import SearchResult
 from app.services.readiness import check_readiness
 from app.services.system_status import get_system_status
@@ -22,6 +24,8 @@ from app.services.rag.errors import (
     RetrievalUnavailableError,
 )
 
+
+configure_app_logging(settings.LOG_LEVEL)
 
 logger = logging.getLogger(__name__)
 
