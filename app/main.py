@@ -3,6 +3,7 @@ import logging
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Request, status as http_status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -13,7 +14,10 @@ from app.api.deps import (
 )
 from app.core.config import settings
 from app.core.logging import configure_app_logging
-from app.core.middleware import RequestContextMiddleware
+from app.core.middleware import (
+    RequestContextMiddleware,
+    SecurityHeadersMiddleware,
+)
 from app.schemas.search_result import SearchResult
 from app.services.readiness import check_readiness
 from app.services.system_status import get_system_status
@@ -46,7 +50,19 @@ app = FastAPI(
 
 # Starlette wraps middleware in reverse: the LAST add_middleware call becomes
 # the OUTERMOST layer (runs first on requests, last on responses).
+# Order (outermost -> innermost): CORS > SecurityHeaders > RequestContext.
+# CORS is outermost so preflight OPTIONS requests are answered before entering
+# the stack and CORS headers land on every response, including error responses.
 app.add_middleware(RequestContextMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.allowed_origins_list,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-API-Key"],
+    expose_headers=["X-Request-ID"],
+)
 
 
 def _service_error_response(

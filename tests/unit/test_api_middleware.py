@@ -6,9 +6,11 @@ from fastapi.testclient import TestClient
 
 from app.api.deps import get_rag_orchestrator, require_internal_api_key
 from app.core.logging import AppJsonLogFormatter
+from app.core.middleware import SECURITY_HEADERS
 from app.main import app
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
+from app.services.rag.errors import RetrievalUnavailableError
 
 
 class LoggingOrchestrator:
@@ -33,6 +35,13 @@ class LoggingOrchestrator:
                 )
             ],
         )
+
+
+class FailingOrchestrator:
+    """Stub orchestrator that raises a handled RAG service error."""
+
+    def run(self, query, **kwargs):
+        raise RetrievalUnavailableError("internal detail must stay private")
 
 
 def client() -> TestClient:
@@ -146,3 +155,52 @@ def test_request_ids_do_not_leak_between_requests(captured_app_logs):
         first.headers["X-Request-ID"],
         second.headers["X-Request-ID"],
     ]
+
+
+def test_security_headers_present_on_success():
+    response = client().get("/health")
+
+    assert response.status_code == 200
+    for name, value in SECURITY_HEADERS:
+        assert response.headers[name.decode()] == value.decode()
+
+
+def test_security_headers_present_on_error():
+    app.dependency_overrides[get_rag_orchestrator] = lambda: (
+        FailingOrchestrator()
+    )
+    app.dependency_overrides[require_internal_api_key] = lambda: None
+    response = TestClient(app).post(
+        "/chat",
+        json={"message": "How do I enrol?"},
+    )
+
+    assert response.status_code == 503
+    for name, value in SECURITY_HEADERS:
+        assert response.headers[name.decode()] == value.decode()
+
+
+def test_cors_preflight_allows_configured_origin():
+    response = client().options(
+        "/chat",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+
+    assert response.headers["Access-Control-Allow-Origin"] == (
+        "http://localhost:3000"
+    )
+
+
+def test_cors_omits_headers_for_unconfigured_origin():
+    response = client().options(
+        "/chat",
+        headers={
+            "Origin": "http://evil.example.com",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+
+    assert "Access-Control-Allow-Origin" not in response.headers
