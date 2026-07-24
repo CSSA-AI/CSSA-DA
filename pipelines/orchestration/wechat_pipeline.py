@@ -19,6 +19,7 @@ from pipelines.shared.paths import (
     DEFAULT_PIPELINE_REPORTS_DIR,
 )
 from pipelines.shared.reports import write_json_report
+from pipelines.shared.storage import LocalStorage
 
 
 logger = logging.getLogger(__name__)
@@ -273,7 +274,13 @@ def _write_wechat_pipeline_report(
             }
         )
 
-    return write_json_report(report_file, payload)
+    storage = LocalStorage(data_dir)
+    write_json_report(
+        storage,
+        report_file.relative_to(data_dir).as_posix(),
+        payload,
+    )
+    return report_file
 
 
 def _run_stage(
