@@ -2,7 +2,7 @@
 
 本文记录 `/chat` API 加固工作的设计细节、背后的取舍,以及为看懂这些代码所需的
 基础知识。整体路线图见 [future_plan.md](future_plan.md) 第 1 项;本文覆盖已经
-完成的步骤(Step 1–6)。
+完成的步骤(Step 1–8,全部完成并验证)。
 
 工作按"每步单独实现、单独验证、单独 review"的方式推进。本文兼作**学习参考**,
 面向刚接触后端的读者:先给全局大图,再补基础知识,最后才逐步讲实现。凡是用到的
@@ -33,9 +33,10 @@
 - [Step 4:CORS](#step-4cors跨源资源共享)
 - [Step 5:/chat 限流(rate limiting)](#step-5chat-限流rate-limiting)
 - [Step 6:兜底异常处理器](#step-6兜底异常处理器)
+- [Step 7:让容器 stdout 只剩结构化日志](#step-7让容器-stdout-只剩结构化日志)
 - [中间件注册顺序](#中间件注册顺序总览)
 - [测试策略](#测试策略)
-- [尚未完成的步骤](#尚未完成的步骤)
+- [完成情况与后续](#完成情况与后续)
 
 ---
 
@@ -765,6 +766,46 @@ Starlette 的 `ExceptionMiddleware` 那层,而我们的两个 middleware 在它*
 
 ---
 
+## Step 7:让容器 stdout 只剩结构化日志
+
+**文件**:[Dockerfile.cpu](Dockerfile.cpu)、[Dockerfile.gpu](Dockerfile.gpu) 的
+uvicorn 启动命令加 `--no-access-log`。不改 Python 代码、不加测试。
+
+### 要解决什么
+
+uvicorn 作为服务器,**默认自己就给每个请求打一条纯文本访问日志**:
+
+```
+INFO:     203.0.113.5:54321 - "POST /chat HTTP/1.1" 200 OK
+```
+
+而 Step 2 我们已经**自己实现了一条结构化 JSON access log**(带 `request_id`、
+`duration_ms`)。结果同一个请求 stdout 上有两条:uvicorn 的纯文本 + 我们的 JSON。
+两个坏处:
+
+- **格式不统一**:将来 ECS 上 `awslogs` driver 把 stdout 整个采到 CloudWatch,
+  想用结构化查询(如"筛出 `duration_ms > 1000` 的请求")时,那些纯文本行是解析
+  不了的噪音。
+- **信息还更少**:uvicorn 那条没有 `request_id`、没有耗时,不如我们自己那条有用。
+
+`--no-access-log` 关掉 uvicorn 的**访问日志**,让 stdout 只留我们的结构化 JSON。
+注意:关的只是每请求的访问日志,**不影响** uvicorn 的启动日志(`Application
+startup complete` 等,那些是想保留的)。
+
+### 取舍
+
+只加在 **Docker 启动命令**里,**不动**本地 `uvicorn --reload` 开发方式 —— 本地
+肉眼扫那条纯文本访问日志反而方便,而"stdout 必须纯 JSON"只在生产 → CloudWatch
+这条链路才重要。(另一种做法是做成可配置项开发生产统一,属于过度设计。)
+
+### 验证
+
+这步是启动参数、没有单元测试可加,靠**真跑容器**验证:`docker compose --profile
+cpu up --build` 后,容器日志里 uvicorn 纯文本访问行 **0 条**、我们的 JSON access
+log 正常、启动日志保留 —— 已实测通过(见[完成情况](#完成情况与后续) Step 7/8)。
+
+---
+
 ## 中间件注册顺序(总览)
 
 **Starlette 规则:最后 `add_middleware()` 的调用变成最外层**(请求最先经过,响应
@@ -790,9 +831,14 @@ app.add_middleware(CORSMiddleware, ...)         # 最后加 → 最外层
 
 ## 测试策略
 
-测试集中在 [tests/unit/test_api_middleware.py](tests/unit/test_api_middleware.py),
+按测试金字塔分两层,各司其职:**逻辑用带 mock 的单元/组件测试(免费、确定、快),
+真实基础设施用集成测试,付费的 OpenAI 永远 mock**(见[测试金字塔:各层测什么](#测试金字塔各层测什么))。
+
+### 单元/组件层:`tests/unit/test_api_middleware.py`
+
 风格对齐既有的 [tests/unit/test_api.py](tests/unit/test_api.py)(`TestClient` +
-`app.dependency_overrides`)。已覆盖:
+`app.dependency_overrides`,orchestrator 整个换成 stub)。逐项覆盖各中间件与
+处理器的行为:
 
 - request_id 缺省时自动生成、客户端提供时原样回传、连续请求间不泄漏。
 - access log 恰好一条,`method`/`path`/`status_code`/`duration_ms`/`request_id`
@@ -807,7 +853,19 @@ app.add_middleware(CORSMiddleware, ...)         # 最后加 → 最外层
 - 抛裸 `RuntimeError`(带敏感串)时,兜底处理器返回安全 500 且异常原文不出现在
   响应里;已有的具体错误测试继续通过,反证兜底没误伤具体处理器。
 
-**几个测试陷阱**:
+### 集成层:`tests/integration/test_api_chat_integration.py`
+
+单元层每个中间件是**孤立**测的;集成层验证它们在**真实完整 ASGI 栈**里**组合
+正确**。这个测试走真 HTTP `/chat` → 真中间件栈 → **真 pgvector 检索**,只把付费的
+OpenAI generator 和 embedding/reranker 模型换成 Fake(免费、确定,CI 也能跑;复用
+了 `test_rag_pipeline.py` 的种数据 + Fake 模型模式)。覆盖:
+
+- 带合法 key 的 `/chat` → 200,答案来自 fake generator 但 **sources 来自真实
+  数据库检索** —— 证明 HTTP → 中间件 → DB → 响应整条链接线正确。
+- **限流 429 仍带安全头 + `X-Request-ID`** —— 这是单元层(孤立测)覆盖不到的
+  组合正确性:证明限流拒绝也会正确穿回外层中间件。全程 0 次真实 OpenAI 调用。
+
+### 几个测试陷阱
 
 - 不能直接用 pytest 的 `caplog`。因为 `configure_app_logging` 设了
   `propagate=False`,日志到不了 root logger,而 `caplog` 默认在 root 监听,会
@@ -819,13 +877,36 @@ app.add_middleware(CORSMiddleware, ...)         # 最后加 → 最外层
 - 测兜底 500 时要用 `TestClient(app, raise_server_exceptions=False)`,否则
   `TestClient` 默认会把服务器端异常**重新抛出**,拿不到处理器产生的 500 响应。
 
-验证结果:全量 `tests/unit` 162 passed,无回归。集成测试
-(`tests/integration`)需要真实 Postgres + pgvector,未在本地运行。
+验证结果:`tests/unit` 162 passed;`tests/integration` 13 passed(需真实
+Postgres + pgvector,本地用容器里的独立 `testdb` 跑,CI 用其专用 `testdb`)。
+
+### 测试金字塔:各层测什么
+
+一条铁律:**自动化测试永远不真调付费/不确定的外部服务(OpenAI 等)**,一律在接缝
+处用 fake 替换(本项目靠 `Depends` 依赖注入 + `dependency_overrides` 做到)。各类
+东西的规范归属:
+
+| 要测的东西 | 放哪层 | 怎么测 |
+|---|---|---|
+| 限流 429、鉴权、错误映射、安全头、request_id | 单元/组件 | `TestClient` + stub orchestrator,不碰 OpenAI |
+| 真 pgvector 检索、DB 迁移、导数据、HTTP 全栈接线 | 集成 | 真 Postgres,只 mock 掉付费的 OpenAI |
+| 生成回答的质量、OpenAI 真实行为 | 不做自动化断言 | 人工/离线 eval,不进 CI |
+| "整条链在真服务器上活着" | E2E 冒烟 | 起真容器打 `/health`,第三方仍 mock |
 
 ---
 
-## 尚未完成的步骤(见 future_plan.md)
+## 完成情况与后续
 
-- **Step 7**:两个 Dockerfile 的 uvicorn 加 `--no-access-log`,stdout 只保留
-  结构化 JSON。
-- **Step 8**:手动端到端验证。
+「保护 `/chat`」这项工作(future_plan 第 1 项)的 8 步**全部完成并验证**:
+
+- Step 1–6:结构化日志、request_id 中间件、安全头、CORS、限流、兜底异常处理。
+- Step 7:两个 Dockerfile 的 uvicorn 加 `--no-access-log`,stdout 只保留结构化
+  JSON —— 已在真实容器里验证(纯文本访问行 0 条,JSON access log 正常)。
+- Step 8:手动端到端验证 —— 对真实 `docker compose` 容器过了一遍 `/health`、
+  `/ready`、安全头、`X-Request-ID`、CORS、`/chat` 鉴权;限流 429 由单元 + 集成
+  测试覆盖。
+
+后续步骤见 [future_plan.md](future_plan.md):模型交付可预测化(第 2 项)、
+持久化存储(第 3 项)、容器加固(non-root、固定基础镜像、锁依赖、瘦身)、以及
+AWS 基础设施与 CI/CD。限流的精细化(按用户维度)见 future_plan 第 16 项 /
+[issue #67](https://github.com/CSSA-AI/CSSA-DA/issues/67)。
