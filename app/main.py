@@ -6,6 +6,7 @@ from fastapi import Depends, FastAPI, Request, status as http_status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from slowapi.errors import RateLimitExceeded
 
 from app.api.deps import (
     close_rag_orchestrator,
@@ -18,6 +19,7 @@ from app.core.middleware import (
     RequestContextMiddleware,
     SecurityHeadersMiddleware,
 )
+from app.core.rate_limit import chat_rate_limit, limiter
 from app.schemas.search_result import SearchResult
 from app.services.readiness import check_readiness
 from app.services.system_status import get_system_status
@@ -47,6 +49,9 @@ app = FastAPI(
     description="RAG chatbot API for Chinese students and scholars in Australia.",
     lifespan=lifespan,
 )
+
+# slowapi reads the limiter from app.state during request handling.
+app.state.limiter = limiter
 
 # Starlette wraps middleware in reverse: the LAST add_middleware call becomes
 # the OUTERMOST layer (runs first on requests, last on responses).
@@ -80,6 +85,23 @@ def _service_error_response(
             "error": {
                 "code": error.code,
                 "message": error.public_message,
+            }
+        },
+    )
+
+
+@app.exception_handler(RateLimitExceeded)
+def handle_rate_limit_exceeded(
+    _: Request,
+    __: RateLimitExceeded,
+) -> JSONResponse:
+    # Override slowapi's default body with our shared safe error shape.
+    return JSONResponse(
+        status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
+        content={
+            "error": {
+                "code": "rate_limited",
+                "message": "Too many requests. Please slow down and try again shortly.",
             }
         },
     )
@@ -161,15 +183,17 @@ def status(
 
 
 @app.post("/chat", response_model=ChatResponse, tags=["chat"])
+@limiter.limit(chat_rate_limit)
 def chat(
-    request: ChatRequest,
+    request: Request,  # required by slowapi (looked up by this exact name)
+    payload: ChatRequest,
     _: Annotated[None, Depends(require_internal_api_key)],
     orchestrator: Annotated[RAGOrchestrator, Depends(get_rag_orchestrator)],
 ) -> ChatResponse:
     answer, sources = orchestrator.run(
-        query=request.message,
-        top_k=request.top_k,
-        rerank_top_k=request.rerank_top_k,
-        chat_history=[message.model_dump() for message in request.chat_history],
+        query=payload.message,
+        top_k=payload.top_k,
+        rerank_top_k=payload.rerank_top_k,
+        chat_history=[message.model_dump() for message in payload.chat_history],
     )
     return ChatResponse(answer=answer, sources=sources)

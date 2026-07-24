@@ -111,8 +111,9 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins_list, ...)
 ```
 
-**新增 `app/core/rate_limit.py`**：用 `slowapi`（内存态，单实例够用，先不
-接 Redis，多实例水平扩容时再评估）：
+**新增 `app/core/rate_limit.py`**：用 `slowapi`（内存态，单实例够用；本项目由
+社团实际部署但不需要多 ECS 水平扩容，因此内存态限流是正确选择，Redis 分布式
+限流彻底归入将来水平扩容再说）：
 
 ```python
 limiter = Limiter(key_func=get_remote_address)
@@ -120,6 +121,11 @@ limiter = Limiter(key_func=get_remote_address)
 def chat_rate_limit() -> str:
     return settings.CHAT_RATE_LIMIT
 ```
+
+**限流维度：先按客户端 IP，`CHAT_RATE_LIMIT` 默认 `10/minute`（方向 C，保命型
+止血）。** 这是一个够用的止血方案，能挡住最主要的威胁——脚本狂刷 / 前端死循环
+把社团的 OpenAI 账单刷爆。精细化（按登录用户 ID 等）延后到前端和用户体系确定
+之后再做（见"中优先级工作 / 精细化限流"）。
 
 传入**函数**而不是字符串常量给 `@limiter.limit(...)`，这样每次请求都会重新
 读取 `settings.CHAT_RATE_LIMIT`，方便测试时 monkeypatch 出一个很低的限额。
@@ -168,6 +174,11 @@ Starlette 按异常类型的 MRO 找 handler，已有的具体异常类型 handl
 
 #### 已知取舍（暂不处理）
 
+- **限流按 IP 是止血,非最终方案。** 社团用户很多人可能共用同一出口 IP（校园
+  WiFi / 宿舍 NAT），对服务器看起来是同一个 IP，因此"每 IP 每分钟 10 次"在
+  校园网下是**多人共享一份额度**，可能误伤正常用户。当前接受这个不完美——它
+  仍能挡住主要威胁（脚本狂刷）。精细化按用户维度的限流延后（见下方"精细化
+  限流"）。
 - 鉴权失败（`require_internal_api_key` 拒绝）不计入 rate limit 次数，因为
   slowapi 的检查在 endpoint 函数内部、鉴权 dependency 之后才执行。要修的话
   需要把限流挪到鉴权之前，改动更大，本阶段不做。
@@ -431,7 +442,22 @@ API 当前运行一个 Uvicorn worker。由于每个 worker 可能单独加载�
 
 LangChain/LangSmith tracing、metadata 和隐私策略继续延后到核心系统完成之后。
 
-### 16. 确定生产 RDS 配置
+### 16. 精细化限流（按用户维度）
+
+第 1 项已经上了**按 IP、`10/minute` 的止血型限流**（方向 C）。它够挡住脚本
+狂刷，但按 IP 计数在校园 WiFi / 宿舍 NAT 下会**多人共享一份额度**，可能误伤
+正常用户。等前端和用户体系确定后再做精细化：
+
+- 确定限流维度：登录用户 ID、会话 token，或按渠道发放的 `X-API-Key`。
+- 可能需要把限流检查挪到鉴权**之前 / 同层**，以便对"狂试错误 key"也计数
+  （当前鉴权失败不计入限流，见第 1 项已知取舍）。
+- 若届时已做多实例水平扩容，改用 Redis 等共享存储做分布式限流（当前单实例
+  内存态足够，不需要）。
+- 可考虑分层限额：正常用户宽松额度 + 全局兜底额度保护 OpenAI 账单。
+
+在此之前,`CHAT_RATE_LIMIT` 可直接通过环境变量按实际用量调整,无需改代码。
+
+### 17. 确定生产 RDS 配置
 
 连接数预算计算方式：
 

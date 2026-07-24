@@ -46,6 +46,7 @@ dependencies:
       # --- 后端 API (Platform Squad 必需) ---
       - fastapi                  # [新增] 构建 REST API
       - uvicorn[standard]        # [新增] API 服务器
+      - slowapi                  # [新增] /chat 限流 (保护 OpenAI 账单)
       - python-multipart         # [新增] 支持文件上传接口
       - pydantic                 # 数据验证
       - pydantic-settings        # [新增] 管理 .env 配置

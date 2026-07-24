@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_rag_orchestrator, require_internal_api_key
+from app.core.config import settings
 from app.core.logging import AppJsonLogFormatter
 from app.core.middleware import SECURITY_HEADERS
 from app.main import app
@@ -204,3 +205,22 @@ def test_cors_omits_headers_for_unconfigured_origin():
     )
 
     assert "Access-Control-Allow-Origin" not in response.headers
+
+
+def test_chat_rate_limit_returns_safe_429(monkeypatch):
+    monkeypatch.setattr(settings, "CHAT_RATE_LIMIT", "2/minute")
+    test_client = client()
+
+    first = test_client.post("/chat", json={"message": "hi"})
+    second = test_client.post("/chat", json={"message": "hi"})
+    third = test_client.post("/chat", json={"message": "hi"})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 429
+    assert third.json() == {
+        "error": {
+            "code": "rate_limited",
+            "message": "Too many requests. Please slow down and try again shortly.",
+        }
+    }

@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     MODEL_DIR: Path | None = None
     LOG_LEVEL: str = "INFO"
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
+    CHAT_RATE_LIMIT: str = "10/minute"
 
     @property
     def allowed_origins_list(self) -> list[str]:
