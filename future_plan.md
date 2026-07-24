@@ -65,7 +65,13 @@ AWS IAM OIDC       为 GitHub 提供短期 AWS 凭据
 
 ## 部署阻塞项
 
-### 1. 保护付费的 `/chat` 接口（含结构化日志与可观测性基础）
+### 1. 保护付费的 `/chat` 接口（含结构化日志与可观测性基础）✅ 已完成
+
+> **状态：已完成并验证（8 步全部落地）。** 设计与实现细节见
+> [docs/design/chat-api-hardening.md](docs/design/chat-api-hardening.md)。
+> 限流精细化（按用户维度）延后,见本文件第 16 项 /
+> [issue #67](https://github.com/CSSA-AI/CSSA-DA/issues/67)。下面保留原始设计
+> 记录以备回顾。
 
 当前 `POST /chat` 没有鉴权和限流，`app/main.py` 里也没有注册任何 middleware
 （无 CORS、无请求日志、无 rate limiting、无安全响应头、无兜底异常处理）。
