@@ -266,13 +266,21 @@ data/reports      -> s3://<bucket>/reports
 - `S3Storage`（后续，见 Phase 3）：PUT 天然原子，`list` = list_objects，
   `delete_prefix` = 按前缀删除。上层 stage 代码**零改动**即可切换。
 
-**需要迁移的咽喉点**（现在直接碰文件系统、且都用「临时文件 + 原子 replace」的地方）：
+**需要迁移的咽喉点**（现在直接碰文件系统、且都用「临时文件 + 原子 replace」的地方）。
+按「存储位置由谁决定」分两类，决定它们的迁移时机：
 
-1. `pipelines/shared/reports.py` `write_json_report` —— reports
-2. `pipelines/shared/json_records.py` `load/write_json_records` —— raw / processed
-3. `pipelines/shared/import_checkpoint.py` `JsonImportCheckpointStore` —— import checkpoint
-4. `pipelines/ingestion/wechat/storage/local.py` `JsonFileCheckpointStore` /
-   `JsonChunkArticleSink` —— wechat checkpoint + current
+- **A 类 —— 根来自 `data_dir`（干净，可独立迁移）**：位置纯由 `data_dir` 推出，
+  没有任意 input，逻辑 key 一目了然。
+  1. `pipelines/shared/reports.py` `write_json_report` —— reports
+  2. `pipelines/ingestion/wechat/storage/local.py` `JsonFileCheckpointStore`
+     —— wechat harvest checkpoint（构造点 `harvest_wechat.py`，路径由 `data_dir` 推出）
+  3. `pipelines/ingestion/wechat/storage/local.py` `JsonChunkArticleSink`
+     —— wechat 批次落盘 + current（同上）
+- **B 类 —— 根来自「任意 input」（与入口串联绑定，第 5 步一起做）**：位置跟随用户可
+  传任意值的 `--input` / `--checkpoint-file`，没有第 5 步的入口串联就得不到干净 key。
+  4. `pipelines/shared/json_records.py` `load/write_json_records` —— raw / processed
+  5. `pipelines/shared/import_checkpoint.py` `JsonImportCheckpointStore`
+     —— import checkpoint（路径 = `checkpoint_file or import_checkpoint_file_for(input_file)`）
 
 **入口串联与寻址决策（关键）**：
 
@@ -289,9 +297,9 @@ data/reports      -> s3://<bucket>/reports
   - 影响：`--input` 等参数从「文件路径」改为「根下逻辑 key」（例如
     `current/wechat_articles_processed.json`）；需要调试外部文件时，先放进 `data/`
     根再引用。
-  - `json_records` 的迁移**与本步绑定**：入口把 storage + 逻辑 key 传下来后，
-    `json_records` 一并改为 `(storage, key)` 签名，**不单独提前做**（提前做只能得到
-    光秃秃的文件名 key，对 S3 无意义，且第 5 步还要重做）。
+  - **B 类**（`json_records`、`JsonImportCheckpointStore`）的迁移**与本步绑定**：入口把
+    storage + 逻辑 key 传下来后，它们一并改为 `(storage, key)` 签名，**不单独提前做**
+    （提前做只能得到光秃秃的文件名 key，对 S3 无意义，且第 5 步还要重做）。
 
 #### 分步实施清单（每步单独提交、单独验证）
 
@@ -299,11 +307,14 @@ data/reports      -> s3://<bucket>/reports
 2. ✅ **已完成**：迁移 reports —— `write_json_report(storage, key, payload)`；唯一调用方
    `wechat_pipeline` 用 `LocalStorage(data_dir)` + `report_file.relative_to(data_dir)`，
    输出字节与落盘位置均不变。
-3. 迁移 import checkpoint store（`JsonImportCheckpointStore`）。
-4. 迁移 wechat checkpoint store 与 article sink（`JsonFileCheckpointStore` /
-   `JsonChunkArticleSink`）。
-5. **入口串联**（`cli.py` / `run_local_*`）：创建 storage、按逻辑 key 往下传；
-   顺带迁移 `json_records`；`--input` 等参数改为逻辑 key（落实方案②）。
+3. 迁移 wechat harvest checkpoint（A 类，`JsonFileCheckpointStore`）——构造函数改收
+   `(storage, key)`，唯一构造点 `harvest_wechat.py` 用 `LocalStorage(data_dir)` +
+   key `checkpoints/wechat_scraper_state.json`。
+4. 迁移 wechat article sink（A 类，`JsonChunkArticleSink`）——逻辑更重（写批次 / list /
+   合并 / 拷到 current / 删临时目录），用到 `write`+`list`+`read`+`delete_prefix`，单独一步。
+5. **入口串联**（`cli.py` / `run_local_*`）：创建 storage、按逻辑 key 往下传；一并迁移
+   **B 类**（`json_records` 与 `JsonImportCheckpointStore`）；`--input` 等参数改为逻辑 key
+   （落实方案②）。
 6. `S3Storage` 实现（等真正上 AWS 时做，见 Phase 3），上层不改。
 
 不在本阶段范围：`S3Storage` 实现、AWS 相关配置（留到 Phase 3）。

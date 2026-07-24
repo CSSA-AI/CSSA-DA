@@ -4,18 +4,19 @@ from pathlib import Path
 from typing import Any
 
 from pipelines.ingestion.wechat.models import ArticleOutput, HarvestState
+from pipelines.shared.storage import Storage
 
 
 class JsonFileCheckpointStore:
-    def __init__(self, state_file: Path):
-        self.state_file = state_file
+    def __init__(self, storage: Storage, key: str):
+        self.storage = storage
+        self.key = key
 
     def load(self) -> HarvestState:
-        if not self.state_file.exists():
+        if not self.storage.exists(self.key):
             return HarvestState()
 
-        with self.state_file.open("r", encoding="utf-8") as file:
-            payload = json.load(file)
+        payload = json.loads(self.storage.read(self.key))
 
         return HarvestState(
             begin=payload.get("begin", 0),
@@ -25,25 +26,17 @@ class JsonFileCheckpointStore:
         )
 
     def save(self, state: HarvestState) -> None:
-        self.state_file.parent.mkdir(parents=True, exist_ok=True)
-        temporary_file = self.state_file.with_suffix(
-            f"{self.state_file.suffix}.tmp"
-        )
         payload = {
             "begin": state.begin,
             "total_saved": state.total_saved,
             "valid_count": state.valid_count,
             "seen_links": sorted(state.seen_links),
         }
-
-        with temporary_file.open("w", encoding="utf-8") as file:
-            json.dump(payload, file, ensure_ascii=False, indent=2)
-
-        temporary_file.replace(self.state_file)
+        document = json.dumps(payload, ensure_ascii=False, indent=2)
+        self.storage.write(self.key, document.encode("utf-8"))
 
     def clear(self) -> None:
-        if self.state_file.exists():
-            self.state_file.unlink()
+        self.storage.delete(self.key)
 
 
 class JsonChunkArticleSink:

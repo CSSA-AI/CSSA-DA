@@ -18,6 +18,7 @@ from pipelines.shared.paths import (
     DEFAULT_WECHAT_RAW_DIR,
     DEFAULT_WECHAT_TEMP_CHUNKS_DIR,
 )
+from pipelines.shared.storage import LocalStorage
 
 
 def build_wechat_raw_snapshot_file(
@@ -57,8 +58,10 @@ def run_local_harvest(
         if data_dir == DEFAULT_DATA_DIR
         else data_dir / "checkpoints" / "wechat_temp_chunks"
     )
+    storage = LocalStorage(data_dir)
     checkpoint_store = JsonFileCheckpointStore(
-        checkpoint_file
+        storage,
+        checkpoint_file.relative_to(data_dir).as_posix(),
     )
     raw_snapshot_file = build_wechat_raw_snapshot_file(
         data_dir=data_dir,

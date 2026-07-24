@@ -19,6 +19,7 @@ from pipelines.ingestion.wechat.storage import (
     MemoryArticleSink,
     MemoryCheckpointStore,
 )
+from pipelines.shared.storage import LocalStorage
 
 
 @pytest.fixture
@@ -50,8 +51,10 @@ def test_api_key_is_required(monkeypatch):
 
 
 def test_local_checkpoint_store_round_trip(test_workspace):
-    state_file = test_workspace / "scraper_state.json"
-    store = JsonFileCheckpointStore(state_file)
+    store = JsonFileCheckpointStore(
+        LocalStorage(test_workspace),
+        "scraper_state.json",
+    )
     state = HarvestState(
         begin=40,
         total_saved=35,
@@ -62,7 +65,7 @@ def test_local_checkpoint_store_round_trip(test_workspace):
     store.save(state)
 
     assert store.load() == state
-    assert not state_file.with_suffix(".json.tmp").exists()
+    assert not (test_workspace / "scraper_state.json.tmp").exists()
 
     store.clear()
     assert store.load() == HarvestState()
