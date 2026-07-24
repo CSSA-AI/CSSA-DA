@@ -13,6 +13,7 @@ from app.api.deps import (
 )
 from app.core.config import settings
 from app.core.logging import configure_app_logging
+from app.core.middleware import RequestContextMiddleware
 from app.schemas.search_result import SearchResult
 from app.services.readiness import check_readiness
 from app.services.system_status import get_system_status
@@ -42,6 +43,10 @@ app = FastAPI(
     description="RAG chatbot API for Chinese students and scholars in Australia.",
     lifespan=lifespan,
 )
+
+# Starlette wraps middleware in reverse: the LAST add_middleware call becomes
+# the OUTERMOST layer (runs first on requests, last on responses).
+app.add_middleware(RequestContextMiddleware)
 
 
 def _service_error_response(
