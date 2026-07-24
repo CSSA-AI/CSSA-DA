@@ -140,6 +140,29 @@ def handle_generation_timeout(
     )
 
 
+@app.exception_handler(Exception)
+def handle_unexpected_error(
+    _: Request,
+    error: Exception,
+) -> JSONResponse:
+    # Catch-all safety net for exceptions with no specific handler. Starlette
+    # resolves handlers by the exception's class MRO, so the specific handlers
+    # above always take precedence and registration order does not matter.
+    logger.error(
+        "Unhandled exception while processing request",
+        exc_info=(type(error), error, error.__traceback__),
+    )
+    return JSONResponse(
+        status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "error": {
+                "code": "internal_error",
+                "message": "An unexpected error occurred. Please try again later.",
+            }
+        },
+    )
+
+
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
 

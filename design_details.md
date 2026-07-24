@@ -2,7 +2,7 @@
 
 本文记录 `/chat` API 加固工作的设计细节、背后的取舍,以及为看懂这些代码所需的
 基础知识。整体路线图见 [future_plan.md](future_plan.md) 第 1 项;本文覆盖已经
-完成的步骤(Step 1–4)。
+完成的步骤(Step 1–6)。
 
 工作按"每步单独实现、单独验证、单独 review"的方式推进。本文兼作**学习参考**,
 面向刚接触后端的读者:先给全局大图,再补基础知识,最后才逐步讲实现。凡是用到的
@@ -16,6 +16,7 @@
 - [先看全局:一次请求的旅程](#先看全局一次请求的旅程)
 - [基础知识](#基础知识)
   - [一、请求怎么进到我的代码里(Web 管道)](#一请求怎么进到我的代码里web-管道)
+    - [技术栈全景:uvicorn / ASGI / Starlette / FastAPI](#技术栈全景uvicorn--asgi--starlette--fastapi)
     - [1. ASGI 三件套:scope / receive / send](#1-asgi-三件套scope--receive--send)
     - [2. 中间件的位置与洋葱结构](#2-中间件的位置与洋葱结构)
   - [二、怎么把发生的事记下来(日志)](#二怎么把发生的事记下来日志)
@@ -24,10 +25,14 @@
     - [5. LogRecord(record)是什么](#5-logrecordrecord-是什么)
   - [三、把"同一次请求"串起来(粘合剂)](#三把同一次请求串起来粘合剂)
     - [6. ContextVar 与 token](#6-contextvar-与-token)
+  - [四、没接住的异常怎么变成安全响应](#四没接住的异常怎么变成安全响应)
+    - [7. 框架按继承链(MRO)挑异常处理器](#7-框架按继承链mro挑异常处理器)
 - [Step 1:结构化 JSON 日志基础](#step-1结构化-json-日志基础)
 - [Step 2:RequestContextMiddleware](#step-2requestcontextmiddleware请求-id--access-log)
 - [Step 3:SecurityHeadersMiddleware](#step-3securityheadersmiddleware安全响应头)
 - [Step 4:CORS](#step-4cors跨源资源共享)
+- [Step 5:/chat 限流(rate limiting)](#step-5chat-限流rate-limiting)
+- [Step 6:兜底异常处理器](#step-6兜底异常处理器)
 - [中间件注册顺序](#中间件注册顺序总览)
 - [测试策略](#测试策略)
 - [尚未完成的步骤](#尚未完成的步骤)
@@ -102,7 +107,7 @@ uvicorn（网络服务器）           把网络字节翻译成 Python 能用的
 ## 基础知识
 
 这一章讲的都是 Python / ASGI 的通用机制,不是本项目特有的写法。看懂它们,后面
-每一步都会变得直白。分三簇,由外到内、由整体到细节。
+每一步都会变得直白。分四簇,由外到内、由整体到细节。
 
 ---
 
@@ -110,6 +115,35 @@ uvicorn（网络服务器）           把网络字节翻译成 Python 能用的
 
 这一簇回答:用户在浏览器点一下,那串网络数据是怎么变成我 Python 代码里能处理的
 东西的,又是怎么一层层穿过中间件的。
+
+#### 技术栈全景:uvicorn / ASGI / Starlette / FastAPI
+
+先认清这几个反复出现的名字是谁、谁建在谁之上,后面就不会晕。它们是**一摞**,
+不是并列关系:
+
+```
+你的代码 (app/main.py：@app.post("/chat") ...)
+   ↑ 建在
+FastAPI        加：pydantic 数据校验、/docs 自动文档、Depends 依赖注入
+   ↑ 建在
+Starlette      提供：路由、Request/Response、middleware、异常处理
+   ↑ 建在
+ASGI 约定       server 和 app 对话的接口：scope / receive / send
+   ↑ 跑在
+uvicorn        网络服务器：把 TCP 字节 ↔ Python 对象
+```
+
+- **uvicorn** 是网络服务器,负责收发网络字节,按 ASGI 约定调用你的 app。
+- **ASGI** 只是一套**接口约定**(下一节详讲),本身不是库。
+- **Starlette** 是个轻量 web 框架,把"路由、请求/响应对象、middleware、异常
+  处理"这些每个 web 项目都要写的脏活封装好。
+- **FastAPI 建在 Starlette 之上**,只额外加了数据校验、自动文档、依赖注入等上层
+  能力;**路由、middleware、异常处理这些底层机制直接用 Starlette 的**。
+
+**为什么这对本文重要**:文中很多"框架默认行为"其实是 **Starlette 定的**,不是
+FastAPI —— 比如[中间件注册顺序](#中间件注册顺序总览)的"后加在外层"规则、
+[基础 7](#7-框架按继承链mro挑异常处理器)的"按 MRO 挑异常处理器"。FastAPI 只是把
+这些转手暴露给你。理解"哪层负责什么",才知道该去哪层解决问题。
 
 #### 1. ASGI 三件套:scope / receive / send
 
@@ -337,6 +371,57 @@ cv.get() after outer reset   -> None          # 恢复到最初始状态
 
 如果内层用 `set(None)` 收尾,会把外层原本的值冲掉。用 `token` + `reset(token)`
 才能精确恢复,嵌套多少层都不互相污染。
+
+---
+
+### 四、没接住的异常怎么变成安全响应
+
+前三簇讲的是"正常路径"。但代码会抛异常——有些是我们预料到的(如
+`RetrievalUnavailableError`),有些没预料到(如某处 `None.foo` 抛的
+`AttributeError`)。这一簇讲框架**怎么决定用哪个处理器**去把一个异常变成 HTTP
+响应,这是看懂 [Step 6 兜底处理器](#step-6兜底异常处理器)的前提。
+
+#### 7. 框架按继承链(MRO)挑异常处理器
+
+**它要解决什么**:你可以给不同异常注册不同的处理器
+(`@app.exception_handler(SomeError)`),每个返回不同的响应。那么一个异常抛出时,
+框架凭什么决定用哪个?答案是**按异常类的继承链**。
+
+先看本项目异常的"家族树"(注意 `RAGServiceError` 继承自 `RuntimeError`,不是直接
+继承 `Exception`):
+
+```
+Exception
+└── RuntimeError
+    ├── RAGServiceError                 （项目基类）
+    │   ├── RetrievalUnavailableError
+    │   ├── GenerationUnavailableError
+    │   └── GenerationTimeoutError
+    └── （其它 RuntimeError 子类，如手写的 RuntimeError("...")）
+```
+
+`RetrievalUnavailableError` **是一种** `RAGServiceError`,**也是一种**
+`RuntimeError` 和 `Exception` —— 就像"哈士奇是一种狗,也是一种动物"。
+
+**MRO(Method Resolution Order,方法解析顺序)** 就是"从一个类往上,到它所有祖先
+的排队,从最具体到最泛"。`RetrievalUnavailableError` 的 MRO 是:
+
+```
+RetrievalUnavailableError → RAGServiceError → RuntimeError → Exception → ...
+        (最近/最具体)                                          (最远/最泛)
+```
+
+**Starlette 就是拿抛出异常的 MRO 链,从最具体那头开始,逐个问"有没有人注册了处理
+这个类的处理器",第一个匹配的就用它。** 由此得到三条结论,正是 Step 6 注释里那句话:
+
+- **"按 MRO 挑"**:框架按继承链找处理器,不是随便找。
+- **"具体处理器优先"**:抛 `RetrievalUnavailableError` 时,链上第一站就命中它专属
+  的处理器(返回 503),根本走不到 `Exception`;只有抛一个**没有专属处理器**的异常
+  (如裸 `RuntimeError`)时,才会一路退到 `Exception` 的兜底处理器。
+- **"注册顺序无关"**:处理器谁先注册、谁后注册都不影响结果,因为框架比的是"在 MRO
+  链上离异常多近",而不是"谁先登记"。距离由**类继承关系**决定,与代码顺序无关。
+
+这条机制是 Step 6 能"加一个 `Exception` 兜底网、又不误伤已有具体处理器"的保证。
 
 ---
 
@@ -585,6 +670,101 @@ app.add_middleware(
 
 ---
 
+## Step 5:/chat 限流(rate limiting)
+
+**文件**:新增 [app/core/rate_limit.py](app/core/rate_limit.py);
+[app/core/config/settings.py](app/core/config/settings.py) 加 `CHAT_RATE_LIMIT`;
+[app/main.py](app/main.py) 注册 limiter、给 `/chat` 加限流、加 429 处理器;
+[tests/conftest.py](tests/conftest.py) 加重置 fixture;依赖 `slowapi` 加到三处
+依赖文件;[.env.example](.env.example) 补注释。
+
+### 为什么只限 `/chat`
+
+大多数接口是"廉价"的(`/health` 只返回一句话,被打一万次也不心疼)。但 `/chat`
+每被调一次,背后是一次 embedding 计算 + 一次 reranker 推理 + **一次 OpenAI API
+调用(真金白银,社团付费)**。这是一个"**每次调用都花钱**"的接口。一旦暴露到
+公网,一个滥用脚本、一个前端死循环 bug,就能把社团的 OpenAI 账单刷爆。
+
+**限流 = 给"同一客户端在一段时间内能调多少次"设上限**,超了直接返回 HTTP 429
+(Too Many Requests),**在触发那三样昂贵操作之前就挡住**。
+
+### 用 `slowapi`,按 IP,`10/minute`(方向 C:止血)
+
+跟 CORS 一样,限流是标准需求,用成熟库 `slowapi`,不自己造。它在**内存**里维护
+`{IP → 这分钟调了几次}` 的计数,超限就抛 `RateLimitExceeded`。
+
+三个决定及取舍:
+
+- **维度:按客户端 IP**(从 ASGI `scope` 里的 `client` 拿)。这是止血方案。
+  **已知局限**:社团很多用户可能共用同一出口 IP(校园 WiFi / 宿舍 NAT),在服务器
+  看来是同一个 IP,因此按 IP 限流会**多人共享一份额度**,可能误伤正常用户。精细化
+  (按登录用户维度)延后,见 [future_plan.md](future_plan.md) 第 16 项 /
+  [issue #67](https://github.com/CSSA-AI/CSSA-DA/issues/67)。
+- **额度:`CHAT_RATE_LIMIT` 默认 `10/minute`**,存成字符串,部署时用环境变量按
+  实际用量调,无需改代码。
+- **存储:内存态,不接 Redis**。本项目由社团部署但**不需要多 ECS 水平扩容**,
+  内存态因此是正确选择;Redis 分布式限流彻底归入"将来水平扩容再说"。
+
+一个为测试着想的小设计:传给 slowapi 的限额是一个**函数**(每次请求现读
+`settings.CHAT_RATE_LIMIT`),而非写死的字符串 —— 这样测试能临时把额度调到很低来
+验证 429,不影响其它测试。
+
+### 两个实现约束(值得记)
+
+- **`/chat` 必须有一个名叫 `request` 的 `Request` 参数**。slowapi **按参数名
+  `request` 去找**那个 HTTP 请求对象(它要读 IP),不是按类型。因此把原来的请求体
+  参数改名为 `payload`,另加 `request: Request`。对外 JSON 格式不变。
+- **429 响应要覆盖成统一安全格式**。slowapi 默认的 429 body 和我们其它错误长得
+  不一样,加一个 `RateLimitExceeded` 处理器,让它也返回
+  `{"error": {"code": "rate_limited", ...}}`,和 Step 2–4 的错误风格一致。
+
+### 一个已知取舍(暂不处理)
+
+鉴权失败(`require_internal_api_key` 拒绝)**不计入**限流次数,因为 slowapi 的检查
+在接口函数内部、鉴权 dependency 之后才执行。要让"狂试错误 key"也被限流,得把限流
+挪到鉴权之前,改动更大,不在本步。
+
+---
+
+## Step 6:兜底异常处理器
+
+**文件**:[app/main.py](app/main.py) 加 `@app.exception_handler(Exception)`;
+[tests/unit/test_api_middleware.py](tests/unit/test_api_middleware.py) 加测试。
+
+> 前置基础:[7. 框架按继承链(MRO)挑异常处理器](#7-框架按继承链mro挑异常处理器)。
+
+### 要解决什么
+
+加固前只有三种**预料到的** `RAGServiceError` 子类(加 Step 5 的
+`RateLimitExceeded`)有专属安全响应。**没预料到的**异常(数据库连接串写错抛出带
+明文密码的异常、某处 `None.foo`、第三方库内部炸了)没有对应处理器,会穿透到
+Starlette 最外层的默认兜底。两个后果:
+
+- **不走我们的结构化日志**:这条错误不带 `request_id`、不以 JSON 格式记录,排查时
+  对不上号。根因是 Starlette 是通用框架,**不认识我们在 Step 1 自定义的日志管道**。
+- **响应格式不统一,且潜在泄露**:兜底返回的是 Starlette 的默认格式,不是我们的
+  `{"error": {...}}`;若 `debug=True`(开发模式)甚至会把完整堆栈渲染给客户端。
+  本项目默认没开 debug,但不该依赖"默认恰好安全"。
+
+### 设计
+
+加一个捕获 `Exception`(所有异常基类)的处理器当**兜底网**:用我们的 `logger` 记
+完整异常 + 堆栈(`request_id` 由 formatter 自动带上),对客户端只返回无害的
+`{"error": {"code": "internal_error", ...}}` + 500。这和已知错误的安全处理是同一
+原则:**内部记全,对外说少**。
+
+**为什么加了兜底不会误伤已有处理器**:见[基础 7](#7-框架按继承链mro挑异常处理器)
+—— Starlette 按 MRO 挑处理器,具体类永远比 `Exception` 更近、优先命中,注册顺序
+也无关。所以已知错误照走各自的处理器,只有"没人认领"的异常才落到这个兜底。
+
+### 已知边界
+
+新加的 **middleware 自身**如果抛异常,**绕不过**这个兜底 —— 因为异常处理器工作在
+Starlette 的 `ExceptionMiddleware` 那层,而我们的两个 middleware 在它**外面**。
+缓解办法是保持 middleware 代码尽量简单(它们本就很简单)。
+
+---
+
 ## 中间件注册顺序(总览)
 
 **Starlette 规则:最后 `add_middleware()` 的调用变成最外层**(请求最先经过,响应
@@ -622,22 +802,30 @@ app.add_middleware(CORSMiddleware, ...)         # 最后加 → 最外层
 - 安全头在成功响应(`/health`)与错误响应(`/chat` 触发 503)上都齐全。
 - CORS 预检对允许的 origin 回 `Access-Control-Allow-Origin`,对未配置的 origin
   不回该头。
+- 限额调低到 `2/minute` 后,第 3 次 `/chat` 返回 429 且是统一安全格式(不是
+  slowapi 默认 body)。
+- 抛裸 `RuntimeError`(带敏感串)时,兜底处理器返回安全 500 且异常原文不出现在
+  响应里;已有的具体错误测试继续通过,反证兜底没误伤具体处理器。
 
-**一个测试陷阱**:不能直接用 pytest 的 `caplog`。因为 `configure_app_logging`
-设了 `propagate=False`,日志到不了 root logger,而 `caplog` 默认在 root 监听,
-会静默地什么都收不到。测试改为手动往 `"app"` logger 挂一个收集用的
-`logging.Handler`(见 `captured_app_logs` fixture)。
+**几个测试陷阱**:
 
-验证结果:全量 `tests/unit` 160 passed,无回归。集成测试
+- 不能直接用 pytest 的 `caplog`。因为 `configure_app_logging` 设了
+  `propagate=False`,日志到不了 root logger,而 `caplog` 默认在 root 监听,会
+  静默地什么都收不到。测试改为手动往 `"app"` logger 挂一个收集用的
+  `logging.Handler`(见 `captured_app_logs` fixture)。
+- slowapi limiter 是 `app` 级的共享状态,`TestClient` 又永远用同一个假客户端
+  地址,不重置会让限流计数在测试间累积、互相影响。`tests/conftest.py` 加了一个
+  autouse fixture 在每个测试前后 `limiter.reset()`。
+- 测兜底 500 时要用 `TestClient(app, raise_server_exceptions=False)`,否则
+  `TestClient` 默认会把服务器端异常**重新抛出**,拿不到处理器产生的 500 响应。
+
+验证结果:全量 `tests/unit` 162 passed,无回归。集成测试
 (`tests/integration`)需要真实 Postgres + pgvector,未在本地运行。
 
 ---
 
 ## 尚未完成的步骤(见 future_plan.md)
 
-- **Step 5**:`/chat` rate limiting(`slowapi`,内存态,`CHAT_RATE_LIMIT` 配置)。
-  需加新依赖、改 `/chat` 签名、处理测试确定性。
-- **Step 6**:兜底 `Exception` 处理器,未预期异常返回安全的 500 并结构化记录。
 - **Step 7**:两个 Dockerfile 的 uvicorn 加 `--no-access-log`,stdout 只保留
   结构化 JSON。
 - **Step 8**:手动端到端验证。

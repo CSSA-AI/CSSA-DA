@@ -45,6 +45,13 @@ class FailingOrchestrator:
         raise RetrievalUnavailableError("internal detail must stay private")
 
 
+class UnexpectedlyFailingOrchestrator:
+    """Stub orchestrator that raises an unhandled, non-RAG exception."""
+
+    def run(self, query, **kwargs):
+        raise RuntimeError("db password=supersecret must stay private")
+
+
 def client() -> TestClient:
     app.dependency_overrides[get_rag_orchestrator] = lambda: (
         LoggingOrchestrator()
@@ -224,3 +231,25 @@ def test_chat_rate_limit_returns_safe_429(monkeypatch):
             "message": "Too many requests. Please slow down and try again shortly.",
         }
     }
+
+
+def test_catch_all_handler_returns_safe_500():
+    app.dependency_overrides[get_rag_orchestrator] = lambda: (
+        UnexpectedlyFailingOrchestrator()
+    )
+    app.dependency_overrides[require_internal_api_key] = lambda: None
+    # raise_server_exceptions=False lets the registered handler produce the
+    # response instead of the TestClient re-raising the exception.
+    response = TestClient(app, raise_server_exceptions=False).post(
+        "/chat",
+        json={"message": "How do I enrol?"},
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "error": {
+            "code": "internal_error",
+            "message": "An unexpected error occurred. Please try again later.",
+        }
+    }
+    assert "supersecret" not in response.text
