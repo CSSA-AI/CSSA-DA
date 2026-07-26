@@ -424,8 +424,12 @@ CPU environment 包含多项 API runtime 不需要的工具，例如：
    optional-dependencies）；torch 走 `pytorch-cpu` index（锁到 `2.12.1+cpu`）；
    ML 栈钉到 `.venv` 验证过的版本。用纯粹由 `uv.lock` 构建的隔离环境跑
    `pytest tests/unit`：**186 passed**（与 `.venv` 基线一致，无回归）。
-2. ⬜ **切 CI 到 uv**：`unit-test.yml` 从 `pip install -r requirements-ci.txt`
-   改为 `uv sync`；删除 `requirements-ci.txt`。验证 CI 配置与本地一致。
+2. ✅ **切 CI 到 uv**：已完成。`unit-test.yml` 与 `integration-test.yml` 改用
+   `astral-sh/setup-uv@v6`（`enable-cache`）+ `uv sync --locked`（锁文件过期即
+   CI 失败）+ `uv run pytest`；删除 `requirements-ci.txt`。本地按 CI 确切命令验证：
+   `uv sync --locked` / `uv run python ops/check_config.py` / `uv run pytest
+   tests/unit` → **186 passed**（集成测试需 postgres 服务，未在本地跑，命令形式与
+   单测一致）。apt 系统依赖步骤暂保留。
 3. ⬜ **重写 `Dockerfile.cpu`**：`python:3.11-slim`（固定 digest）+ multi-stage
    + `uv sync --no-dev`；本地 `docker build` 跑通 `/health`、`/ready`、
    `pipelines --help`（对齐 `docker-check.yml` 的冒烟测试）。落实第 5/6/7 项。
