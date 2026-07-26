@@ -19,6 +19,7 @@ from pipelines.ingestion.wechat.storage import (
     MemoryArticleSink,
     MemoryCheckpointStore,
 )
+from pipelines.shared.storage import LocalStorage
 
 
 @pytest.fixture
@@ -50,8 +51,10 @@ def test_api_key_is_required(monkeypatch):
 
 
 def test_local_checkpoint_store_round_trip(test_workspace):
-    state_file = test_workspace / "scraper_state.json"
-    store = JsonFileCheckpointStore(state_file)
+    store = JsonFileCheckpointStore(
+        LocalStorage(test_workspace),
+        "scraper_state.json",
+    )
     state = HarvestState(
         begin=40,
         total_saved=35,
@@ -62,7 +65,7 @@ def test_local_checkpoint_store_round_trip(test_workspace):
     store.save(state)
 
     assert store.load() == state
-    assert not state_file.with_suffix(".json.tmp").exists()
+    assert not (test_workspace / "scraper_state.json.tmp").exists()
 
     store.clear()
     assert store.load() == HarvestState()
@@ -70,18 +73,10 @@ def test_local_checkpoint_store_round_trip(test_workspace):
 
 def test_local_article_sink_is_ordered_and_idempotent(test_workspace):
     sink = JsonChunkArticleSink(
-        temp_dir=test_workspace / "temp_chunks",
-        final_file=(
-            test_workspace
-            / "raw"
-            / "wechat"
-            / "wechat_articles_20260710T010203Z.json"
-        ),
-        current_file=(
-            test_workspace
-            / "current"
-            / "wechat_articles_all.json"
-        ),
+        LocalStorage(test_workspace),
+        "checkpoints/wechat_temp_chunks",
+        "raw/wechat/wechat_articles_20260710T010203Z.json",
+        "current/wechat_articles_all.json",
     )
     sink.write_batch(20, [{"title": "old second"}])
     sink.write_batch(0, [{"title": "first"}])
@@ -107,7 +102,8 @@ def test_local_article_sink_is_ordered_and_idempotent(test_workspace):
     assert articles == [{"title": "first"}, {"title": "second"}]
     assert current_articles == articles
     assert output.article_count == 2
-    assert not (test_workspace / "temp_chunks").exists()
+    assert output.location == "raw/wechat/wechat_articles_20260710T010203Z.json"
+    assert not (test_workspace / "checkpoints" / "wechat_temp_chunks").exists()
 
 
 def test_harvester_uses_injected_client_and_memory_storage(config):

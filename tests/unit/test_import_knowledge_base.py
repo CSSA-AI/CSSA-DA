@@ -18,6 +18,7 @@ from pipelines.orchestration.import_knowledge_base import (
 from pipelines.shared.import_checkpoint import (
     MemoryImportCheckpointStore,
 )
+from pipelines.shared.storage import LocalStorage
 
 
 DATABASE_URL = "postgresql://test:test@localhost:5432/testdb"
@@ -331,16 +332,19 @@ def test_local_import_loads_file_and_constructs_model(
     loader.load_batch.return_value = 1
     mock_loader_class.return_value.__enter__.return_value = loader
 
+    storage = LocalStorage(temp_dir)
     try:
         result = run_local_import(
+            storage,
             DATABASE_URL,
-            input_file=input_file,
+            input_key="knowledge_base.json",
             model_name="test-model",
             model_revision="revision-123",
         )
         cached_result = run_local_import(
+            storage,
             DATABASE_URL,
-            input_file=input_file,
+            input_key="knowledge_base.json",
             model_name="test-model",
             model_revision="revision-123",
         )

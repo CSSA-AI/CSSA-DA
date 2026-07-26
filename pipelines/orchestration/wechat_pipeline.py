@@ -3,7 +3,6 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
-from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -14,11 +13,12 @@ from pipelines.orchestration.import_knowledge_base import run_local_import
 from pipelines.orchestration.transform_wechat import run_local_transform
 from pipelines.shared.logging import pipeline_run_context
 from pipelines.shared.paths import (
-    DEFAULT_CURRENT_DATA_DIR,
-    DEFAULT_DATA_DIR,
-    DEFAULT_PIPELINE_REPORTS_DIR,
+    KNOWLEDGE_BASE_CURRENT_KEY,
+    PIPELINE_REPORTS_PREFIX,
+    WECHAT_RAW_CURRENT_KEY,
 )
 from pipelines.shared.reports import write_json_report
+from pipelines.shared.storage import Storage
 
 
 logger = logging.getLogger(__name__)
@@ -38,8 +38,8 @@ class WechatPipelineRunResult:
     attempted_import_count: int
     affected_count: int
     raw_output_location: str
-    processed_output_file: Path
-    report_file: Path | None = None
+    processed_output_key: str
+    report_key: str | None = None
 
     @property
     def rejected_count(self) -> int:
@@ -47,37 +47,24 @@ class WechatPipelineRunResult:
 
 
 def run_local_wechat_pipeline(
+    storage: Storage,
     database_url: str,
     *,
     harvester_config: WechatHarvesterConfig | None = None,
-    data_dir: Path = DEFAULT_DATA_DIR,
     created_at: date | None = None,
     model_name: str | None = None,
     model_revision: str | None = None,
     table_name: str | None = None,
     batch_size: int = 100,
-    import_checkpoint_file: Path | None = None,
+    import_checkpoint_key: str | None = None,
     reset_import_checkpoint: bool = False,
     pipeline_run_loader: PipelineRunMetadataLoader | None = None,
     run_id: str | None = None,
 ) -> WechatPipelineRunResult:
     run_id = run_id or str(uuid4())
     run_started_at = datetime.now(timezone.utc)
-    raw_output_file = data_dir / "wechat_articles_all.json"
-    processed_output_file = data_dir / "wechat_articles_processed.json"
-    if data_dir == DEFAULT_DATA_DIR:
-        raw_output_file = (
-            DEFAULT_CURRENT_DATA_DIR / "wechat_articles_all.json"
-        )
-        processed_output_file = (
-            DEFAULT_CURRENT_DATA_DIR
-            / "wechat_articles_processed.json"
-        )
-    else:
-        raw_output_file = data_dir / "current" / "wechat_articles_all.json"
-        processed_output_file = (
-            data_dir / "current" / "wechat_articles_processed.json"
-        )
+    raw_output_key = WECHAT_RAW_CURRENT_KEY
+    processed_output_key = KNOWLEDGE_BASE_CURRENT_KEY
     run_started = time.perf_counter()
     with pipeline_run_context(run_id):
         logger.info(
@@ -91,7 +78,7 @@ def run_local_wechat_pipeline(
                 pipeline_name="wechat",
                 status="started",
                 started_at=run_started_at,
-                input_path=str(raw_output_file),
+                input_path=raw_output_key,
             ),
         )
 
@@ -99,8 +86,8 @@ def run_local_wechat_pipeline(
             harvest_result = _run_stage(
                 "harvest",
                 lambda: run_local_harvest(
+                    storage,
                     config=harvester_config,
-                    data_dir=data_dir,
                     run_started_at=run_started_at,
                 ),
                 lambda result: {
@@ -110,9 +97,9 @@ def run_local_wechat_pipeline(
             transform_result = _run_stage(
                 "transform",
                 lambda: run_local_transform(
-                    input_file=raw_output_file,
-                    output_file=processed_output_file,
-                    data_dir=data_dir,
+                    storage,
+                    input_key=raw_output_key,
+                    output_key=processed_output_key,
                     created_at=created_at,
                     run_started_at=run_started_at,
                 ),
@@ -123,13 +110,14 @@ def run_local_wechat_pipeline(
             import_result = _run_stage(
                 "import",
                 lambda: run_local_import(
-                    database_url=database_url,
-                    input_file=processed_output_file,
+                    storage,
+                    database_url,
+                    input_key=processed_output_key,
                     model_name=model_name,
                     model_revision=model_revision,
                     table_name=table_name,
                     batch_size=batch_size,
-                    checkpoint_file=import_checkpoint_file,
+                    checkpoint_key=import_checkpoint_key,
                     reset_checkpoint=reset_import_checkpoint,
                 ),
                 lambda result: {
@@ -139,8 +127,8 @@ def run_local_wechat_pipeline(
             )
         except Exception as error:
             finished_at = datetime.now(timezone.utc)
-            report_file = _write_wechat_pipeline_report(
-                data_dir=data_dir,
+            report_key = _write_wechat_pipeline_report(
+                storage=storage,
                 run_id=run_id,
                 status="failed",
                 started_at=run_started_at,
@@ -155,9 +143,9 @@ def run_local_wechat_pipeline(
                     status="failed",
                     started_at=run_started_at,
                     finished_at=finished_at,
-                    input_path=str(raw_output_file),
-                    output_path=str(processed_output_file),
-                    report_path=str(report_file),
+                    input_path=raw_output_key,
+                    output_path=processed_output_key,
+                    report_path=report_key,
                     error_type=type(error).__name__,
                     error_message=str(error),
                 ),
@@ -173,18 +161,18 @@ def run_local_wechat_pipeline(
             attempted_import_count=import_result.attempted_count,
             affected_count=import_result.affected_count,
             raw_output_location=harvest_result.output_location,
-            processed_output_file=processed_output_file,
+            processed_output_key=processed_output_key,
         )
         finished_at = datetime.now(timezone.utc)
-        report_file = _write_wechat_pipeline_report(
-            data_dir=data_dir,
+        report_key = _write_wechat_pipeline_report(
+            storage=storage,
             run_id=run_id,
             status="completed",
             started_at=run_started_at,
             finished_at=finished_at,
             result=result,
         )
-        result = replace(result, report_file=report_file)
+        result = replace(result, report_key=report_key)
         _upsert_pipeline_run_metadata(
             pipeline_run_loader,
             PipelineRunRecord(
@@ -193,9 +181,9 @@ def run_local_wechat_pipeline(
                 status="completed",
                 started_at=run_started_at,
                 finished_at=finished_at,
-                input_path=str(raw_output_file),
-                output_path=str(processed_output_file),
-                report_path=str(report_file),
+                input_path=raw_output_key,
+                output_path=processed_output_key,
+                report_path=report_key,
                 record_count=result.transformed_count,
                 affected_count=result.affected_count,
             ),
@@ -224,26 +212,17 @@ def _upsert_pipeline_run_metadata(
     loader.upsert_run(record)
 
 
-def _pipeline_reports_dir(data_dir: Path) -> Path:
-    if data_dir == DEFAULT_DATA_DIR:
-        return DEFAULT_PIPELINE_REPORTS_DIR
-    return data_dir / "reports" / "pipelines"
-
-
 def _write_wechat_pipeline_report(
     *,
-    data_dir: Path,
+    storage: Storage,
     run_id: str,
     status: str,
     started_at: datetime,
     finished_at: datetime,
     result: WechatPipelineRunResult | None = None,
     error: Exception | None = None,
-) -> Path:
-    report_file = (
-        _pipeline_reports_dir(data_dir)
-        / f"wechat_pipeline_{run_id}.json"
-    )
+) -> str:
+    report_key = f"{PIPELINE_REPORTS_PREFIX}/wechat_pipeline_{run_id}.json"
     payload: dict[str, Any] = {
         "run_id": run_id,
         "pipeline": "wechat",
@@ -255,7 +234,7 @@ def _write_wechat_pipeline_report(
         payload.update(
             {
                 "raw_output_location": result.raw_output_location,
-                "processed_output_file": str(result.processed_output_file),
+                "processed_output_key": result.processed_output_key,
                 "harvested_count": result.harvested_count,
                 "transformed_count": result.transformed_count,
                 "skipped_count": result.skipped_count,
@@ -273,7 +252,8 @@ def _write_wechat_pipeline_report(
             }
         )
 
-    return write_json_report(report_file, payload)
+    write_json_report(storage, report_key, payload)
+    return report_key
 
 
 def _run_stage(

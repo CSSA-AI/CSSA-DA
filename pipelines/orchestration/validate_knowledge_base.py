@@ -1,16 +1,19 @@
 import argparse
-from pathlib import Path
 
 from pipelines.shared.json_records import load_json_records
-from pipelines.shared.paths import DEFAULT_KNOWLEDGE_BASE_INPUT
+from pipelines.shared.paths import (
+    DEFAULT_DATA_DIR,
+    DEFAULT_KNOWLEDGE_BASE_INPUT_KEY,
+)
+from pipelines.shared.storage import LocalStorage, Storage
 from pipelines.validation.knowledge_base_records import validate_records
 
 
-def dry_run(input_file: Path) -> int:
-    records = load_json_records(input_file)
+def dry_run(storage: Storage, key: str) -> int:
+    records = load_json_records(storage, key)
     errors = validate_records(records)
 
-    print(f"Input file: {input_file}")
+    print(f"Input key: {key}")
     print(f"Rows found: {len(records)}")
 
     if errors:
@@ -32,13 +35,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--input",
-        type=Path,
-        default=DEFAULT_KNOWLEDGE_BASE_INPUT,
-        help="Processed JSON file to validate.",
+        default=DEFAULT_KNOWLEDGE_BASE_INPUT_KEY,
+        help="Processed record key under the storage root.",
     )
     args = parser.parse_args()
 
-    return dry_run(args.input)
+    return dry_run(LocalStorage(DEFAULT_DATA_DIR), args.input)
 
 
 if __name__ == "__main__":

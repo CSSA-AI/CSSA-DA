@@ -3,8 +3,9 @@ import json
 import logging
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
-from pathlib import Path
 from typing import Any, Protocol
+
+from pipelines.shared.storage import Storage, StorageNotFoundError
 
 
 logger = logging.getLogger(__name__)
@@ -39,15 +40,15 @@ class ImportCheckpointStore(Protocol):
 
 
 class JsonImportCheckpointStore:
-    def __init__(self, checkpoint_file: Path):
-        self.checkpoint_file = checkpoint_file
+    def __init__(self, storage: Storage, key: str):
+        self.storage = storage
+        self.key = key
 
     def load(self) -> ImportCheckpoint | None:
-        if not self.checkpoint_file.exists():
+        try:
+            payload = json.loads(self.storage.read(self.key))
+        except StorageNotFoundError:
             return None
-
-        with self.checkpoint_file.open("r", encoding="utf-8") as file:
-            payload = json.load(file)
 
         return ImportCheckpoint(
             identity=ImportCheckpointIdentity(**payload["identity"]),
@@ -61,24 +62,15 @@ class JsonImportCheckpointStore:
         )
 
     def save(self, checkpoint: ImportCheckpoint) -> None:
-        self.checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
-        temporary_file = self.checkpoint_file.with_suffix(
-            f"{self.checkpoint_file.suffix}.tmp"
+        document = json.dumps(
+            asdict(checkpoint),
+            ensure_ascii=False,
+            indent=2,
         )
-
-        with temporary_file.open("w", encoding="utf-8") as file:
-            json.dump(
-                asdict(checkpoint),
-                file,
-                ensure_ascii=False,
-                indent=2,
-            )
-
-        temporary_file.replace(self.checkpoint_file)
+        self.storage.write(self.key, document.encode("utf-8"))
 
     def clear(self) -> None:
-        if self.checkpoint_file.exists():
-            self.checkpoint_file.unlink()
+        self.storage.delete(self.key)
 
 
 class MemoryImportCheckpointStore:

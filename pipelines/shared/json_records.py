@@ -1,26 +1,22 @@
 import json
-from pathlib import Path
 from typing import Any
 
+from pipelines.shared.storage import Storage
 
-def load_json_records(input_file: Path) -> list[dict[str, Any]]:
-    with input_file.open("r", encoding="utf-8") as file:
-        records = json.load(file)
+
+def load_json_records(storage: Storage, key: str) -> list[dict[str, Any]]:
+    records = json.loads(storage.read(key))
 
     if not isinstance(records, list):
-        raise ValueError(f"Expected a JSON list in {input_file}")
+        raise ValueError(f"Expected a JSON list in {key}")
 
     return records
 
 
 def write_json_records(
-    output_file: Path,
+    storage: Storage,
+    key: str,
     records: list[dict[str, Any]],
 ) -> None:
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    temporary_file = output_file.with_suffix(f"{output_file.suffix}.tmp")
-
-    with temporary_file.open("w", encoding="utf-8") as file:
-        json.dump(records, file, ensure_ascii=False, indent=2)
-
-    temporary_file.replace(output_file)
+    document = json.dumps(records, ensure_ascii=False, indent=2)
+    storage.write(key, document.encode("utf-8"))

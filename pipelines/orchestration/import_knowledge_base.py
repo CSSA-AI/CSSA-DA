@@ -2,7 +2,6 @@ import logging
 import math
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
@@ -23,9 +22,10 @@ from pipelines.shared.import_checkpoint import (
 )
 from pipelines.shared.json_records import load_json_records
 from pipelines.shared.paths import (
-    DEFAULT_KNOWLEDGE_BASE_INPUT,
-    import_checkpoint_file_for,
+    DEFAULT_KNOWLEDGE_BASE_INPUT_KEY,
+    IMPORT_CHECKPOINT_KEY,
 )
+from pipelines.shared.storage import Storage
 from pipelines.validation.knowledge_base_records import validate_records
 
 
@@ -235,15 +235,16 @@ def _import_validated_records(
 
 
 def run_local_import(
+    storage: Storage,
     database_url: str,
     *,
-    input_file: Path = DEFAULT_KNOWLEDGE_BASE_INPUT,
+    input_key: str = DEFAULT_KNOWLEDGE_BASE_INPUT_KEY,
     model_name: str | None = None,
     model_revision: str | None = None,
     table_name: str | None = None,
     limit: int | None = None,
     batch_size: int = 100,
-    checkpoint_file: Path | None = None,
+    checkpoint_key: str | None = None,
     reset_checkpoint: bool = False,
 ) -> ImportResult:
     if limit is not None and limit < 0:
@@ -251,7 +252,7 @@ def run_local_import(
     if batch_size <= 0:
         raise ValueError("batch_size must be greater than zero")
 
-    records = load_json_records(input_file)
+    records = load_json_records(storage, input_key)
     if limit is not None:
         records = records[:limit]
 
@@ -267,7 +268,8 @@ def run_local_import(
         )
     table_name = table_name or rag_config["pgvector"]["table_name"]
     checkpoint_store = JsonImportCheckpointStore(
-        checkpoint_file or import_checkpoint_file_for(input_file)
+        storage,
+        checkpoint_key or IMPORT_CHECKPOINT_KEY,
     )
     if reset_checkpoint:
         checkpoint_store.clear()
