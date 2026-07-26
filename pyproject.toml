@@ -1,0 +1,79 @@
+[project]
+name = "cssa-da"
+version = "0.1.0"
+description = "RAG chatbot for Chinese students and scholars in Australia."
+requires-python = ">=3.11,<3.12"
+
+# Shared runtime core: imported by BOTH the API service and the data pipeline.
+# Direct dependencies only — exact versions (incl. transitive) are pinned in
+# uv.lock. Keep this list to what the code actually imports.
+# ML stack pinned to the versions the code is developed and tested against
+# (see the local .venv). The Hugging Face ecosystem moves fast and newer
+# releases have shipped breaking changes, so these carry exact pins rather than
+# floating to "latest".
+dependencies = [
+    "torch==2.12.1",                 # embedding / reranker inference (CPU wheel, see [tool.uv.sources])
+    "sentence-transformers==5.6.0",  # SentenceTransformer / CrossEncoder
+    "peft==0.19.1",                  # load LoRA adapters onto the reranker
+    "huggingface-hub",       # ops/download_models.py snapshot_download
+    "psycopg2-binary",       # sync Postgres driver (retriever, readiness, loaders)
+    "sqlalchemy",            # used by Alembic migrations
+    "alembic",               # schema migrations + integration test setup
+    "pydantic",              # request/response + config models
+    "pydantic-settings",     # app/core/config/settings.py
+    "pyyaml",                # settings.py loads rag-config.yaml
+    "python-dotenv",         # load .env for local/dev
+    "langchain-core",        # rag/adapters/langchain_adapter.py
+    "openai",                # ChatGPT generator + question generator
+]
+
+[dependency-groups]
+# API-serving-only deps. Installed into the API image via:
+#   uv sync --no-default-groups --group api
+api = [
+    "fastapi",
+    "uvicorn[standard]",
+    "slowapi",              # /chat rate limiting
+]
+
+# Data-pipeline-only deps. Installed into the pipeline image via:
+#   uv sync --no-default-groups --group pipeline
+pipeline = [
+    "requests",             # wechat ingestion client
+]
+
+# Development / CI: everything needed to run the full test suite (which imports
+# both app and pipeline code), plus test and type-check tooling. `dev` is uv's
+# default group, so a plain `uv sync` gives contributors a complete env.
+dev = [
+    "pytest",
+    "httpx",                # fastapi.testclient transport + integration tests
+    "numpy",                # imported directly by several tests
+    "mypy",
+    { include-group = "api" },
+    { include-group = "pipeline" },
+]
+
+[tool.uv]
+# app/ and pipelines/ are top-level import packages run from source, not a
+# single pip-installable distribution — treat the repo as a virtual project so
+# uv manages dependencies without trying to build/install the project itself.
+package = false
+
+# transformers is pulled in transitively (by sentence-transformers / peft).
+# Pin it to the version the code is tested against (the local .venv) so a future
+# re-lock doesn't silently adopt an untested release — without making it a
+# direct dependency of ours.
+constraint-dependencies = ["transformers==5.12.1"]
+
+# torch defaults to the CUDA build on PyPI (~2.5 GB, useless without a GPU).
+# Pull it from PyTorch's CPU-only index instead. `explicit = true` means ONLY
+# packages pinned to this index below are fetched from it; everything else
+# still resolves from PyPI.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }

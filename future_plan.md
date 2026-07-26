@@ -202,7 +202,14 @@ Starlette 按异常类型的 MRO 找 handler，已有的具体异常类型 handl
 - 每次请求都有一条结构化 JSON access log，带 `request_id`。
 - 未预期异常不会把内部细节泄露给客户端。
 
-### 2. 让模型交付过程可预测
+### 2. 让模型交付过程可预测 ✅ 已完成（CPU；GPU 待补齐）
+
+> **状态：CPU 侧已完成。** `ops/download_models.py` 在可缓存镜像层下载两个
+> 模型，revision 固定在 `app/core/config/rag-config.yaml`，`Dockerfile.cpu`
+> 设置 `MODEL_DIR`，`app/main.py` lifespan 在接流量前调用
+> `model_registry.preload_models()`，`ModelRegistry` 用 `local_files_only`
+> 加载本地模型。**遗留：`Dockerfile.gpu` 尚未下载模型、未设 `MODEL_DIR`，
+> 需与 CPU 侧对齐（见第 4/5 项的 GPU 补齐）。** 下面保留原始设计记录。
 
 当前 embedding model 和 reranker 在第一次 `/chat` 请求时才加载。这会导致
 `/health` 已经返回成功，但 RAG pipeline 实际上还不能稳定提供服务。
@@ -322,13 +329,18 @@ data/reports      -> s3://<bucket>/reports
 
 ## 高优先级容器工作
 
-### 4. 使用 non-root 用户运行容器
+### 4. 使用 non-root 用户运行容器 ✅ 已完成（CPU；GPU 待补齐）
 
-当前两个 Dockerfile 都以 root 用户运行。
+> **状态：CPU 侧已完成。** `Dockerfile.cpu` 创建 system 用户 `appuser`
+> 并以 `USER appuser` 运行。**遗留：`Dockerfile.gpu` 仍以 root 运行，
+> 需补上同样的 non-root 用户。** `readonlyRootFilesystem` 留到 Phase 2 写
+> ECS task definition 时评估。
+
+当前 GPU Dockerfile 仍以 root 用户运行。
 
 需要完成：
 
-- 创建专用 application user。
+- 创建专用 application user。（CPU 已完成，GPU 待补齐）
 - 只授予该用户所需应用目录和 cache 目录的访问权限。
 - 在 ECS task definition 中评估启用 `readonlyRootFilesystem`。
 
@@ -377,6 +389,55 @@ CPU environment 包含多项 API runtime 不需要的工具，例如：
 - 清理 apt、Conda 和 pip cache。
 - 测量压缩和解压后的镜像大小。
 
+### 5+6+7 合并实施：生产 API 镜像的锁定与瘦身
+
+> **决策（2026-07-27）**：第 5（固定基础镜像）、第 6（锁定依赖）、第 7（缩小
+> 镜像）本质是同一件事，合并实施。
+
+**总方向 —— 按团队分工拆两套环境，互不拖累：**
+
+- **数据科学家（DS）线**：继续用 `environment_cpu.yml`（conda + notebook），
+  jupyter / matplotlib / nltk / gensim 都留着，供 DS 微调模型用。**它不再是
+  生产镜像的来源，永远不进部署产物**，因此不必强锁、不必瘦身。交接点：DS 在
+  notebook 产出模型 / LoRA adapter，工程师侧只负责加载已训好的模型。
+- **工程师线（生产 API 运行时）**：迁到纯 pip 工具链 + slim 基础镜像，严格锁定、
+  精简、可复现。这是部署到 ECS 的镜像。
+
+**工程师线内部再分「生产 / dev」两层**（按"用户请求跑不跑得到"划分）：
+
+- 生产运行时：`/chat` 真正依赖的包（fastapi、uvicorn、torch(CPU)、
+  sentence-transformers、peft、langchain-*、sqlalchemy、asyncpg、pgvector …）。
+- dev / 测试：在生产之上叠加 `pytest`、`httpx`、`mypy`——只在开发和 CI 用，
+  **不进生产镜像**。
+
+**锁定工具（2026-07-27 定）：`uv`。** 直接依赖写进 `pyproject.toml`
+（`[project].dependencies` = 生产，dev group = 测试工具），`uv lock` 生成单一
+`uv.lock`（含 transitive）。本地 / CI `uv sync`，生产镜像 `uv sync --no-dev`。
+基础镜像 `python:3.11-slim` 固定到 digest（落实第 5 项）。`torch` 走 CPU wheel
+的 index。DS 的 conda 环境不受影响。
+
+#### 分步实施清单（每步单独提交、单独验证，再进入下一步）
+
+1. ✅ **建 `pyproject.toml` + `uv.lock`（纯新增，不动 CI / Dockerfile）**：已完成。
+   `[project].dependencies` = 共享核心运行时；`[dependency-groups]` 分
+   `api` / `pipeline` / `dev`（虚拟项目 `package = false`，故用 groups 而非
+   optional-dependencies）；torch 走 `pytorch-cpu` index（锁到 `2.12.1+cpu`）；
+   ML 栈钉到 `.venv` 验证过的版本。用纯粹由 `uv.lock` 构建的隔离环境跑
+   `pytest tests/unit`：**186 passed**（与 `.venv` 基线一致，无回归）。
+2. ⬜ **切 CI 到 uv**：`unit-test.yml` 从 `pip install -r requirements-ci.txt`
+   改为 `uv sync`；删除 `requirements-ci.txt`。验证 CI 配置与本地一致。
+3. ⬜ **重写 `Dockerfile.cpu`**：`python:3.11-slim`（固定 digest）+ multi-stage
+   + `uv sync --no-dev`；本地 `docker build` 跑通 `/health`、`/ready`、
+   `pipelines --help`（对齐 `docker-check.yml` 的冒烟测试）。落实第 5/6/7 项。
+4. ⬜ **`environment_cpu.yml` 重定位为 DS notebook 环境**：加注释 / README 说明
+   它只供 DS 微调用、非部署产物（大概率只是文档层面，不动依赖）。
+5. ⬜ **`Dockerfile.gpu` 对齐**（第 2/4/5 项在 GPU 侧的补齐）：模型下载 +
+   non-root 用户 + 固定基础镜像。GPU 推理属 Phase 5 延后项，此步优先级低于 1–3。
+6. ⬜ **本地构建并测量**：镜像压缩 / 解压大小、启动时间、idle / peak 内存、
+   first-request latency —— Phase 1 收尾验收，为 Phase 2 选 Fargate size 铺路。
+
+原始条目（第 5/6/7 项）保留在下方以备回顾。
+
 ### 8. 在 ECS 中明确配置 health check
 
 Dockerfile 已经包含 health check，但 ECS task definition 仍需要明确配置 container
@@ -398,26 +459,36 @@ ALB target health check      -> /ready
 - 配置 ALB target group health check。
 - 验证 readiness 失败时，新 task 不会接收流量。
 
-### 9. 完善 readiness 语义
+### 9. 完善 readiness 语义 ✅ 已完成
 
-当前 `/ready` 会检查数据库和有效 knowledge-base rows，但不会证明：
+> **状态：已完成。** `app/services/rag/model_registry.py` 用
+> `ModelRegistryStatus` 记录 embedding / reranker 的加载状态；
+> `app/services/readiness.py` 的 `check_readiness` 在数据库和 knowledge-base
+> rows 之外，还检查 `model_registry.status().is_ready`，未 ready 时 `/ready`
+> 返回 503。`/health` 仍是轻量的静态 `{"status":"ok"}`，不依赖外部服务。
+
+`/ready` 现在会检查数据库、有效 knowledge-base rows，并证明：
 
 - Embedding model 已加载
 - Reranker 已加载
 - RAG pipeline 已成功初始化
 
-需要完成：
+已完成：
 
 - 记录 RAG component 初始化状态。
 - 保持 `/health` 轻量，并且不依赖外部服务。
 - 只有 task 确实能够处理 `/chat` 时，`/ready` 才返回成功。
 
-### 10. 清理初始化失败响应
+### 10. 清理初始化失败响应 ✅ 已完成
 
-运行期间的 RAG 错误已经使用安全的公开响应，但 dependency 初始化失败时，当前
-HTTP 503 仍可能包含原始 exception 内容。
+> **状态：已完成。** `app/main.py` 的兜底 `@app.exception_handler(Exception)`
+> 把原始异常记入结构化日志，对外只返回安全的
+> `{"error": {"code": "internal_error", ...}}`（500）。`/ready` 只回
+> `readiness.to_dict()` 里 curated 的 `reason` 字符串（如
+> "Database is unavailable"），不含数据库 URL、内部路径或 provider 细节；
+> lifespan 里模型 preload 失败也只记日志，由 `/ready` 拦住流量。
 
-需要完成：
+已完成：
 
 - 对外返回稳定的初始化错误。
 - 在内部日志中保存原始 exception。
@@ -572,15 +643,20 @@ ECS task count
 
 ### Phase 1：生产 API 容器与可观测性/安全基础
 
-1. 完成第 1 项"保护付费的 `/chat` 接口"的分步实施清单（结构化日志、
+1. ✅ 完成第 1 项"保护付费的 `/chat` 接口"的分步实施清单（结构化日志、
    request_id、CORS、安全响应头、rate limiting、兜底异常处理）。
-2. 确定并实现模型交付策略。
-3. 固定模型 revision。
-4. 创建最小化且锁定版本的 API runtime environment。
-5. 固定基础镜像。
-6. 使用 non-root runtime user。
-7. 在本地构建并测量镜像。
-8. 验证 startup、shutdown、health、readiness 和 first-request 行为。
+2. ✅ 确定并实现模型交付策略（CPU；GPU 待补齐）。
+3. ✅ 固定模型 revision。
+4. ⬜ 创建最小化且锁定版本的 API runtime environment（对应第 6/7 项，**主体
+   剩余工作**：依赖锁定 + 镜像瘦身）。
+5. ⬜ 固定基础镜像（对应第 5 项）。
+6. ✅ 使用 non-root runtime user（CPU；GPU 待补齐）。
+7. ⬜ 在本地构建并测量镜像。
+8. ⬜ 验证 startup、shutdown、health、readiness 和 first-request 行为。
+
+> **Phase 1 剩余聚焦**：第 6 项（依赖锁定）+ 第 7 项（镜像瘦身）+ 第 5 项
+> （固定基础镜像）+ 把第 2/4/5 项在 `Dockerfile.gpu` 侧对齐，然后本地构建并
+> 测量镜像大小 / 启动时间 / 内存 / first-request latency。
 
 ### Phase 2：安全的 AWS API 基础设施
 
