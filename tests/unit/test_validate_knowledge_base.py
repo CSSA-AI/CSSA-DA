@@ -3,6 +3,7 @@ import shutil
 from pathlib import Path
 
 from pipelines.shared.json_records import load_json_records
+from pipelines.shared.storage import LocalStorage
 from pipelines.validation.knowledge_base_records import validate_records
 
 
@@ -33,7 +34,10 @@ def test_validate_records_accepts_processed_wechat_shape():
             encoding="utf-8",
         )
 
-        records = load_json_records(input_file)
+        records = load_json_records(
+            LocalStorage(temp_dir),
+            "wechat_articles_processed.json",
+        )
 
         assert validate_records(records) == []
     finally:

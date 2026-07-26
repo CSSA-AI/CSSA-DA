@@ -12,6 +12,7 @@ from pipelines.orchestration.wechat_pipeline import (
     WechatPipelineRunResult,
     run_local_wechat_pipeline,
 )
+from pipelines.shared.storage import LocalStorage
 from pipelines.transform.wechat_articles import (
     WechatTransformResult,
     WechatTransformStats,
@@ -40,6 +41,7 @@ def test_local_pipeline_runs_stages_and_returns_report():
     if data_dir.exists():
         shutil.rmtree(data_dir)
     data_dir.mkdir()
+    storage = LocalStorage(data_dir)
     metadata_loader = MagicMock()
 
     try:
@@ -48,8 +50,7 @@ def test_local_pipeline_runs_stages_and_returns_report():
                 "pipelines.orchestration.wechat_pipeline.run_local_harvest",
                 return_value=HarvestResult(
                     output_location=(
-                        str(data_dir)
-                        + "/raw/wechat/"
+                        "raw/wechat/"
                         "wechat_articles_20260710T010203Z.json"
                     ),
                     articles_written=12,
@@ -82,8 +83,8 @@ def test_local_pipeline_runs_stages_and_returns_report():
                     lambda *args, **kwargs: datetime(*args, **kwargs)
                 )
                 result = run_local_wechat_pipeline(
+                    storage,
                     DATABASE_URL,
-                    data_dir=data_dir,
                     pipeline_run_loader=metadata_loader,
                     run_id="run-123",
                 )
@@ -99,17 +100,8 @@ def test_local_pipeline_runs_stages_and_returns_report():
         )
         shutil.rmtree(data_dir)
 
-    raw_output_location = (
-        str(data_dir)
-        + "/raw/wechat/"
-        "wechat_articles_20260710T010203Z.json"
-    )
-    expected_report_file = (
-        data_dir
-        / "reports"
-        / "pipelines"
-        / "wechat_pipeline_run-123.json"
-    )
+    raw_output_location = "raw/wechat/wechat_articles_20260710T010203Z.json"
+    report_key = "reports/pipelines/wechat_pipeline_run-123.json"
     assert report_payload["status"] == "completed"
     assert report_payload["pipeline"] == "wechat"
     assert report_payload["transformed_count"] == 9
@@ -122,13 +114,11 @@ def test_local_pipeline_runs_stages_and_returns_report():
     completed_metadata = metadata_loader.upsert_run.call_args_list[1].args[0]
     assert completed_metadata.id == "run-123"
     assert completed_metadata.pipeline_name == "wechat"
-    assert completed_metadata.input_path == str(
-        data_dir / "current" / "wechat_articles_all.json"
+    assert completed_metadata.input_path == "current/wechat_articles_all.json"
+    assert completed_metadata.output_path == (
+        "current/wechat_articles_processed.json"
     )
-    assert completed_metadata.output_path == str(
-        data_dir / "current" / "wechat_articles_processed.json"
-    )
-    assert completed_metadata.report_path == str(expected_report_file)
+    assert completed_metadata.report_path == report_key
     assert completed_metadata.record_count == 9
     assert completed_metadata.affected_count == 8
 
@@ -141,36 +131,35 @@ def test_local_pipeline_runs_stages_and_returns_report():
         attempted_import_count=9,
         affected_count=8,
         raw_output_location=raw_output_location,
-        processed_output_file=(
-            data_dir / "current" / "wechat_articles_processed.json"
-        ),
-        report_file=expected_report_file,
+        processed_output_key="current/wechat_articles_processed.json",
+        report_key=report_key,
     )
     assert result.rejected_count == 3
     harvest.assert_called_once_with(
+        storage,
         config=None,
-        data_dir=data_dir,
         run_started_at=datetime(
             2026, 7, 10, 1, 2, 3, tzinfo=timezone.utc
         ),
     )
     transform.assert_called_once_with(
-        input_file=data_dir / "current" / "wechat_articles_all.json",
-        output_file=data_dir / "current" / "wechat_articles_processed.json",
-        data_dir=data_dir,
+        storage,
+        input_key="current/wechat_articles_all.json",
+        output_key="current/wechat_articles_processed.json",
         created_at=None,
         run_started_at=datetime(
             2026, 7, 10, 1, 2, 3, tzinfo=timezone.utc
         ),
     )
     import_records.assert_called_once_with(
-        database_url=DATABASE_URL,
-        input_file=data_dir / "current" / "wechat_articles_processed.json",
+        storage,
+        DATABASE_URL,
+        input_key="current/wechat_articles_processed.json",
         model_name=None,
         model_revision=None,
         table_name=None,
         batch_size=100,
-        checkpoint_file=None,
+        checkpoint_key=None,
         reset_checkpoint=False,
     )
     completed_events = [
@@ -187,6 +176,7 @@ def test_local_pipeline_writes_failure_report():
     if data_dir.exists():
         shutil.rmtree(data_dir)
     data_dir.mkdir()
+    storage = LocalStorage(data_dir)
     metadata_loader = MagicMock()
 
     try:
@@ -213,8 +203,8 @@ def test_local_pipeline_writes_failure_report():
             pytest.raises(ValueError, match="invalid raw data"),
         ):
             run_local_wechat_pipeline(
+                storage,
                 DATABASE_URL,
-                data_dir=data_dir,
                 pipeline_run_loader=metadata_loader,
                 run_id="run-failure",
             )

@@ -9,6 +9,7 @@ from pipelines.shared.import_checkpoint import (
     build_import_checkpoint_identity,
     fingerprint_records,
 )
+from pipelines.shared.storage import LocalStorage
 
 
 def _identity():
@@ -51,8 +52,10 @@ def test_json_checkpoint_store_round_trip():
     if temp_dir.exists():
         shutil.rmtree(temp_dir)
     temp_dir.mkdir()
-    checkpoint_file = temp_dir / "import_checkpoint.json"
-    store = JsonImportCheckpointStore(checkpoint_file)
+    store = JsonImportCheckpointStore(
+        LocalStorage(temp_dir),
+        "import_checkpoint.json",
+    )
     checkpoint = ImportCheckpoint(
         identity=_identity(),
         next_batch_index=2,
@@ -65,7 +68,7 @@ def test_json_checkpoint_store_round_trip():
         store.save(checkpoint)
 
         assert store.load() == checkpoint
-        assert not checkpoint_file.with_suffix(".json.tmp").exists()
+        assert not (temp_dir / "import_checkpoint.json.tmp").exists()
 
         store.clear()
         assert store.load() is None
@@ -99,7 +102,10 @@ def test_json_checkpoint_store_reads_legacy_inserted_count():
 """,
         encoding="utf-8",
     )
-    store = JsonImportCheckpointStore(checkpoint_file)
+    store = JsonImportCheckpointStore(
+        LocalStorage(temp_dir),
+        "import_checkpoint.json",
+    )
 
     try:
         checkpoint = store.load()

@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from pathlib import Path
 
 from pipelines.ingestion.wechat import (
     HarvestResult,
@@ -12,66 +11,39 @@ from pipelines.ingestion.wechat.storage import (
     JsonFileCheckpointStore,
 )
 from pipelines.shared.paths import (
-    DEFAULT_CURRENT_DATA_DIR,
-    DEFAULT_DATA_DIR,
-    DEFAULT_WECHAT_CHECKPOINT_FILE,
-    DEFAULT_WECHAT_RAW_DIR,
-    DEFAULT_WECHAT_TEMP_CHUNKS_DIR,
+    WECHAT_CHECKPOINT_KEY,
+    WECHAT_RAW_CURRENT_KEY,
+    WECHAT_RAW_DIR_KEY,
+    WECHAT_TEMP_CHUNKS_PREFIX,
 )
-from pipelines.shared.storage import LocalStorage
+from pipelines.shared.storage import Storage
 
 
-def build_wechat_raw_snapshot_file(
+def build_wechat_raw_snapshot_key(
     *,
-    data_dir: Path = DEFAULT_DATA_DIR,
     run_started_at: datetime | None = None,
-) -> Path:
+) -> str:
     run_started_at = run_started_at or datetime.now(timezone.utc)
     timestamp = (
         run_started_at.astimezone(timezone.utc)
         .strftime("%Y%m%dT%H%M%SZ")
     )
-    if data_dir == DEFAULT_DATA_DIR:
-        return DEFAULT_WECHAT_RAW_DIR / f"wechat_articles_{timestamp}.json"
-    return data_dir / "raw" / "wechat" / f"wechat_articles_{timestamp}.json"
+    return f"{WECHAT_RAW_DIR_KEY}/wechat_articles_{timestamp}.json"
 
 
 def run_local_harvest(
+    storage: Storage,
     *,
     config: WechatHarvesterConfig | None = None,
-    data_dir: Path = DEFAULT_DATA_DIR,
     run_started_at: datetime | None = None,
 ) -> HarvestResult:
     config = config or WechatHarvesterConfig.from_environment()
-    current_file = (
-        DEFAULT_CURRENT_DATA_DIR / "wechat_articles_all.json"
-        if data_dir == DEFAULT_DATA_DIR
-        else data_dir / "current" / "wechat_articles_all.json"
-    )
-    checkpoint_file = (
-        DEFAULT_WECHAT_CHECKPOINT_FILE
-        if data_dir == DEFAULT_DATA_DIR
-        else data_dir / "checkpoints" / "wechat_scraper_state.json"
-    )
-    temp_chunks_dir = (
-        DEFAULT_WECHAT_TEMP_CHUNKS_DIR
-        if data_dir == DEFAULT_DATA_DIR
-        else data_dir / "checkpoints" / "wechat_temp_chunks"
-    )
-    storage = LocalStorage(data_dir)
-    checkpoint_store = JsonFileCheckpointStore(
-        storage,
-        checkpoint_file.relative_to(data_dir).as_posix(),
-    )
-    raw_snapshot_file = build_wechat_raw_snapshot_file(
-        data_dir=data_dir,
-        run_started_at=run_started_at,
-    )
+    checkpoint_store = JsonFileCheckpointStore(storage, WECHAT_CHECKPOINT_KEY)
     article_sink = JsonChunkArticleSink(
         storage,
-        temp_chunks_dir.relative_to(data_dir).as_posix(),
-        raw_snapshot_file.relative_to(data_dir).as_posix(),
-        current_file.relative_to(data_dir).as_posix(),
+        WECHAT_TEMP_CHUNKS_PREFIX,
+        build_wechat_raw_snapshot_key(run_started_at=run_started_at),
+        WECHAT_RAW_CURRENT_KEY,
     )
 
     return harvest_wechat(

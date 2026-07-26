@@ -1,4 +1,3 @@
-from pathlib import Path
 from unittest.mock import ANY, patch
 
 from pipelines.cli import main
@@ -25,7 +24,7 @@ def test_harvest_wechat_command(mock_run_local_harvest):
     exit_code = main(["harvest-wechat"])
 
     assert exit_code == 0
-    mock_run_local_harvest.assert_called_once_with()
+    mock_run_local_harvest.assert_called_once()
 
 
 @patch(
@@ -47,7 +46,7 @@ def test_transform_wechat_command(mock_process_articles):
     exit_code = main(["transform-wechat"])
 
     assert exit_code == 0
-    mock_process_articles.assert_called_once_with()
+    mock_process_articles.assert_called_once()
 
 
 @patch(
@@ -74,8 +73,8 @@ def test_import_knowledge_base_command(mock_run_local_import):
 
     assert exit_code == 0
     assert (
-        mock_run_local_import.call_args.kwargs["checkpoint_file"]
-        == Path("checkpoint.json")
+        mock_run_local_import.call_args.kwargs["checkpoint_key"]
+        == "checkpoint.json"
     )
     assert mock_run_local_import.call_args.kwargs["reset_checkpoint"] is True
 
@@ -96,10 +95,8 @@ def test_run_wechat_pipeline_command(
         dropped_count=1,
         attempted_import_count=9,
         affected_count=8,
-        raw_output_location="data/wechat_articles_all.json",
-        processed_output_file=Path(
-            "data/wechat_articles_processed.json"
-        ),
+        raw_output_location="raw/wechat/wechat_articles_all.json",
+        processed_output_key="current/wechat_articles_processed.json",
     )
 
     exit_code = main(
@@ -116,6 +113,7 @@ def test_run_wechat_pipeline_command(
         "postgresql://test:test@localhost:5432/testdb"
     )
     mock_run_pipeline.assert_called_once_with(
+        ANY,
         database_url=(
             "postgresql://test:test@localhost:5432/testdb"
         ),

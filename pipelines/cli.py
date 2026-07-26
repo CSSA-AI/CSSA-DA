@@ -2,14 +2,17 @@ import argparse
 import logging
 import os
 from collections.abc import Sequence
-from pathlib import Path
 from uuid import uuid4
 
 from pipelines.shared.logging import (
     configure_pipeline_logging,
     pipeline_run_context,
 )
-from pipelines.shared.paths import DEFAULT_KNOWLEDGE_BASE_INPUT
+from pipelines.shared.paths import (
+    DEFAULT_DATA_DIR,
+    DEFAULT_KNOWLEDGE_BASE_INPUT_KEY,
+)
+from pipelines.shared.storage import LocalStorage
 
 
 logger = logging.getLogger(__name__)
@@ -36,9 +39,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     import_command.add_argument(
         "--input",
-        type=Path,
-        default=DEFAULT_KNOWLEDGE_BASE_INPUT,
-        help="Processed knowledge-base JSON file.",
+        default=DEFAULT_KNOWLEDGE_BASE_INPUT_KEY,
+        help="Processed knowledge-base record key under the storage root.",
     )
     import_command.add_argument(
         "--database-url",
@@ -59,9 +61,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     import_command.add_argument(
         "--checkpoint-file",
-        type=Path,
         default=None,
-        help="Import checkpoint JSON file.",
+        help=(
+            "Import checkpoint key under the storage root. Defaults to "
+            "checkpoints/import_knowledge_base.json."
+        ),
     )
     import_command.add_argument(
         "--reset-checkpoint",
@@ -132,7 +136,7 @@ def _run_command(
             run_local_harvest,
         )
 
-        result = run_local_harvest()
+        result = run_local_harvest(LocalStorage(DEFAULT_DATA_DIR))
         logger.info(
             "WeChat harvest completed",
             extra={
@@ -146,7 +150,7 @@ def _run_command(
             run_local_transform,
         )
 
-        result = run_local_transform()
+        result = run_local_transform(LocalStorage(DEFAULT_DATA_DIR))
         logger.info(
             "WeChat transformation completed",
             extra={
@@ -166,11 +170,12 @@ def _run_command(
             )
 
         result = run_local_import(
+            LocalStorage(DEFAULT_DATA_DIR),
             database_url=args.database_url,
-            input_file=args.input,
+            input_key=args.input,
             limit=args.limit,
             batch_size=args.batch_size,
-            checkpoint_file=args.checkpoint_file,
+            checkpoint_key=args.checkpoint_file,
             reset_checkpoint=args.reset_checkpoint,
         )
         logger.info(
@@ -196,6 +201,7 @@ def _run_command(
             )
 
         result = run_local_wechat_pipeline(
+            LocalStorage(DEFAULT_DATA_DIR),
             database_url=args.database_url,
             batch_size=args.batch_size,
             reset_import_checkpoint=args.reset_import_checkpoint,

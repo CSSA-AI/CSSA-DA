@@ -2,49 +2,23 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+# Local storage root. Logical keys below are resolved relative to this
+# directory by ``LocalStorage``; in the cloud the same keys live under an S3
+# bucket. Artifacts are always addressed by logical key, never by filesystem
+# path (see docs/design/storage-abstraction.md).
 DEFAULT_DATA_DIR = PROJECT_ROOT / "data"
-DEFAULT_RAW_DATA_DIR = DEFAULT_DATA_DIR / "raw"
-DEFAULT_PROCESSED_DATA_DIR = DEFAULT_DATA_DIR / "processed"
-DEFAULT_CURRENT_DATA_DIR = DEFAULT_DATA_DIR / "current"
-DEFAULT_CHECKPOINT_DATA_DIR = DEFAULT_DATA_DIR / "checkpoints"
-DEFAULT_REPORTS_DATA_DIR = DEFAULT_DATA_DIR / "reports"
-DEFAULT_WECHAT_RAW_DIR = DEFAULT_RAW_DATA_DIR / "wechat"
-DEFAULT_KNOWLEDGE_BASE_PROCESSED_DIR = (
-    DEFAULT_PROCESSED_DATA_DIR / "knowledge_base"
-)
-DEFAULT_WECHAT_CHECKPOINT_FILE = (
-    DEFAULT_CHECKPOINT_DATA_DIR / "wechat_scraper_state.json"
-)
-DEFAULT_WECHAT_TEMP_CHUNKS_DIR = (
-    DEFAULT_CHECKPOINT_DATA_DIR / "wechat_temp_chunks"
-)
-DEFAULT_IMPORT_CHECKPOINT_FILE = (
-    DEFAULT_CHECKPOINT_DATA_DIR / "import_knowledge_base.json"
-)
-DEFAULT_PIPELINE_REPORTS_DIR = DEFAULT_REPORTS_DATA_DIR / "pipelines"
-DEFAULT_WECHAT_RAW_CURRENT = (
-    DEFAULT_CURRENT_DATA_DIR / "wechat_articles_all.json"
-)
-DEFAULT_KNOWLEDGE_BASE_CURRENT = (
-    DEFAULT_CURRENT_DATA_DIR / "wechat_articles_processed.json"
-)
-LEGACY_WECHAT_RAW_INPUT = DEFAULT_DATA_DIR / "wechat_articles_all.json"
-LEGACY_KNOWLEDGE_BASE_INPUT = (
-    DEFAULT_DATA_DIR / "wechat_articles_processed.json"
-)
-DEFAULT_WECHAT_RAW_INPUT = DEFAULT_WECHAT_RAW_CURRENT
-DEFAULT_KNOWLEDGE_BASE_INPUT = (
-    DEFAULT_KNOWLEDGE_BASE_CURRENT
-)
 
+# Logical storage keys (``/``-separated, relative to the storage root).
+WECHAT_CHECKPOINT_KEY = "checkpoints/wechat_scraper_state.json"
+WECHAT_TEMP_CHUNKS_PREFIX = "checkpoints/wechat_temp_chunks"
+WECHAT_RAW_DIR_KEY = "raw/wechat"
+WECHAT_RAW_CURRENT_KEY = "current/wechat_articles_all.json"
+KNOWLEDGE_BASE_PROCESSED_DIR_KEY = "processed/knowledge_base"
+KNOWLEDGE_BASE_CURRENT_KEY = "current/wechat_articles_processed.json"
+IMPORT_CHECKPOINT_KEY = "checkpoints/import_knowledge_base.json"
+PIPELINE_REPORTS_PREFIX = "reports/pipelines"
 
-def import_checkpoint_file_for(input_file: Path) -> Path:
-    if input_file == DEFAULT_KNOWLEDGE_BASE_INPUT:
-        return DEFAULT_IMPORT_CHECKPOINT_FILE
-    if input_file.parent.name == "current":
-        return (
-            input_file.parent.parent
-            / "checkpoints"
-            / "import_knowledge_base.json"
-        )
-    return input_file.parent / "checkpoints" / "import_knowledge_base.json"
+# Default logical keys for CLI inputs.
+DEFAULT_WECHAT_RAW_INPUT_KEY = WECHAT_RAW_CURRENT_KEY
+DEFAULT_KNOWLEDGE_BASE_INPUT_KEY = KNOWLEDGE_BASE_CURRENT_KEY
