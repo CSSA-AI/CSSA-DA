@@ -68,9 +68,10 @@ def run_local_harvest(
         run_started_at=run_started_at,
     )
     article_sink = JsonChunkArticleSink(
-        temp_dir=temp_chunks_dir,
-        final_file=raw_snapshot_file,
-        current_file=current_file,
+        storage,
+        temp_chunks_dir.relative_to(data_dir).as_posix(),
+        raw_snapshot_file.relative_to(data_dir).as_posix(),
+        current_file.relative_to(data_dir).as_posix(),
     )
 
     return harvest_wechat(

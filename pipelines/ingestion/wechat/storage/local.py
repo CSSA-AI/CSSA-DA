@@ -1,6 +1,4 @@
 import json
-import shutil
-from pathlib import Path
 from typing import Any
 
 from pipelines.ingestion.wechat.models import ArticleOutput, HarvestState
@@ -42,64 +40,48 @@ class JsonFileCheckpointStore:
 class JsonChunkArticleSink:
     def __init__(
         self,
-        temp_dir: Path,
-        final_file: Path,
-        current_file: Path | None = None,
+        storage: Storage,
+        temp_prefix: str,
+        final_key: str,
+        current_key: str | None = None,
     ):
-        self.temp_dir = temp_dir
-        self.final_file = final_file
-        self.current_file = current_file
+        self.storage = storage
+        self.temp_prefix = temp_prefix
+        self.final_key = final_key
+        self.current_key = current_key
 
     def write_batch(
         self,
         batch_id: int,
         articles: list[dict[str, Any]],
     ) -> None:
-        self.temp_dir.mkdir(parents=True, exist_ok=True)
-        batch_file = self.temp_dir / f"batch_{batch_id}.json"
-        temporary_file = batch_file.with_suffix(".json.tmp")
-
-        with temporary_file.open("w", encoding="utf-8") as file:
-            json.dump(articles, file, ensure_ascii=False, indent=2)
-
-        temporary_file.replace(batch_file)
+        document = json.dumps(articles, ensure_ascii=False, indent=2)
+        self.storage.write(
+            f"{self.temp_prefix}/batch_{batch_id}.json",
+            document.encode("utf-8"),
+        )
 
     def finalize(self) -> ArticleOutput:
         articles: list[dict[str, Any]] = []
-        batch_files = (
-            list(self.temp_dir.glob("batch_*.json"))
-            if self.temp_dir.exists()
-            else []
-        )
+        for key in sorted(self.storage.list(self.temp_prefix), key=_batch_offset):
+            articles.extend(json.loads(self.storage.read(key)))
 
-        for batch_file in sorted(batch_files, key=_batch_offset):
-            with batch_file.open("r", encoding="utf-8") as file:
-                articles.extend(json.load(file))
+        document = json.dumps(
+            articles, ensure_ascii=False, indent=2
+        ).encode("utf-8")
+        self.storage.write(self.final_key, document)
 
-        self.final_file.parent.mkdir(parents=True, exist_ok=True)
-        temporary_file = self.final_file.with_suffix(
-            f"{self.final_file.suffix}.tmp"
-        )
-        with temporary_file.open("w", encoding="utf-8") as file:
-            json.dump(articles, file, ensure_ascii=False, indent=2)
-        temporary_file.replace(self.final_file)
+        if self.current_key is not None:
+            self.storage.write(self.current_key, document)
 
-        if self.current_file is not None:
-            self.current_file.parent.mkdir(parents=True, exist_ok=True)
-            temporary_current_file = self.current_file.with_suffix(
-                f"{self.current_file.suffix}.tmp"
-            )
-            shutil.copyfile(self.final_file, temporary_current_file)
-            temporary_current_file.replace(self.current_file)
-
-        if self.temp_dir.exists():
-            shutil.rmtree(self.temp_dir)
+        self.storage.delete_prefix(self.temp_prefix)
 
         return ArticleOutput(
-            location=str(self.final_file.resolve()),
+            location=self.final_key,
             article_count=len(articles),
         )
 
 
-def _batch_offset(batch_file: Path) -> int:
-    return int(batch_file.stem.removeprefix("batch_"))
+def _batch_offset(key: str) -> int:
+    stem = key.rsplit("/", 1)[-1].removesuffix(".json")
+    return int(stem.removeprefix("batch_"))

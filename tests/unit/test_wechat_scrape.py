@@ -73,18 +73,10 @@ def test_local_checkpoint_store_round_trip(test_workspace):
 
 def test_local_article_sink_is_ordered_and_idempotent(test_workspace):
     sink = JsonChunkArticleSink(
-        temp_dir=test_workspace / "temp_chunks",
-        final_file=(
-            test_workspace
-            / "raw"
-            / "wechat"
-            / "wechat_articles_20260710T010203Z.json"
-        ),
-        current_file=(
-            test_workspace
-            / "current"
-            / "wechat_articles_all.json"
-        ),
+        LocalStorage(test_workspace),
+        "checkpoints/wechat_temp_chunks",
+        "raw/wechat/wechat_articles_20260710T010203Z.json",
+        "current/wechat_articles_all.json",
     )
     sink.write_batch(20, [{"title": "old second"}])
     sink.write_batch(0, [{"title": "first"}])
@@ -110,7 +102,8 @@ def test_local_article_sink_is_ordered_and_idempotent(test_workspace):
     assert articles == [{"title": "first"}, {"title": "second"}]
     assert current_articles == articles
     assert output.article_count == 2
-    assert not (test_workspace / "temp_chunks").exists()
+    assert output.location == "raw/wechat/wechat_articles_20260710T010203Z.json"
+    assert not (test_workspace / "checkpoints" / "wechat_temp_chunks").exists()
 
 
 def test_harvester_uses_injected_client_and_memory_storage(config):
