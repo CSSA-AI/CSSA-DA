@@ -307,14 +307,15 @@ data/reports      -> s3://<bucket>/reports
 2. ✅ **已完成**：迁移 reports —— `write_json_report(storage, key, payload)`；唯一调用方
    `wechat_pipeline` 用 `LocalStorage(data_dir)` + `report_file.relative_to(data_dir)`，
    输出字节与落盘位置均不变。
-3. 迁移 wechat harvest checkpoint（A 类，`JsonFileCheckpointStore`）——构造函数改收
-   `(storage, key)`，唯一构造点 `harvest_wechat.py` 用 `LocalStorage(data_dir)` +
+3. ✅ **已完成**：迁移 wechat harvest checkpoint（A 类，`JsonFileCheckpointStore`）——
+   构造函数改收 `(storage, key)`，唯一构造点 `harvest_wechat.py` 用
    key `checkpoints/wechat_scraper_state.json`。
-4. 迁移 wechat article sink（A 类，`JsonChunkArticleSink`）——逻辑更重（写批次 / list /
-   合并 / 拷到 current / 删临时目录），用到 `write`+`list`+`read`+`delete_prefix`，单独一步。
-5. **入口串联**（`cli.py` / `run_local_*`）：创建 storage、按逻辑 key 往下传；一并迁移
-   **B 类**（`json_records` 与 `JsonImportCheckpointStore`）；`--input` 等参数改为逻辑 key
-   （落实方案②）。
+4. ✅ **已完成**：迁移 wechat article sink（A 类，`JsonChunkArticleSink`）——逻辑更重
+   （写批次 / list / 合并 / 拷到 current / 删临时目录），用到
+   `write`+`list`+`read`+`delete_prefix`；`ArticleOutput.location` 改为逻辑 key。
+5. ✅ **已完成**：**入口串联**（`cli.py` 只建一次 storage、往下传）：一并迁移 **B 类**
+   （`json_records` 与 `JsonImportCheckpointStore`）；`--input` / `--checkpoint-file` 改为
+   逻辑 key（落实方案②）；删掉 `import_checkpoint_file_for` 与 transform legacy 回退。
 6. `S3Storage` 实现（等真正上 AWS 时做，见 Phase 3），上层不改。
 
 不在本阶段范围：`S3Storage` 实现、AWS 相关配置（留到 Phase 3）。

@@ -24,8 +24,8 @@
   - [Step 1:接口 + LocalStorage(已完成)](#step-1接口--localstorage已完成)
   - [Step 2:迁移 reports(已完成)](#step-2迁移-reports已完成)
   - [Step 3:迁移 wechat harvest checkpoint(已完成)](#step-3迁移-wechat-harvest-checkpoint已完成)
-  - [Step 4:迁移 article sink(待做)](#step-4迁移-article-sink待做)
-  - [Step 5:入口串联 + B 类咽喉点(待做)](#step-5入口串联--b-类咽喉点待做)
+  - [Step 4:迁移 article sink(已完成)](#step-4迁移-article-sink已完成)
+  - [Step 5:入口串联 + B 类咽喉点(已完成)](#step-5入口串联--b-类咽喉点已完成)
   - [Step 6:S3Storage(待做,Phase 3)](#step-6s3storage待做phase-3)
 - [迁移顺序原则:A 类先、B 类后](#迁移顺序原则a-类先b-类后)
 - [测试策略](#测试策略)
@@ -239,7 +239,7 @@ import 各段;stage 代码不再自己构造 storage、不再处理裸 `Path`。
 ## 迁移步骤
 
 咽喉点(现在直接碰文件系统的地方)逐个迁移,**每步单独提交、单独验证**。当前全套件
-共 **178 个单元测试**,每步都要求全绿。
+共 **186 个单元测试**,每步都要求全绿。
 
 ### Step 1:接口 + LocalStorage(已完成)
 
@@ -276,27 +276,46 @@ import 各段;stage 代码不再自己构造 storage、不再处理裸 `Path`。
 `LocalStorage(data_dir)` + key `checkpoints/wechat_scraper_state.json`。字节与位置不变;
 同步更新了直接测试它的 round-trip 用例。
 
-### Step 4:迁移 article sink(待做)
+### Step 4:迁移 article sink(已完成)
 
 > 前置基础:[三、Storage 接口(全部 6 个动作)](#三storage-接口与后端)。
 
 [JsonChunkArticleSink](../../pipelines/ingestion/wechat/storage/local.py) 负责「抓取时
 分批落盘 + 最后合并定稿」,是 A 类里最重的一个,几乎用到接口的全部动作:`write_batch`
-→ `write`;`finalize` 里 `glob` → `list`(仍需按批次号数字排序)、读各批 → `read`、写
-final 与 current → `write`、`rmtree` 临时目录 → `delete_prefix`。构造函数从 3 个 `Path`
-改为 `storage` + 3 个 key。
+→ `write`;`finalize` 里 `glob` → `list`(仍需按批次号数字排序,`list` 只保证字典序)、
+读各批 → `read`、写 final 与 current → `write`、`rmtree` 临时目录 → `delete_prefix`。
+构造函数从 3 个 `Path` 改为 `storage` + `temp_prefix` / `final_key` / `current_key` 三个
+key。
 
-一个设计点:`finalize` 返回的 `ArticleOutput.location`(现为绝对磁盘路径)将改为**逻辑
-key**——与方案②一致、本地云通用(它是信息性字段,只进报告和日志,不参与控制流)。
+`finalize` 返回的 `ArticleOutput.location` 从绝对磁盘路径改为**逻辑 key**——与方案②一致、
+本地云通用(它是信息性字段,只进报告和日志,不参与控制流)。字节与落盘位置不变,直接
+测它的 round-trip 用例同步改用 `LocalStorage` + key。
 
-### Step 5:入口串联 + B 类咽喉点(待做)
+### Step 5:入口串联 + B 类咽喉点(已完成)
 
 > 前置基础:[四、入口串联与逻辑 key 寻址](#四把两者粘起来入口串联与逻辑-key-寻址粘合剂)。
 
-在 `cli.py` / `run_local_*` 创建 storage、按逻辑 key 往下传;**一并迁移 B 类**——
-[json_records](../../pipelines/shared/json_records.py) 与
-[JsonImportCheckpointStore](../../pipelines/shared/import_checkpoint.py);`--input` 等
-参数改为逻辑 key(落实方案②)。B 类必须放在这一步,原因见下节。
+这一步是**收口**:落实组合根 + 方案②,把整条管线改成「认接口不认磁盘」。落地内容:
+
+- **组合根**:[cli.py](../../pipelines/cli.py) 在入口**只建一次** `LocalStorage(DEFAULT_DATA_DIR)`,
+  positional 传给每个 `run_local_*`;各编排函数**不再收 `data_dir`、不再自己建 storage**,
+  改收 `storage` + 逻辑 key。换 S3 从此只改 cli 这一行。
+- **B 类咽喉点迁完**:[json_records](../../pipelines/shared/json_records.py)
+  (`load/write_json_records(storage, key[, records])`)与
+  [JsonImportCheckpointStore](../../pipelines/shared/import_checkpoint.py)
+  (`(storage, key)`,`load` 用 `StorageNotFoundError` 判缺失)。
+- **key 常量化**:[paths.py](../../pipelines/shared/paths.py) 把原来的 `DEFAULT_*_FILE`
+  路径常量换成逻辑 key 常量(`WECHAT_CHECKPOINT_KEY`、`IMPORT_CHECKPOINT_KEY`……)。
+- **方案② 落地**:CLI 的 `--input` / `--checkpoint-file` 从「文件路径」改为「逻辑 key」;
+  pipeline 存进 DB 的 `input_path` / `output_path` / `report_path` 元数据、以及
+  `WechatPipelineRunResult` 的字段(改名 `processed_output_key` / `report_key`)都改为逻辑 key。
+
+**顺带删掉的历史包袱**(方案② 下失去意义,已确认取舍):
+- `import_checkpoint_file_for()`——让 import checkpoint 跟随「任意自定义 input 路径」的推导逻辑,
+  改为固定 key `checkpoints/import_knowledge_base.json`。
+- transform 的 `LEGACY_WECHAT_RAW_INPUT` 回退分支。
+
+B 类为何必须压到这一步(而不能随 A 类提前迁),见下节。
 
 ### Step 6:S3Storage(待做,Phase 3)
 
@@ -338,7 +357,8 @@ key**——与方案②一致、本地云通用(它是信息性字段,只进报�
 
 ## 尚未完成
 
-- **S3Storage 实现**与 AWS 相关配置 —— 留到 future_plan 的 Phase 3。
-- **Step 4/5** —— article sink 迁移、入口串联 + B 类迁移 + `--input` 改逻辑 key。
+- **Step 6:S3Storage 实现**与 AWS 相关配置 —— 全部本地咽喉点(A + B 类)已迁完,入口
+  已收成组合根;只差照同一套 6 个动作写一个走 S3 的后端,入口换一行即可切换。留到
+  future_plan 的 Phase 3。
 - 一个已知的小取舍:失败分支「先写报告 → 再写 DB 记录 → 抛出」,若 DB 写入本身抛错,会
   出现「有报告但无 DB 行」的部分追踪。影响很小,暂不处理。
