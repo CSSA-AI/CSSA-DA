@@ -23,6 +23,17 @@ class Settings(BaseSettings):
     WECHAT_API_KEY: str | None = None
     DATABASE_URL: str | None = None
     MODEL_DIR: Path | None = None
+    LOG_LEVEL: str = "INFO"
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
+    CHAT_RATE_LIMIT: str = "10/minute"
+
+    @property
+    def allowed_origins_list(self) -> list[str]:
+        return [
+            origin.strip()
+            for origin in self.ALLOWED_ORIGINS.split(",")
+            if origin.strip()
+        ]
 
     def local_model_path(self, model_name: str) -> Path | None:
         if self.MODEL_DIR is None:

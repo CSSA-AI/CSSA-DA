@@ -46,6 +46,7 @@ dependencies:
     # === 4. 后端 API (Platform Squad) ===
     - fastapi                 # 写接口必备
     - uvicorn[standard]       # 跑服务必备
+    - slowapi                 # /chat 限流 (保护 OpenAI 账单)
     - python-multipart        # 上传文件
     - pydantic
     - pydantic-settings       # 读取 .env

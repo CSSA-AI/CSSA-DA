@@ -13,6 +13,9 @@
 当前暂时假设微信清洗逻辑符合要求。微信清洗 golden tests 延后到首次 AWS
 部署完成之后再处理。
 
+数据库方向已确定：使用 **Amazon RDS for PostgreSQL + pgvector**，直接复用现有
+schema、迁移和 `PGVectorRetriever` 代码，不引入专用向量数据库。
+
 ## 目标架构
 
 API 请求链路：
@@ -62,28 +65,142 @@ AWS IAM OIDC       为 GitHub 提供短期 AWS 凭据
 
 ## 部署阻塞项
 
-### 1. 保护付费的 `/chat` 接口
+### 1. 保护付费的 `/chat` 接口（含结构化日志与可观测性基础）✅ 已完成
 
-当前 `POST /chat` 没有鉴权和限流。如果直接暴露到公网，任何人都可以触发：
+> **状态：已完成并验证（8 步全部落地）。** 设计与实现细节见
+> [docs/design/chat-api-hardening.md](docs/design/chat-api-hardening.md)。
+> 限流精细化（按用户维度）延后,见本文件第 16 项 /
+> [issue #67](https://github.com/CSSA-AI/CSSA-DA/issues/67)。下面保留原始设计
+> 记录以备回顾。
+
+当前 `POST /chat` 没有鉴权和限流，`app/main.py` 里也没有注册任何 middleware
+（无 CORS、无请求日志、无 rate limiting、无安全响应头、无兜底异常处理）。
+只有 `RetrievalUnavailableError` / `GenerationUnavailableError` /
+`GenerationTimeoutError` 三种已知错误有安全的公开响应，其他未预期的异常会
+直接落到 Starlette 的默认行为，不会被结构化记录。
+
+如果直接暴露到公网，任何人都可以触发：
 
 - Embedding 计算
 - Reranker 推理
 - OpenAI API 调用
 - AWS 计算资源消耗
 
-需要完成：
+#### 具体设计
 
-- 确定并实现鉴权方案。
-- 增加按客户端计算的 rate limiting。
-- 保留请求大小限制。
-- 增加 access log 和稳定的 `request_id`。
-- 保持安全、稳定的公开错误响应。
+**新增 `app/core/logging.py`**：仿照 `pipelines/shared/logging.py` 里的
+`JsonLogFormatter`，但用 `request_id`（`ContextVar`）代替 `run_id`，单独实现
+（不与 pipelines 共用，两者字段和上下文不同）。`configure_app_logging()` 把
+JSON handler 挂到 `logging.getLogger("app")` 上，`propagate=False`。所有
+`app.*` 下的 logger（包括 `app.services.rag.orchestrator`）自动继承，
+无需改动 orchestrator 代码。
+
+**新增 `app/core/middleware.py`**（纯 ASGI middleware，不用
+`BaseHTTPMiddleware`，避免它的响应缓冲开销）：
+- `RequestContextMiddleware`：读取/生成 `X-Request-ID`，绑定到 ContextVar，
+  计时，请求结束时输出一条结构化 access log（method、path、status_code、
+  duration_ms、request_id），并把 `X-Request-ID` 写回响应头。
+- `SecurityHeadersMiddleware`：给所有响应加
+  `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、
+  `Referrer-Policy: no-referrer`、`Strict-Transport-Security`。
+
+**CORS**：用 Starlette 自带的 `CORSMiddleware`，允许的 origin 来自新配置项
+`ALLOWED_ORIGINS`（逗号分隔字符串，避免 pydantic-settings 对复杂类型要求
+JSON 格式），并 `expose_headers=["X-Request-ID"]` 让前端能读到。
+
+**Middleware 注册顺序**（`app/main.py`）：Starlette 里"最后
+`add_middleware()` 的在最外层"，顺序反直觉，需要在代码里写注释说明：
+
+```python
+app.add_middleware(RequestContextMiddleware)   # 最先添加 -> 最内层
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins_list, ...)
+```
+
+**新增 `app/core/rate_limit.py`**：用 `slowapi`（内存态，单实例够用；本项目由
+社团实际部署但不需要多 ECS 水平扩容，因此内存态限流是正确选择，Redis 分布式
+限流彻底归入将来水平扩容再说）：
+
+```python
+limiter = Limiter(key_func=get_remote_address)
+
+def chat_rate_limit() -> str:
+    return settings.CHAT_RATE_LIMIT
+```
+
+**限流维度：先按客户端 IP，`CHAT_RATE_LIMIT` 默认 `10/minute`（方向 C，保命型
+止血）。** 这是一个够用的止血方案，能挡住最主要的威胁——脚本狂刷 / 前端死循环
+把社团的 OpenAI 账单刷爆。精细化（按登录用户 ID 等）延后到前端和用户体系确定
+之后再做（见"中优先级工作 / 精细化限流"）。
+
+传入**函数**而不是字符串常量给 `@limiter.limit(...)`，这样每次请求都会重新
+读取 `settings.CHAT_RATE_LIMIT`，方便测试时 monkeypatch 出一个很低的限额。
+`/chat` 需要一个真正的 `Request` 参数才能配合 slowapi，把现有的
+`request: ChatRequest` 改名成 `payload: ChatRequest` 并加
+`http_request: Request`（JSON 请求体格式不变，只是内部参数名变化）。
+`RateLimitExceeded` 的响应体要覆盖成跟其他错误一致的安全格式：
+`{"error": {"code": "rate_limited", "message": "..."}}`，429。
+
+**兜底异常处理**（`app/main.py`）：加
+`@app.exception_handler(Exception)`，把完整异常和 `request_id` 记到结构化
+日志，对外只返回 `{"error": {"code": "internal_error", ...}}`，500。
+Starlette 按异常类型的 MRO 找 handler，已有的具体异常类型 handler 会继续
+优先匹配，不需要调整注册顺序。
+
+**依赖**：`slowapi` 需要同时加到 `requirements-ci.txt`、
+`environment_cpu.yml`、`environment_gpu.yml`（这三处分别管 CI 和真实构建的
+依赖，缺一个就会导致 CI 和生产环境不一致）。
+
+**顺带清理**：`Dockerfile.cpu` / `Dockerfile.gpu` 的 uvicorn 启动命令加
+`--no-access-log`，避免 stdout 里同时出现 uvicorn 自带的纯文本访问日志和
+我们的结构化 JSON 日志，保持 stdout 干净（为将来接 CloudWatch 铺路）。
+
+#### 分步实施清单（每一步单独提交、单独验证，再进入下一步）
+
+1. `app/core/logging.py` + `configure_app_logging()` 接入 `app/main.py`，
+   确认现有测试全部通过（先不加中间件，只验证结构化日志本身能跑起来）。
+2. `RequestContextMiddleware`（request_id + access log），配套测试：无
+   header 时自动生成、有 header 时原样回传、深层日志（orchestrator 里的
+   log）也能带上同一个 request_id。
+3. `SecurityHeadersMiddleware`，配套测试：成功和失败响应都带上四个头。
+4. `CORSMiddleware` + `ALLOWED_ORIGINS` 配置项，配套测试：允许的 origin
+   preflight 通过，未配置的 origin 不返回 `Access-Control-Allow-Origin`。
+5. `app/core/rate_limit.py` + `/chat` 参数改名 + `CHAT_RATE_LIMIT` 配置项，
+   配套测试：超过限额返回安全格式的 429；`tests/conftest.py` 加 autouse
+   fixture 在每个测试前后 reset limiter 状态（`TestClient` 请求永远用同一个
+   客户端地址，不 reset 会导致测试之间互相影响）。
+6. 兜底 `Exception` handler，配套测试：未预期的 `RuntimeError` 返回安全的
+   500 body，异常原文不出现在响应里（对照现有
+   `test_chat_returns_safe_service_errors` 的写法）。
+7. `--no-access-log` 加到两个 Dockerfile，本地跑一次 `docker compose`
+   确认镜像仍然正常启动、`/health` healthcheck 仍然通过。
+8. 手动验证：`uvicorn app.main:app --reload`，检查 `/health`、`/chat`
+   （带合法 `CHAT_API_KEY`）返回里有 `X-Request-ID` 和安全响应头，stdout
+   每次请求有一条 JSON 日志，连续打 `/chat` 超过限额能看到 429。
+
+#### 已知取舍（暂不处理）
+
+- **限流按 IP 是止血,非最终方案。** 社团用户很多人可能共用同一出口 IP（校园
+  WiFi / 宿舍 NAT），对服务器看起来是同一个 IP，因此"每 IP 每分钟 10 次"在
+  校园网下是**多人共享一份额度**，可能误伤正常用户。当前接受这个不完美——它
+  仍能挡住主要威胁（脚本狂刷）。精细化按用户维度的限流延后（见下方"精细化
+  限流"）。
+- 鉴权失败（`require_internal_api_key` 拒绝）不计入 rate limit 次数，因为
+  slowapi 的检查在 endpoint 函数内部、鉴权 dependency 之后才执行。要修的话
+  需要把限流挪到鉴权之前，改动更大，本阶段不做。
+- 新加的 middleware 本身如果抛异常，会绕过兜底 handler（它们在 Starlette
+  的 `ExceptionMiddleware` 外层）。保持这部分代码尽量简单、覆盖测试即可。
+- 分布式 rate limiting（Redis 等）、Prometheus `/metrics`、OpenTelemetry
+  tracing 都不在本阶段范围内，等真正需要多实例水平扩容或更细粒度的指标时
+  再评估。
 
 验收条件：
 
 - 匿名或无效客户端无法调用 `/chat`。
 - 单个客户端无法超过规定的请求频率。
 - 鉴权失败时不会执行 retrieval、reranking 或 OpenAI 调用。
+- 每次请求都有一条结构化 JSON access log，带 `request_id`。
+- 未预期异常不会把内部细节泄露给客户端。
 
 ### 2. 让模型交付过程可预测
 
@@ -320,21 +437,33 @@ API 当前运行一个 Uvicorn worker。由于每个 worker 可能单独加载�
 - CPU saturation point
 - 可接受 latency 下的 requests per second
 
-### 15. 改进结构化应用日志
+### 15. 补充业务级可观测性字段
 
-应用已经将日志输出到 stdout 和 stderr，可以接入 CloudWatch。完整 tracing 可以延后，
-但应先增加基础运维字段：
+基础的结构化日志、`request_id`、access log 已经在第 1 项里完成。这里延后的
+是更细粒度的业务字段，等 RAG pipeline 有实际打点需求时再加：
 
-- `request_id`
-- `duration_ms`
-- `status_code`
-- `error_code`
-- `retrieval_count`
-- `model_name`
+- `retrieval_count`（检索到的候选数）
+- `model_name` / `model_revision`（当前生效的 embedding/reranker 版本）
+- `error_code`（已在错误响应里有，日志里补充记录）
 
 LangChain/LangSmith tracing、metadata 和隐私策略继续延后到核心系统完成之后。
 
-### 16. 确定生产 RDS 配置
+### 16. 精细化限流（按用户维度）
+
+第 1 项已经上了**按 IP、`10/minute` 的止血型限流**（方向 C）。它够挡住脚本
+狂刷，但按 IP 计数在校园 WiFi / 宿舍 NAT 下会**多人共享一份额度**，可能误伤
+正常用户。等前端和用户体系确定后再做精细化：
+
+- 确定限流维度：登录用户 ID、会话 token，或按渠道发放的 `X-API-Key`。
+- 可能需要把限流检查挪到鉴权**之前 / 同层**，以便对"狂试错误 key"也计数
+  （当前鉴权失败不计入限流，见第 1 项已知取舍）。
+- 若届时已做多实例水平扩容，改用 Redis 等共享存储做分布式限流（当前单实例
+  内存态足够，不需要）。
+- 可考虑分层限额：正常用户宽松额度 + 全局兜底额度保护 OpenAI 账单。
+
+在此之前,`CHAT_RATE_LIMIT` 可直接通过环境变量按实际用量调整,无需改代码。
+
+### 17. 确定生产 RDS 配置
 
 连接数预算计算方式：
 
@@ -363,7 +492,8 @@ ECS task count
 - `.env`、virtual environment、cache、tests、notebook 和大部分本地数据已从
   Docker build context 排除。
 - 没有发现 tracked `.env` 或 private key。
-- Runtime secret 通过环境变量读取。
+- Runtime secret 通过环境变量读取（ECS 可以直接用 Secrets Manager 注入同名
+  环境变量，代码不需要改动）。
 - FastAPI lifespan 会在 shutdown 时关闭 PostgreSQL connection pool。
 - Docker 使用 JSON-form `CMD`，Uvicorn 可以接收 termination signal。
 - Database migration 可以通过 Alembic 独立运行。
@@ -373,25 +503,26 @@ ECS task count
 
 ## 推荐交付顺序
 
-### Phase 1：生产 API 容器
+### Phase 1：生产 API 容器与可观测性/安全基础
 
-1. 确定并实现模型交付策略。
-2. 固定模型 revision。
-3. 创建最小化且锁定版本的 API runtime environment。
-4. 固定基础镜像。
-5. 使用 non-root runtime user。
-6. 在本地构建并测量镜像。
-7. 验证 startup、shutdown、health、readiness 和 first-request 行为。
+1. 完成第 1 项"保护付费的 `/chat` 接口"的分步实施清单（结构化日志、
+   request_id、CORS、安全响应头、rate limiting、兜底异常处理）。
+2. 确定并实现模型交付策略。
+3. 固定模型 revision。
+4. 创建最小化且锁定版本的 API runtime environment。
+5. 固定基础镜像。
+6. 使用 non-root runtime user。
+7. 在本地构建并测量镜像。
+8. 验证 startup、shutdown、health、readiness 和 first-request 行为。
 
 ### Phase 2：安全的 AWS API 基础设施
 
 1. 使用 infrastructure as code 创建 VPC、subnet、security group、ECR、ECS、
    ALB、RDS、Secrets Manager、CloudWatch 和 IAM。
-2. 在公开 `/chat` 前增加 authentication 和 rate limiting。
-3. 配置 ECS 和 ALB health check。
-4. 配置访问 OpenAI 所需的 outbound network。
-5. 将 migration 作为部署关卡。
-6. 部署 API 并运行 smoke test。
+2. 配置 ECS 和 ALB health check。
+3. 配置访问 OpenAI 所需的 outbound network。
+4. 将 migration 作为部署关卡。
+5. 部署 API 并运行 smoke test。
 
 ### Phase 3：生产 Pipeline
 
@@ -418,7 +549,10 @@ ECS task count
 
 ## 当前最需要决定的问题
 
-首先决定模型如何进入 ECS。推荐的首版方案是：
+第 1 项（保护 `/chat`、结构化日志）是当前正在按分步清单推进的工作，一步
+一步做、每步单独验证。
+
+其次是模型如何进入 ECS。推荐的首版方案是：
 
 ```text
 将固定 revision 的 embedding model 和 reranker model 放入 API 镜像。

@@ -2,6 +2,7 @@
 pytest
 fastapi
 httpx
+slowapi
 
 # 数据模型
 pydantic
