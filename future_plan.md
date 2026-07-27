@@ -409,7 +409,8 @@ FROM continuumio/miniconda3:latest
 ### 5+6+7 合并实施：生产 API 镜像的锁定与瘦身
 
 > **决策（2026-07-27）**：第 5（固定基础镜像）、第 6（锁定依赖）、第 7（缩小
-> 镜像）本质是同一件事，合并实施。
+> 镜像）本质是同一件事，合并实施。设计与实现细节、基础知识见
+> [docs/design/deployment-packaging.md](docs/design/deployment-packaging.md)。
 
 **总方向 —— 按团队分工拆两套环境，互不拖累：**
 
