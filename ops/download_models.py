@@ -1,5 +1,6 @@
 import argparse
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -29,7 +30,13 @@ class ModelDownload:
     revision: str
 
 
-def get_model_downloads(config: dict[str, Any]) -> list[ModelDownload]:
+MODEL_NAMES = ("embedding", "reranker")
+
+
+def get_model_downloads(
+    config: dict[str, Any],
+    names: Sequence[str] | None = None,
+) -> list[ModelDownload]:
     downloads = [
         ModelDownload(
             name="embedding",
@@ -43,6 +50,16 @@ def get_model_downloads(config: dict[str, Any]) -> list[ModelDownload]:
         ),
     ]
 
+    if names is not None:
+        unknown = set(names) - {model.name for model in downloads}
+        if unknown:
+            valid = ", ".join(sorted(m.name for m in downloads))
+            raise ValueError(
+                f"Unknown model(s): {', '.join(sorted(unknown))}. "
+                f"Valid models: {valid}"
+            )
+        downloads = [model for model in downloads if model.name in names]
+
     for model in downloads:
         if not model.repo_id:
             raise ValueError(f"Model repository is required for {model.name}")
@@ -55,11 +72,12 @@ def get_model_downloads(config: dict[str, Any]) -> list[ModelDownload]:
 def download_models(
     target_dir: Path,
     config: dict[str, Any] = rag_config,
+    names: Sequence[str] | None = None,
 ) -> list[Path]:
     target_dir = target_dir.resolve()
     downloaded_paths = []
 
-    for model in get_model_downloads(config):
+    for model in get_model_downloads(config, names):
         local_dir = target_dir / model.name
         snapshot_download(
             repo_id=model.repo_id,
@@ -82,9 +100,19 @@ def main() -> int:
         required=True,
         help="Directory that will contain embedding and reranker models.",
     )
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        choices=MODEL_NAMES,
+        default=None,
+        help=(
+            "Which models to download. Defaults to all. The pipeline image "
+            "only needs 'embedding'; the API image needs both."
+        ),
+    )
     args = parser.parse_args()
 
-    for path in download_models(args.target_dir):
+    for path in download_models(args.target_dir, names=args.models):
         print(f"Downloaded model to {path}")
 
     return 0

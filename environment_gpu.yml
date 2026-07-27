@@ -1,3 +1,15 @@
+# =============================================================================
+# Data Science / notebook environment (GPU) - NOT a deployment artifact.
+#
+# Same purpose as environment_cpu.yml but with a CUDA (cu118) PyTorch build for
+# data scientists who fine-tune models on a GPU machine. It is NOT used for
+# deployment - production images are built from Dockerfile.api /
+# Dockerfile.pipeline against pyproject.toml + uv.lock (CPU inference).
+#
+# Versions are deliberately mostly unpinned for experimentation. When
+# reproducible fine-tuning is needed (e.g. golden tests), lock this with
+# conda-lock and align the ML core with the versions pinned in uv.lock.
+# =============================================================================
 name: cssa-ai
 channels:
   - conda-forge
@@ -20,6 +32,7 @@ dependencies:
   - tqdm
   - pip
   - pip:
+    # CUDA 11.8 PyTorch build for GPU fine-tuning
     - --extra-index-url https://download.pytorch.org/whl/cu118
     - torch
     - torchaudio
@@ -33,8 +46,8 @@ dependencies:
     - langchain
     - langchain-community
     - langchain-text-splitters
-    - langchain-openai        # [关键] 你的 ChatGPTGenerator 需要这个
-    - tiktoken                # [关键] 计算 Token 数量
+    - langchain-openai        # ChatGPT generator backend
+    - tiktoken                # Token counting
     - openai
 
     - trafilatura
@@ -43,20 +56,20 @@ dependencies:
     - bs4
     - requests
 
-    # === 4. 后端 API (Platform Squad) ===
-    - fastapi                 # 写接口必备
-    - uvicorn[standard]       # 跑服务必备
-    - slowapi                 # /chat 限流 (保护 OpenAI 账单)
-    - python-multipart        # 上传文件
+    # === Backend API (Platform Squad) ===
+    - fastapi                 # REST API framework
+    - uvicorn[standard]       # API server
+    - slowapi                 # /chat rate limiting (protect the OpenAI bill)
+    - python-multipart        # Form / file upload support
     - pydantic
-    - pydantic-settings       # 读取 .env
+    - pydantic-settings       # .env configuration
 
-    # === 5. 数据库 (Postgres) ===
+    # === Database (Postgres) ===
     - sqlalchemy              # ORM
     - alembic                 # Database schema migrations
-    - asyncpg                 # 异步驱动
-    - psycopg2-binary         # 同步驱动 (备用)
-    - pgvector                # 向量插件支持
+    - asyncpg                 # Async driver
+    - psycopg2-binary         # Sync driver
+    - pgvector                # pgvector support
 
-    # === 7. Demo 展示 ===
-    - python-dotenv           # 加载环境变量
+    # === Demo ===
+    - python-dotenv           # Load environment variables

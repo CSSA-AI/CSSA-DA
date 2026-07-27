@@ -82,11 +82,13 @@ CSSA-DA/
 ├── tests/
 │   └── test_db.py
 │
-├── Dockerfile.cpu                           # CPU Docker image
-├── Dockerfile.gpu                           # GPU Docker image
+├── Dockerfile.api                          # Production API image (slim, uv, multi-stage)
+├── Dockerfile.pipeline                     # Data pipeline task image (slim, uv, multi-stage)
 ├── docker-compose.yml                       # PostgreSQL + pgvector + app services
-├── environment_cpu.yml                      # Conda environment (CPU)
-├── environment_gpu.yml                      # Conda environment (GPU)
+├── pyproject.toml                          # Runtime deps (api/pipeline/dev groups); source for uv.lock
+├── uv.lock                                 # Locked dependency versions (used by images + CI)
+├── environment_cpu.yml                      # DS notebook env (CPU) — not a deployment artifact
+├── environment_gpu.yml                      # DS notebook env (GPU) — not a deployment artifact
 ├── branch-policy.md                         # Git branching conventions
 └── docker-command.md                        # Docker usage reference
 ```

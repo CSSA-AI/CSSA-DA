@@ -36,10 +36,10 @@ services:
       retries: 5
 
   api-cpu:
-    image: cssa-da-cpu:latest
+    image: cssa-da-api:latest
     build:
       context: .
-      dockerfile: Dockerfile.cpu
+      dockerfile: Dockerfile.api
     container_name: rag_api_cpu
     profiles: ["cpu"]
     restart: unless-stopped
@@ -57,12 +57,13 @@ services:
       - huggingface_cache:/root/.cache/huggingface
 
   migrate-cpu:
-    image: cssa-da-cpu:latest
+    # Migrations run from the API image (alembic is in the shared core).
+    image: cssa-da-api:latest
     build:
       context: .
-      dockerfile: Dockerfile.cpu
+      dockerfile: Dockerfile.api
     container_name: rag_migrate_cpu
-    profiles: ["cpu", "gpu", "pipeline"]
+    profiles: ["cpu", "pipeline"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -74,17 +75,16 @@ services:
       DATABASE_URL: postgresql://rag_user:rag_password@postgres:5432/rag_vectordb
 
   pipeline-cpu:
-    image: cssa-da-cpu:latest
+    image: cssa-da-pipeline:latest
     build:
       context: .
-      dockerfile: Dockerfile.cpu
+      dockerfile: Dockerfile.pipeline
     profiles: ["pipeline"]
     depends_on:
       migrate-cpu:
         condition: service_completed_successfully
     healthcheck:
       disable: true
-    entrypoint: ["python", "-m", "pipelines"]
     command: ["--help"]
     environment:
       PYTHONUTF8: "1"
@@ -94,33 +94,6 @@ services:
     volumes:
       - ./data:/app/data
       - huggingface_cache:/root/.cache/huggingface
-
-  api-gpu:
-    build:
-      context: .
-      dockerfile: Dockerfile.gpu
-    container_name: rag_api_gpu
-    profiles: ["gpu"]
-    restart: unless-stopped
-    depends_on:
-      migrate-cpu:
-        condition: service_completed_successfully
-    ports:
-      - "8000:8000"
-    environment:
-      ENV: ${ENV:-dev}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      CHAT_API_KEY: ${CHAT_API_KEY:-}
-      DATABASE_URL: postgresql://rag_user:rag_password@postgres:5432/rag_vectordb
-    volumes:
-      - huggingface_cache:/root/.cache/huggingface
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
 
 volumes:
   pgdata:

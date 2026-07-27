@@ -14,18 +14,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build CPU image
-        run: docker build -f Dockerfile.cpu -t cssa-da:ci .
+      - name: Build API image
+        run: docker build -f Dockerfile.api -t cssa-da-api:ci .
+
+      - name: Build pipeline image
+        run: docker build -f Dockerfile.pipeline -t cssa-da-pipeline:ci .
 
       - name: Smoke test pipeline CLI
-        run: docker run --rm --entrypoint python cssa-da:ci -m pipelines --help
+        run: docker run --rm cssa-da-pipeline:ci --help
 
-      - name: Validate runtime config contract in image
-        run: docker run --rm -e DATABASE_URL=postgresql://test:test@postgres:5432/testdb -e OPENAI_API_KEY=dummy-key-for-ci -e CHAT_API_KEY=dummy-chat-key-for-ci -e WECHAT_API_KEY=dummy-wechat-key-for-ci cssa-da:ci python ops/check_config.py --profile all
+      - name: Validate runtime config contract in API image
+        run: docker run --rm -e DATABASE_URL=postgresql://test:test@postgres:5432/testdb -e OPENAI_API_KEY=dummy-key-for-ci -e CHAT_API_KEY=dummy-chat-key-for-ci -e WECHAT_API_KEY=dummy-wechat-key-for-ci cssa-da-api:ci python ops/check_config.py --profile all
 
       - name: Smoke test API container
         run: |
-          docker run --rm -d --name cssa-da-api -p 8000:8000 -e OPENAI_API_KEY=dummy-key cssa-da:ci
+          docker run --rm -d --name cssa-da-api -p 8000:8000 -e OPENAI_API_KEY=dummy-key cssa-da-api:ci
           for attempt in {1..30}; do
             if curl --fail --silent http://localhost:8000/health; then
               exit 0
