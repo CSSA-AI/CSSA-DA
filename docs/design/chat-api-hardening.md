@@ -768,8 +768,9 @@ Starlette 的 `ExceptionMiddleware` 那层,而我们的两个 middleware 在它*
 
 ## Step 7:让容器 stdout 只剩结构化日志
 
-**文件**:[Dockerfile.cpu](../../Dockerfile.cpu)、[Dockerfile.gpu](../../Dockerfile.gpu) 的
-uvicorn 启动命令加 `--no-access-log`。不改 Python 代码、不加测试。
+**文件**:[Dockerfile](../../Dockerfile) 的 uvicorn 启动命令加 `--no-access-log`。
+（当时为 `Dockerfile.cpu` / `Dockerfile.gpu` 两份，后合并为单一 `Dockerfile`。）
+不改 Python 代码、不加测试。
 
 ### 要解决什么
 

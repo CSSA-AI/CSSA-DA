@@ -1,0 +1,60 @@
+# Data pipeline image for CSSA-DA (batch harvest / transform / embed / import).
+#
+# Runs as a one-off or scheduled task, not a long-running server — so there is
+# no port and no HTTP healthcheck. Compared with the API image it carries the
+# `pipeline` group instead of `api`, and downloads ONLY the embedding model
+# (documents are embedded at import time; reranking is a query-time API concern).
+#
+# Same slim base, pinned by digest, and non-root user as the API image.
+
+# ---------------------------------------------------------------------------
+# Stage 1: builder
+# ---------------------------------------------------------------------------
+FROM python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93 AS builder
+
+COPY --from=ghcr.io/astral-sh/uv:0.11.32@sha256:df4cae8f3a96d175e2e5f992e597550000edbe78fdc2594d5cd8de1a217f504c /uv /uvx /bin/
+
+ENV UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=0 \
+    UV_COMPILE_BYTECODE=1
+
+WORKDIR /app
+
+# Shared core + `pipeline` group only (adds `requests` for ingestion).
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-default-groups --group pipeline
+
+# Only the embedding model — the pipeline never reranks.
+COPY ops/__init__.py ops/download_models.py ./ops/
+COPY app/core/__init__.py ./app/core/
+COPY app/core/config ./app/core/config
+RUN --mount=type=cache,target=/root/.cache/huggingface \
+    /app/.venv/bin/python ops/download_models.py --target-dir /models --models embedding
+
+# ---------------------------------------------------------------------------
+# Stage 2: final runtime
+# ---------------------------------------------------------------------------
+FROM python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93
+
+RUN groupadd --system appuser && \
+    useradd --system --gid appuser --create-home appuser
+
+WORKDIR /app
+
+COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
+COPY --from=builder --chown=appuser:appuser /models /models
+COPY --chown=appuser:appuser . .
+
+ENV PATH=/app/.venv/bin:$PATH \
+    MODEL_DIR=/models \
+    HOME=/home/appuser \
+    HF_HOME=/home/appuser/.cache/huggingface \
+    PYTHONUNBUFFERED=1
+
+USER appuser
+
+# Default command prints the CLI help; compose / ECS override with a real task
+# (e.g. run-wechat-pipeline, import-knowledge-base).
+ENTRYPOINT ["python", "-m", "pipelines"]
+CMD ["--help"]

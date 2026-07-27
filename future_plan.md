@@ -430,15 +430,35 @@ CPU environment 包含多项 API runtime 不需要的工具，例如：
    `uv sync --locked` / `uv run python ops/check_config.py` / `uv run pytest
    tests/unit` → **186 passed**（集成测试需 postgres 服务，未在本地跑，命令形式与
    单测一致）。apt 系统依赖步骤暂保留。
-3. ⬜ **重写 `Dockerfile.cpu`**：`python:3.11-slim`（固定 digest）+ multi-stage
-   + `uv sync --no-dev`；本地 `docker build` 跑通 `/health`、`/ready`、
-   `pipelines --help`（对齐 `docker-check.yml` 的冒烟测试）。落实第 5/6/7 项。
+3. ✅ **重写为 slim 多阶段镜像，并拆成 `Dockerfile.api` + `Dockerfile.pipeline`
+   （决策 2026-07-27：合并 cpu/gpu → 再按 api/pipeline 拆两个部署镜像）**：已完成。
+   两者同一 `python:3.11-slim`（固定 digest `db3ff2…`）+ 三阶段构建（builder：uv
+   装对应 group + 下模型；final：只搬 venv+models+代码、non-root、无 uv/编译器）。
+   - `Dockerfile.api`：`--group api`，下 **embedding + reranker** 两模型，`uvicorn`
+     常驻 + HTTP healthcheck。
+   - `Dockerfile.pipeline`：`--group pipeline`，**只下 embedding**（管线不 rerank；
+     `ops/download_models.py` 新增 `--models` 选择，配套单测），无端口 / 无
+     healthcheck，`ENTRYPOINT python -m pipelines`。
+   删除 `Dockerfile.cpu` / `Dockerfile.gpu` / 中间的单一 `Dockerfile`；
+   `docker-compose.yml`（api/migrate 用 `Dockerfile.api`、pipeline 用
+   `Dockerfile.pipeline`、删 `api-gpu`、镜像名 `cssa-da-api` / `cssa-da-pipeline`）、
+   `docker-check.yml`（build 两镜像各自冒烟）、README、设计文档同步。
+   本地 `docker build` 两镜像均成功，冒烟全绿：pipeline `--help` ✅、
+   `check_config --profile all` ✅、API 启动 + 模型本地加载（无联网下载）+
+   `/health` → `{"status":"ok"}` ✅。**确认 `python-multipart` 无需。**
+   单测 **188 passed**（含新增 `--models` 测试）。
+   **体积：API 3.35GB / Pipeline 3.06GB**（pipeline 省掉 reranker 模型 + api 库
+   约 290MB；torch 754MB + embedding 477MB 为硬成本；相比 conda 全家桶 5–8GB
+   大幅瘦身）。落实第 5/6/7 项。
 4. ⬜ **`environment_cpu.yml` 重定位为 DS notebook 环境**：加注释 / README 说明
    它只供 DS 微调用、非部署产物（大概率只是文档层面，不动依赖）。
-5. ⬜ **`Dockerfile.gpu` 对齐**（第 2/4/5 项在 GPU 侧的补齐）：模型下载 +
-   non-root 用户 + 固定基础镜像。GPU 推理属 Phase 5 延后项，此步优先级低于 1–3。
-6. ⬜ **本地构建并测量**：镜像压缩 / 解压大小、启动时间、idle / peak 内存、
+   （`environment_gpu.yml` 现已无 Dockerfile 使用，一并在此步决定去留。）
+5. ⬜ **本地测量补全**：镜像大小已测（3.35GB）；仍需测启动时间、idle / peak 内存、
    first-request latency —— Phase 1 收尾验收，为 Phase 2 选 Fargate size 铺路。
+
+> **注（2026-07-27）**：原第 5 步「`Dockerfile.gpu` 对齐」已作废——决定合并为
+> 单一部署镜像、删除 GPU Dockerfile（DS 的 GPU 训练走 conda notebook，GPU
+> serving 属 Phase 5 延后项，届时按需另建）。原「本地构建并测量」顺延为第 5 步。
 
 原始条目（第 5/6/7 项）保留在下方以备回顾。
 
@@ -649,14 +669,16 @@ ECS task count
 
 1. ✅ 完成第 1 项"保护付费的 `/chat` 接口"的分步实施清单（结构化日志、
    request_id、CORS、安全响应头、rate limiting、兜底异常处理）。
-2. ✅ 确定并实现模型交付策略（CPU；GPU 待补齐）。
+2. ✅ 确定并实现模型交付策略（模型烤入单一 `Dockerfile`，启动本地加载无联网）。
 3. ✅ 固定模型 revision。
-4. ⬜ 创建最小化且锁定版本的 API runtime environment（对应第 6/7 项，**主体
-   剩余工作**：依赖锁定 + 镜像瘦身）。
-5. ⬜ 固定基础镜像（对应第 5 项）。
-6. ✅ 使用 non-root runtime user（CPU；GPU 待补齐）。
-7. ⬜ 在本地构建并测量镜像。
-8. ⬜ 验证 startup、shutdown、health、readiness 和 first-request 行为。
+4. ✅ 创建最小化且锁定版本的 API runtime environment（`pyproject.toml` + `uv.lock`，
+   `api`/`pipeline` group，slim 多阶段镜像；依赖锁定 + 镜像瘦身已落地）。
+5. ✅ 固定基础镜像（`python:3.11-slim` 钉 digest）。
+6. ✅ 使用 non-root runtime user（`appuser`）。
+7. ◻ 在本地构建并测量镜像（大小 3.35GB 已测；启动时间 / 内存 / first-request
+   latency 待补，见上方合并清单第 5 步）。
+8. ◻ 验证 startup、shutdown、health、readiness 和 first-request 行为（`/health` +
+   模型本地加载已验；`/ready`（需 DB）、shutdown、first-request latency 待补）。
 
 > **Phase 1 剩余聚焦**：第 6 项（依赖锁定）+ 第 7 项（镜像瘦身）+ 第 5 项
 > （固定基础镜像）+ 把第 2/4/5 项在 `Dockerfile.gpu` 侧对齐，然后本地构建并

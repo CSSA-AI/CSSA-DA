@@ -42,6 +42,25 @@ def test_get_model_downloads_reads_models_from_config():
     ]
 
 
+def test_get_model_downloads_filters_by_name():
+    models = download_models.get_model_downloads(
+        TEST_CONFIG, names=["embedding"]
+    )
+
+    assert models == [
+        download_models.ModelDownload(
+            name="embedding",
+            repo_id="example/embedding-model",
+            revision="embedding-revision",
+        ),
+    ]
+
+
+def test_get_model_downloads_rejects_unknown_name():
+    with pytest.raises(ValueError, match="Unknown model.*: nope"):
+        download_models.get_model_downloads(TEST_CONFIG, names=["nope"])
+
+
 def test_get_model_downloads_requires_pinned_revision():
     config = {
         **TEST_CONFIG,
