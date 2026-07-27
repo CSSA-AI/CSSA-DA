@@ -5,17 +5,12 @@ The Docker services start the FastAPI application automatically. Copy
 
 ## Start the API
 
-CPU:
-
 ```bash
 docker compose --profile cpu up --build
 ```
 
-NVIDIA GPU:
-
-```bash
-docker compose --profile gpu up --build
-```
+Images are built from `Dockerfile.api` (the API service) and
+`Dockerfile.pipeline` (pipeline tasks) — slim, multi-stage, uv-locked.
 
 Open:
 
@@ -24,13 +19,15 @@ Open:
 - API/data status: <http://localhost:8000/status>
 - Interactive API docs: <http://localhost:8000/docs>
 
-The `cpu` and `gpu` profiles run the `migrate-cpu` service before starting the
-API, so Alembic migrations are applied to PostgreSQL automatically. `/chat`
-expects `knowledge_base` rows to already exist; rebuild them with the pipeline
-commands below when the database is empty or the processed data changes.
+The `cpu` profile runs the `migrate-cpu` service before starting the API, so
+Alembic migrations are applied to PostgreSQL automatically. `/chat` expects
+`knowledge_base` rows to already exist; rebuild them with the pipeline commands
+below when the database is empty or the processed data changes.
 
-The first `/chat` request downloads the configured Hugging Face models. Docker
-stores them in the `huggingface_cache` volume so later starts can reuse them.
+The pinned embedding and reranker models are baked into the image at build time
+and preloaded on startup (`local_files_only`), so no model download happens on
+the first `/chat` request. Because preload blocks startup, once `/health`
+responds the models are already loaded.
 
 ## Check configuration
 
@@ -63,8 +60,10 @@ docker compose --profile pipeline run --rm --no-deps pipeline-cpu transform-wech
 docker compose --profile pipeline run --rm pipeline-cpu import-knowledge-base --reset-checkpoint
 
 # 4. Smoke-test pgvector retrieval
-docker compose --profile pipeline run --rm pipeline-cpu \
-  python -m pipelines.orchestration.smoke_test_retrieval --query "墨尔本 校招"
+#    (the pipeline image's entrypoint is `python -m pipelines`, so override it
+#     with --entrypoint to run a different module)
+docker compose --profile pipeline run --rm --entrypoint python pipeline-cpu \
+  -m pipelines.orchestration.smoke_test_retrieval --query "墨尔本 校招"
 ```
 
 Then start the API:
