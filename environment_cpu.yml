@@ -1,3 +1,20 @@
+# =============================================================================
+# Data Science / notebook environment (CPU) - NOT a deployment artifact.
+#
+# Used by data scientists for interactive work in Jupyter and for model
+# fine-tuning on their own machines. It intentionally carries heavy dev/notebook
+# tooling (jupyter, matplotlib, nltk, gensim, ...) that the production services
+# do NOT need.
+#
+# Deployment does NOT use this file. Production images are built from
+# Dockerfile.api / Dockerfile.pipeline against pyproject.toml + uv.lock.
+#
+# Versions here are deliberately left mostly unpinned so DS can experiment
+# freely. When reproducible fine-tuning is needed (e.g. golden tests), lock this
+# with conda-lock and align the ML core (torch / transformers /
+# sentence-transformers / peft) with the versions pinned in uv.lock so trained
+# artifacts load in the production images.
+# =============================================================================
 name: cssa-ai
 channels:
   - conda-forge
@@ -6,64 +23,63 @@ channels:
 dependencies:
   - python=3.11.12
   - pip
-  # 基础科学计算
+  # Core scientific computing
   - numpy
   - pandas
   - scikit-learn
   - matplotlib
   - tqdm
-  # 开发工具
+  # Dev / notebook tooling
   - mypy
   - ipykernel
   - jupyter
   - ipython
   - pytest
-  # 向量检索核心
-  # 深度学习基础
+  # Deep learning
   - pytorch
   - torchvision
   - torchaudio
-  # 文本处理
+  # Text processing
   - nltk
   - gensim
 
   - pip:
-      # --- RAG 核心组件 ---
-      - sentence_transformers    # Embedding 模型
+      # --- RAG core components ---
+      - sentence_transformers    # Embedding models
       - huggingface_hub          # Model artifact downloads
-      - rank-bm25==0.2.2         # 关键词检索 (BM25)
-      - accelerate==1.6.0        # 模型加速
-      - peft                     # [新增] 你的 Reranker 代码用到了 LoRA 微调加载
-      
-      # --- LangChain 全家桶 ---
-      - langchain                # 基础框架
-      - langchain-community      # 社区组件
-      - langchain-core           # 核心接口
-      - langchain-openai         # [新增] 你的 ChatGPTGenerator 必须用这个
-      - langchain-text-splitters # 文本切片
-      - tiktoken                 # [新增] 你的 Generator 用来计算 Token 数量
+      - rank-bm25==0.2.2         # Keyword retrieval (BM25)
+      - accelerate==1.6.0        # Model acceleration
+      - peft                     # LoRA fine-tuning / adapter loading for the reranker
 
-      # --- 后端 API (Platform Squad 必需) ---
-      - fastapi                  # [新增] 构建 REST API
-      - uvicorn[standard]        # [新增] API 服务器
-      - slowapi                  # [新增] /chat 限流 (保护 OpenAI 账单)
-      - python-multipart         # [新增] 支持文件上传接口
-      - pydantic                 # 数据验证
-      - pydantic-settings        # [新增] 管理 .env 配置
+      # --- LangChain stack ---
+      - langchain                # Base framework
+      - langchain-community      # Community integrations
+      - langchain-core           # Core interfaces
+      - langchain-openai         # ChatGPT generator backend
+      - langchain-text-splitters # Text chunking
+      - tiktoken                 # Token counting for the generator
 
-      # --- 数据库 (Postgres + pgvector) ---
-      - sqlalchemy               # [新增] ORM 框架
+      # --- Backend API (Platform Squad) ---
+      - fastapi                  # REST API framework
+      - uvicorn[standard]        # API server
+      - slowapi                  # /chat rate limiting (protect the OpenAI bill)
+      - python-multipart         # Form / file upload support
+      - pydantic                 # Data validation
+      - pydantic-settings        # .env configuration
+
+      # --- Database (Postgres + pgvector) ---
+      - sqlalchemy               # ORM (used by Alembic migrations)
       - alembic                  # Database schema migrations
-      - asyncpg                  # [新增] 异步 Postgres 驱动 (FastAPI 标配)
-      - psycopg2-binary          # 同步驱动 (备用)
-      - pgvector                 # [新增] 向量数据库插件支持
+      - asyncpg                  # Async Postgres driver
+      - psycopg2-binary          # Sync Postgres driver
+      - pgvector                 # pgvector support
 
-      # --- 爬虫与数据清洗 (Data Squad 必需) ---
-      - trafilatura              # 网页正文提取
-      - beautifulsoup4           # HTML 解析 (即 bs4)
-      - requests                 # HTTP 请求
-      - langdetect               # 语言检测
-      - hanzidentifier           # 繁简识别
+      # --- Ingestion & cleaning (Data Squad) ---
+      - trafilatura              # Web article extraction
+      - beautifulsoup4           # HTML parsing (bs4)
+      - requests                 # HTTP requests
+      - langdetect               # Language detection
+      - hanzidentifier           # Simplified/traditional Chinese detection
 
-      # --- Demo 演示 ---
-      - python-dotenv            # [新增] 加载 .env 文件中的 API KEY
+      # --- Demo ---
+      - python-dotenv            # Load API keys from .env

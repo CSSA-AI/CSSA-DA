@@ -450,9 +450,14 @@ CPU environment 包含多项 API runtime 不需要的工具，例如：
    **体积：API 3.35GB / Pipeline 3.06GB**（pipeline 省掉 reranker 模型 + api 库
    约 290MB；torch 754MB + embedding 477MB 为硬成本；相比 conda 全家桶 5–8GB
    大幅瘦身）。落实第 5/6/7 项。
-4. ⬜ **`environment_cpu.yml` 重定位为 DS notebook 环境**：加注释 / README 说明
-   它只供 DS 微调用、非部署产物（大概率只是文档层面，不动依赖）。
-   （`environment_gpu.yml` 现已无 Dockerfile 使用，一并在此步决定去留。）
+4. ✅ **`environment_cpu.yml` / `environment_gpu.yml` 重定位为 DS notebook 环境**：
+   已完成。两个 yml 加英文注释 + 头部声明「DS 交互/微调用，非部署产物；部署走
+   `Dockerfile.api` / `Dockerfile.pipeline` + `uv.lock`」；依赖全部保留、**版本不锁**
+   （决策 2026-07-27：DS 环境保持放养便于实验）。README 说明同步更新。两个 yml
+   都保留（GPU 版供 DS 在显卡机上微调）。
+   **延后待办**：真要做可复现微调 / golden test 时，用 `conda-lock` 给 DS 环境上锁，
+   并把 ML 核心（torch / transformers / sentence-transformers / peft）对齐 `uv.lock`
+   的固定版本，保证 DS 训出的 adapter 能在生产镜像加载。
 5. ⬜ **本地测量补全**：镜像大小已测（3.35GB）；仍需测启动时间、idle / peak 内存、
    first-request latency —— Phase 1 收尾验收，为 Phase 2 选 Fargate size 铺路。
 
