@@ -202,14 +202,14 @@ Starlette 按异常类型的 MRO 找 handler，已有的具体异常类型 handl
 - 每次请求都有一条结构化 JSON access log，带 `request_id`。
 - 未预期异常不会把内部细节泄露给客户端。
 
-### 2. 让模型交付过程可预测 ✅ 已完成（CPU；GPU 待补齐）
+### 2. 让模型交付过程可预测 ✅ 已完成
 
-> **状态：CPU 侧已完成。** `ops/download_models.py` 在可缓存镜像层下载两个
-> 模型，revision 固定在 `app/core/config/rag-config.yaml`，`Dockerfile.cpu`
-> 设置 `MODEL_DIR`，`app/main.py` lifespan 在接流量前调用
-> `model_registry.preload_models()`，`ModelRegistry` 用 `local_files_only`
-> 加载本地模型。**遗留：`Dockerfile.gpu` 尚未下载模型、未设 `MODEL_DIR`，
-> 需与 CPU 侧对齐（见第 4/5 项的 GPU 补齐）。** 下面保留原始设计记录。
+> **状态：已完成。** `ops/download_models.py`（含 `--models` 选择）在可缓存镜像
+> 层下载模型，revision 固定在 `app/core/config/rag-config.yaml`，`Dockerfile.api`
+> / `Dockerfile.pipeline` 设置 `MODEL_DIR`，`app/main.py` lifespan 在接流量前
+> 调用 `model_registry.preload_models()`，`ModelRegistry` 用 `local_files_only`
+> 加载本地模型。实测冷启动 ~7s 内模型加载完毕，首个请求无需联网下载。
+> （GPU Dockerfile 已删除，不再有 GPU 侧待补齐。）下面保留原始设计记录。
 
 当前 embedding model 和 reranker 在第一次 `/chat` 请求时才加载。这会导致
 `/health` 已经返回成功，但 RAG pipeline 实际上还不能稳定提供服务。
@@ -232,7 +232,11 @@ Starlette 按异常类型的 MRO 找 handler，已有的具体异常类型 handl
 - 可以从源码配置准确复现模型版本。
 - 必需模型不可用时，readiness 不会返回成功。
 
-### 3. 使用持久化存储代替本地 pipeline 文件
+### 3. 使用持久化存储代替本地 pipeline 文件 ✅ 存储抽象已完成（S3 留 Phase 3）
+
+> **状态：接口 + `LocalStorage` + 各咽喉点迁移 + 入口串联已完成**（见下方分步
+> 实施清单步骤 1–5 全部 ✅）。**`S3Storage` 实现留到 Phase 3**（真正上 AWS 时，
+> 上层 stage 代码零改动，仅入口换后端）。
 
 当前 pipeline 依赖 `./data` 和 Docker bind mount。Fargate task 的本地存储是
 临时存储，不能作为长期事实来源。
@@ -329,24 +333,27 @@ data/reports      -> s3://<bucket>/reports
 
 ## 高优先级容器工作
 
-### 4. 使用 non-root 用户运行容器 ✅ 已完成（CPU；GPU 待补齐）
+### 4. 使用 non-root 用户运行容器 ✅ 已完成
 
-> **状态：CPU 侧已完成。** `Dockerfile.cpu` 创建 system 用户 `appuser`
-> 并以 `USER appuser` 运行。**遗留：`Dockerfile.gpu` 仍以 root 运行，
-> 需补上同样的 non-root 用户。** `readonlyRootFilesystem` 留到 Phase 2 写
-> ECS task definition 时评估。
+> **状态：已完成。** `Dockerfile.api` 与 `Dockerfile.pipeline` 都创建 system
+> 用户 `appuser` 并以 `USER appuser` 运行，`COPY --chown=appuser` 交付
+> venv/models/代码。（GPU Dockerfile 已删除。）`readonlyRootFilesystem` 留到
+> Phase 2 写 ECS task definition 时评估。
 
-当前 GPU Dockerfile 仍以 root 用户运行。
+已完成：
 
-需要完成：
-
-- 创建专用 application user。（CPU 已完成，GPU 待补齐）
+- 创建专用 application user（`appuser`，两个镜像均是）。
 - 只授予该用户所需应用目录和 cache 目录的访问权限。
-- 在 ECS task definition 中评估启用 `readonlyRootFilesystem`。
+- 在 ECS task definition 中评估启用 `readonlyRootFilesystem`（留 Phase 2）。
 
-### 5. 固定基础镜像
+### 5. 固定基础镜像 ✅ 已完成
 
-`Dockerfile.cpu` 当前使用：
+> **状态：已完成。** `Dockerfile.api` / `Dockerfile.pipeline` 均以
+> `python:3.11-slim@sha256:db3ff2…` 固定 digest 起步，uv 二进制也按 digest 钉死
+> （`ghcr.io/astral-sh/uv:0.11.32@sha256:df4c…`）。详见「### 5+6+7 合并实施」。
+> 下面保留原始条目。
+
+`Dockerfile.cpu`（历史）当前使用：
 
 ```dockerfile
 FROM continuumio/miniconda3:latest
@@ -358,9 +365,14 @@ FROM continuumio/miniconda3:latest
 - 开始 GPU 部署时，将 GPU 基础镜像固定到经过审核的 digest。
 - 建立受控的基础镜像更新流程。
 
-### 6. 锁定 runtime 依赖
+### 6. 锁定 runtime 依赖 ✅ 已完成
 
-当前 Conda environment 文件包含大量未固定版本的依赖，不同时间构建可能得到
+> **状态：已完成。** `pyproject.toml` 声明直接依赖（`api`/`pipeline`/`dev`
+> group），`uv.lock` 锁定全部 transitive；本地 / CI / 生产镜像统一走这份锁。
+> ML 核心钉到验证过的版本，torch 走 CPU index。详见「### 5+6+7 合并实施」。
+> 下面保留原始条目。
+
+（历史）当前 Conda environment 文件包含大量未固定版本的依赖，不同时间构建可能得到
 不同的运行环境。
 
 需要完成：
@@ -370,9 +382,14 @@ FROM continuumio/miniconda3:latest
 - 根据需要拆分 CPU、GPU、pipeline、test 和 development 依赖。
 - 明确列出直接 runtime 依赖，避免依靠 transitive dependency 安装。
 
-### 7. 缩小 API 镜像
+### 7. 缩小 API 镜像 ✅ 已完成
 
-CPU environment 包含多项 API runtime 不需要的工具，例如：
+> **状态：已完成。** 换 slim 基础镜像 + 多阶段构建（final 阶段无 uv/编译器/dev
+> 工具）+ 拆 API/Pipeline 双镜像。jupyter/matplotlib/pytest/mypy 等均不进生产。
+> 实测 API 3.35GB / Pipeline 3.06GB（torch + 模型为硬成本；相比 conda 全家桶
+> 5–8GB 大幅瘦身）。详见「### 5+6+7 合并实施」。下面保留原始条目。
+
+（历史）CPU environment 包含多项 API runtime 不需要的工具，例如：
 
 - Jupyter
 - IPython
