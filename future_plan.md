@@ -458,8 +458,12 @@ CPU environment 包含多项 API runtime 不需要的工具，例如：
    **延后待办**：真要做可复现微调 / golden test 时，用 `conda-lock` 给 DS 环境上锁，
    并把 ML 核心（torch / transformers / sentence-transformers / peft）对齐 `uv.lock`
    的固定版本，保证 DS 训出的 adapter 能在生产镜像加载。
-5. ⬜ **本地测量补全**：镜像大小已测（3.35GB）；仍需测启动时间、idle / peak 内存、
-   first-request latency —— Phase 1 收尾验收，为 Phase 2 选 Fargate size 铺路。
+5. ✅ **本地测量（不依赖 DB 的部分）**：已完成。镜像大小 API 3.35GB / Pipeline
+   3.06GB；**冷启动 → `/health` 可用 ~7s**（含 torch + 两模型预加载，阻塞启动，
+   故首个请求不再等模型）；**idle 内存 ~950 MiB**、idle CPU ~0.1%。
+   → Phase 2 选 Fargate size 参考：内存至少 1GB，建议 2GB 留请求峰值余量。
+   **延后到 Phase 2（需真实 Postgres + 有数据的 knowledge_base）**：`/ready`、
+   first-request `/chat` 端到端 latency、peak 内存 —— 连同负载测试一起做。
 
 > **注（2026-07-27）**：原第 5 步「`Dockerfile.gpu` 对齐」已作废——决定合并为
 > 单一部署镜像、删除 GPU Dockerfile（DS 的 GPU 训练走 conda notebook，GPU
@@ -680,10 +684,11 @@ ECS task count
    `api`/`pipeline` group，slim 多阶段镜像；依赖锁定 + 镜像瘦身已落地）。
 5. ✅ 固定基础镜像（`python:3.11-slim` 钉 digest）。
 6. ✅ 使用 non-root runtime user（`appuser`）。
-7. ◻ 在本地构建并测量镜像（大小 3.35GB 已测；启动时间 / 内存 / first-request
-   latency 待补，见上方合并清单第 5 步）。
+7. ✅ 在本地构建并测量镜像（API 3.35GB / Pipeline 3.06GB；冷启动→`/health` ~7s；
+   idle 内存 ~950 MiB）。
 8. ◻ 验证 startup、shutdown、health、readiness 和 first-request 行为（`/health` +
-   模型本地加载已验；`/ready`（需 DB）、shutdown、first-request latency 待补）。
+   模型本地加载 + 启动耗时已验；`/ready`（需 DB）、shutdown、first-request
+   latency 延后至 Phase 2 连同负载测试）。
 
 > **Phase 1 剩余聚焦**：第 6 项（依赖锁定）+ 第 7 项（镜像瘦身）+ 第 5 项
 > （固定基础镜像）+ 把第 2/4/5 项在 `Dockerfile.gpu` 侧对齐，然后本地构建并
