@@ -575,15 +575,38 @@ Wait for healthy targets
 
 ### 12. 设计 outbound networking
 
-Private ECS task 必须能够访问 OpenAI。如果模型没有放进镜像或 EFS，它还需要访问
-Hugging Face。
+Private ECS task 必须能够访问 OpenAI。
+
+> **已确认（2026-08-03）：运行时不需要 Hugging Face 出网。** 两个镜像在
+> `docker run --network none` 下都能完整加载模型（api 6.27s / pipeline 6.60s，
+> 两模型均 `ready`）。模型在构建期由 `ops/download_models.py` 烤入 `/models`，
+> 运行时经 `MODEL_DIR` 走 `local_files_only=True` 的本地分支
+> （`app/services/rag/model_registry.py`）。
+>
+> 导入日志里那条 `You are sending unauthenticated requests to the HF Hub` 是
+> `huggingface_hub` 初始化时无条件打印的提示，**不代表发生了网络请求**。
+
+因此出站需求收敛为一份确定清单：
+
+| Task | 需要的出站连接 | 不需要 |
+|---|---|---|
+| API | OpenAI API | Hugging Face |
+| Pipeline（harvest 阶段） | 微信 API | Hugging Face |
+| Pipeline（transform / embed / import） | 仅 RDS（VPC 内） | 任何公网 |
+
+这让出网可以按目的地白名单收紧，而不是「开个 NAT 放行全部」；也意味着
+transform/embed/import 可以放在完全不出网的子网里。
 
 需要完成：
 
 - 将 API task 放在 private subnet。
-- 提供受控的 outbound internet access。
+- 提供受控的 outbound internet access（按上表最小化）。
 - Inbound 只允许来自 ALB security group。
 - RDS 只允许来自 ECS task security group。
+- ⚠️ 把 `MODEL_DIR` 当作 task definition 的必填项校验。它一旦缺失，
+  `model_registry` 会**静默回退**到连 Hugging Face 下载（见
+  `_load_embedding_model` 的 else 分支），在 private subnet 里表现为启动卡死到
+  超时且日志难以定位。更彻底的做法是直接删掉该回退分支——生产镜像永远自带模型。
 
 ## 中优先级工作
 
@@ -702,15 +725,50 @@ ECS task count
    `api`/`pipeline` group，slim 多阶段镜像；依赖锁定 + 镜像瘦身已落地）。
 5. ✅ 固定基础镜像（`python:3.11-slim` 钉 digest）。
 6. ✅ 使用 non-root runtime user（`appuser`）。
-7. ✅ 在本地构建并测量镜像（API 3.35GB / Pipeline 3.06GB；冷启动→`/health` ~7s；
-   idle 内存 ~950 MiB）。
-8. ◻ 验证 startup、shutdown、health、readiness 和 first-request 行为（`/health` +
-   模型本地加载 + 启动耗时已验；`/ready`（需 DB）、shutdown、first-request
-   latency 延后至 Phase 2 连同负载测试）。
+7. ✅ 在本地构建并测量镜像（API 3.35GB / Pipeline 3.06GB；冷启动→`/health` ~7.5s；
+   idle 内存 ~944 MiB）。
+8. ✅ 验证 startup、shutdown、health、readiness 和 first-request 行为
+   （2026-08-03 本地实测，见下方「Phase 1 收尾验证记录」）。
 
-> **Phase 1 剩余聚焦**：第 6 项（依赖锁定）+ 第 7 项（镜像瘦身）+ 第 5 项
-> （固定基础镜像）+ 把第 2/4/5 项在 `Dockerfile.gpu` 侧对齐，然后本地构建并
-> 测量镜像大小 / 启动时间 / 内存 / first-request latency。
+> **Phase 1 已全部完成。** 原先「剩余聚焦」列出的第 5/6/7 项均已落地；其中提到的
+> `Dockerfile.gpu` 已不存在——GPU 路线在打包阶段废弃，torch 固定为 CPU wheel，
+> 现在只有 `Dockerfile.api` 和 `Dockerfile.pipeline`。
+
+#### Phase 1 收尾验证记录（2026-08-03，本地 Docker Desktop / Windows）
+
+验证环境：`cssa-da-api:latest` + `cssa-da-pipeline:latest` 本地重建，pgvector
+容器，`knowledge_base` 导入 200 行。
+
+| 指标 | 实测 | 结论 |
+|---|---|---|
+| 冷启动 → `/health` | 7.49s / 7.57s（两次） | 与既有记录一致 |
+| Idle 内存 | 943.9 MiB | 与既有记录一致 |
+| `/health` 延迟 | warm ~2ms（首次 16ms） | 适合 ECS container health check |
+| `/ready` 延迟 | 稳定 ~10ms | 适合 ALB target health check |
+| `/ready` not-ready | 503，`reason` 为 curated 文案，无内部细节 | 第 9/10 项在真实 DB 上复验通过 |
+| `/ready` ready | 200，`knowledge_base_rows: 200` | — |
+| `/chat` 首请求 | 4662ms | ⚠️ 见下方「first-request 冷惩罚」 |
+| `/chat` 稳态 | 均值 2584ms（2386–2882） | 由 OpenAI 生成耗时主导 |
+| SIGTERM（空闲） | 1.67s 退出，exit code 0 | 远低于 ECS 默认 30s stopTimeout |
+| SIGTERM（有在途请求） | 3.01s 退出，exit 0，在途 `/chat` 完整返回 200 | 滚动发布不丢请求 |
+| 关闭后 PG 后端连接 | 1 → 0 | lifespan 确实关闭了连接池 |
+| 离线加载（`--network none`） | api 6.27s / pipeline 6.60s，两模型 ready | 运行时不需要任何公网 |
+| 单元测试 | 188 passed | — |
+
+补充验证：`/chat` 与 `/status` 在缺 key / 错 key 时均返回 401；安全响应头
+（`X-Request-ID`、`nosniff`、`X-Frame-Options: DENY`、`no-referrer`、HSTS）齐全；
+uvicorn 关闭日志四步完整（`Shutting down` → `Waiting for application shutdown` →
+`Application shutdown complete` → `Finished server process`）。
+
+**first-request 冷惩罚（待修）**：首个 `/chat` 比稳态慢约 **2.1 秒**。原因不是模型
+加载（模型已在 lifespan 预加载），而是 `app/api/deps.py` 的
+`_build_rag_orchestrator` 用 `lru_cache` 懒构建——第一个请求才创建 PG 连接池和三个
+组件。在 ECS 上这意味着：新 task 通过 `/ready` 后 ALB 立即导流，**第一个真实用户
+承担这 2.1 秒**，而 `/ready` 此时已宣称 ready。
+
+建议修法：在 lifespan 的模型预加载之后同步构建一次 orchestrator，把这段成本移到启动
+期（冷启动约 7.5s → 9.6s，仍远低于 `Dockerfile.api` 中 healthcheck 的 60s
+`start-period`）。这样 `/ready` 的语义才真正等于「能以全速服务」。
 
 ### Phase 2：安全的 AWS API 基础设施
 
@@ -744,23 +802,87 @@ ECS task count
 1. 增加 LangChain/LangSmith tracing，并定义 metadata 隐私规则。
 2. 修改微信清洗行为前增加 golden tests。
 3. 只有 CPU 测试数据证明有必要时，才评估 GPU inference。
-4. 只有模型放入镜像不再可行时，才评估 EFS model cache。
+4. 模型交付方式：达到下方阈值前，一律保持「烤入镜像」。
+
+#### 4.1 模型交付方式：现状、阈值与备选（2026-08-03 实测）
+
+**现状构成**（`cssa-da-api:latest`，3.35GB）：
+
+| 内容 | 大小 |
+|---|---|
+| `.venv` 依赖 | 1.5 GB（其中 torch 单独 754 MB） |
+| `/models` 两个模型 | 605 MB（embedding 477 MB + reranker 129 MB） |
+| 应用代码 | 5.5 MB |
+
+**模型只占镜像 18%，地板由 torch 决定**：即使把模型全部移出镜像，镜像仍在 2.7GB
+量级。因此「模型撑爆镜像」要到相当大的规模才成立。
+
+**为什么镜像大小在 Fargate 上仍需盯住**：Fargate **不跨 task 缓存镜像**，每启动一个
+新 task 都要从 ECR 完整拉取。镜像大小直接乘进冷启动、扩容速度、滚动发布每一批和
+ECR 传输量。（ECS on EC2 会在实例上缓存镜像，只有节点上第一个 task 付这个代价——
+所以「换 EC2 launch type」本身也是一个备选。）
+
+**触发阈值**（替代原先含糊的「不再可行」）：
+
+- `/models` < 2 GB → 保持烤入，不讨论。
+- 2–5 GB → 实测一次 ECR 拉取耗时，对照扩容 SLO 再定。
+- \> 5 GB，或任何自托管 LLM → 改用下方备选，或转 ECS on EC2 吃镜像缓存。
+
+参考体量：embedding / reranker 换 large 级（bge-m3、multilingual-e5-large 一类）后
+`/models` 约 4.6 GB，镜像约 7 GB；自托管 7B 模型 fp16 约 14 GB，届时烤入方案失效。
+注意生成走 OpenAI API，除非改为自托管 LLM，否则只有 embedding / reranker 会增长。
+
+**⚠️ S3 在 Fargate 上无法挂载。** S3 是对象存储而非文件系统；`s3fs` /
+`Mountpoint for S3` 依赖 FUSE，而 Fargate 不提供 `/dev/fuse` 也不给 `SYS_ADMIN`。
+ECS task definition 支持的卷类型里没有 S3。因此备选只有两条：
+
+| | 烤入镜像（现状） | EFS 挂载 | S3 + 启动时下载 |
+|---|---|---|---|
+| 镜像大小 | 大 | 小 | 小 |
+| 模型加载速度 | 本地盘，最快 | NFS，明显慢（模型是几百个小文件，每次冷启动重付） | 下载后本地盘，最快 |
+| 启动耗时 | 拉镜像（含模型） | 无下载，但读文件走网络 | 拉镜像 + 下载模型 |
+| 换模型 | 重建 + 重新部署 | 传 EFS 即可 | 传 S3 + 重启 task |
+| 常驻成本 | 无 | 有：按 GB/月 + 吞吐量，每 AZ 一个 mount target | 近乎为零 |
+| 运维复杂度 | 最低 | 最高 | 中 |
+| 版本可追溯 | 最好：镜像 tag = 代码 + 模型版本 | 差：EFS 内容可被随时改动，故障难复现 | 中：可用带版本的 S3 前缀 |
+
+**若将来必须拆分，倾向 S3 + 启动时下载而非 EFS**：EFS 的小文件读性能对模型加载不
+友好且每次冷启动重付；EFS 是常驻成本 + 常驻运维；而烤入方案「镜像 tag 即模型版本」
+这一可追溯性很有价值，EFS 会打破它，S3 用带版本前缀能保住大部分。
+
+**关键：三种方案都不需要改代码。** `MODEL_DIR` 只是一个文件系统路径，指向
+`/models`、`/mnt/efs/models` 还是 `/tmp/models`，`model_registry` 的
+`local_files_only=True` 分支一字不改，差别全在 task definition 和启动脚本里。因此
+这个决定可以推迟到模型真的变大、有实测数据时再做。
 
 ## 当前最需要决定的问题
 
-第 1 项（保护 `/chat`、结构化日志）是当前正在按分步清单推进的工作，一步
-一步做、每步单独验证。
-
-其次是模型如何进入 ECS。推荐的首版方案是：
+第 1 项（保护 `/chat`、结构化日志）已完成。模型进入 ECS 的首版方案也已确定并落地：
 
 ```text
 将固定 revision 的 embedding model 和 reranker model 放入 API 镜像。
 ```
 
-在本地完成镜像构建，并测量以下指标之前，不应创建正式 AWS 基础设施：
+**「创建正式 AWS 基础设施」的前置门槛已全部满足**（2026-08-03 本地实测，明细见
+Phase 1 的「收尾验证记录」）：
 
-- 镜像大小
-- 启动时间
-- 内存使用
-- Shutdown 行为
-- First-request latency
+| 门槛指标 | 状态 |
+|---|---|
+| 镜像大小 | ✅ API 3.35GB / Pipeline 3.06GB |
+| 启动时间 | ✅ 冷启动 → `/health` 7.5s |
+| 内存使用 | ✅ idle 943.9 MiB |
+| Shutdown 行为 | ✅ 1.67s 优雅退出（exit 0）；在途请求完整排空 |
+| First-request latency | ✅ 已测：首个 `/chat` 4662ms，稳态 2584ms |
+
+因此 Phase 2（AWS 基础设施）现在可以开工。进入 Phase 2 前建议先修掉 Phase 1 记录
+中的 **first-request 冷惩罚**（在 lifespan 预热 orchestrator），否则 `/ready` 通过
+后仍有约 2.1 秒的首请求代价，会干扰后续负载测试的基线。
+
+下一批需要决定的问题落在 Phase 2 自身：
+
+- 第 8 项：ECS container health check 与 ALB target group health check 的具体配置
+  （语义已定：`/health` 给 ECS，`/ready` 给 ALB；模型 readiness 已完成，前置条件
+  满足）。
+- 第 11 项：migration 作为部署关卡的编排方式（Compose 的 `depends_on` 在 ECS 不
+  继承）。
+- 第 12 项：出网设计（出站清单已收敛，见该项表格）。

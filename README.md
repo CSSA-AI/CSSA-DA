@@ -2,9 +2,16 @@
 
 A Retrieval-Augmented Generation (RAG) chatbot designed for Chinese students and scholars studying in Australia. The system answers questions about education, university requirements, visa processes, and student life by retrieving relevant articles and generating contextual responses via ChatGPT.
 
+The repository holds two halves that meet in PostgreSQL:
+
+- **Serving** — a FastAPI service (`app/`) that answers questions over the knowledge base.
+- **Data** — a pipeline package (`pipelines/`) that harvests, cleans, validates, embeds and imports source articles.
+
 ---
 
 ## Architecture
+
+**Query path** (`app/`):
 
 ```
 User Query
@@ -22,7 +29,15 @@ User Query
 Answer + Source Articles
 ```
 
-The RAG pipeline is orchestrated in [app/services/rag/orchestrator.py](app/services/rag/orchestrator.py) and exposed through the FastAPI app in [app/main.py](app/main.py). PostgreSQL is the source of truth for `knowledge_base`.
+**Data path** (`pipelines/`):
+
+```
+WeChat API ──▶ harvest ──▶ transform ──▶ validate ──▶ embed ──▶ import ──▶ knowledge_base
+              data/raw    data/processed          pinned model        (PostgreSQL)
+                              └── data/current (stable stage inputs) ──┘
+```
+
+The RAG pipeline is orchestrated in [app/services/rag/orchestrator.py](app/services/rag/orchestrator.py) and exposed through the FastAPI app in [app/main.py](app/main.py). PostgreSQL is the source of truth for `knowledge_base`; its schema is managed by Alembic migrations in [migrations/](migrations/).
 
 ---
 
@@ -30,102 +45,130 @@ The RAG pipeline is orchestrated in [app/services/rag/orchestrator.py](app/servi
 
 ```
 CSSA-DA/
-├── app/
-│   ├── main.py                              # FastAPI entry point (placeholder)
+├── app/                                      # FastAPI service
+│   ├── main.py                               # App, endpoints, exception handlers, model preload
 │   ├── api/
-│   │   └── deps.py                          # Dependency injection (DB session, RAG pipeline)
+│   │   └── deps.py                           # DI: RAG orchestrator, API-key auth
 │   ├── core/
-│   │   └── config.py                        # Pydantic settings (placeholder)
-│   ├── models/                              # SQLAlchemy DB models (planned)
-│   │   ├── article.py
-│   │   └── chat_log.py
+│   │   ├── config/
+│   │   │   ├── settings.py                   # Pydantic settings (env / .env)
+│   │   │   └── rag-config.yaml               # Pinned models, top_k, prompts, pgvector table
+│   │   ├── logging.py                        # Structured JSON logging
+│   │   ├── middleware.py                     # Request ID/context + security headers
+│   │   └── rate_limit.py                     # slowapi limiter for /chat
 │   ├── schemas/
-│   │   ├── article.py                       # Article Pydantic schema
-│   │   └── search_result.py                 # RAG output schema (article + score + rank)
+│   │   ├── article.py                        # Article Pydantic schema
+│   │   └── search_result.py                  # RAG output schema (article + score + rank)
 │   └── services/
-│       ├── question_generator/              # GPT-powered question generation for articles
-│       │   ├── question_generator.py        # Main generation logic (OpenAI batch API)
-│       │   ├── file_processor.py
-│       │   ├── config.py
-│       │   └── main.py
-│       └── rag/                             # Core RAG pipeline
-│           ├── orchestrator.py              # Wires retriever → reranker → generator
-│           ├── retriever/
-│           │   ├── base.py                  # Abstract base class
-│           │   └── pg_retriever.py          # PostgreSQL + pgvector semantic search
-│           ├── reranker/
-│           │   ├── base.py                  # Abstract base class
-│           │   ├── cross_encoder.py         # CrossEncoder with optional LoRA adapter
-│           │   ├── qa_dataset.py            # QA dataset for reranker training
-│           │   └── train_lora.py            # LoRA fine-tuning script
-│           ├── generator/
-│           │   ├── base.py                  # Abstract base class
-│           │   └── chatgpt_generator.py     # OpenAI SDK generation + streaming
-│           ├── eval/                        # Evaluation module (WIP)
-│           └── tests/
-│               └── test_orchestrator.py
+│       ├── readiness.py                      # /ready: DB rows + model state
+│       ├── system_status.py                  # /status: readiness + latest pipeline run
+│       ├── question_generator/               # GPT-powered question generation for articles
+│       └── rag/                              # Core RAG pipeline
+│           ├── orchestrator.py               # Wires retriever → reranker → generator
+│           ├── model_registry.py             # Shared model instances, startup preload
+│           ├── errors.py                     # Safe error taxonomy (503 / 504 responses)
+│           ├── adapters/langchain_adapter.py # Optional LCEL wrapper
+│           ├── retriever/pg_retriever.py     # PostgreSQL + pgvector semantic search
+│           ├── reranker/                     # CrossEncoder + LoRA training script
+│           ├── generator/chatgpt_generator.py# OpenAI SDK generation + streaming
+│           └── eval/                         # Retriever / reranker / generator evaluation
 │
-├── scripts/
-│   ├── merge_json.py                        # Merge multiple JSON data files
-│   ├── run_question_generator.py            # CLI launcher for question generation
-│   └── chunking/                            # Web scrapers and chunking notebooks
-│       ├── aoji_harvester.py                # AOJI website scraper
-│       ├── YI_XIANG_HAO_JU.ipynb
-│       ├── YUN_XIAO_EDU_AU.ipynb
-│       └── myoffer_harvester.ipynb
+├── pipelines/                                # Data pipeline package (CLI: python -m pipelines)
+│   ├── cli.py                                # harvest / transform / import / full run
+│   ├── ingestion/wechat/                     # WeChat API client + harvester
+│   ├── transform/wechat_articles.py          # Source-specific cleaning
+│   ├── validation/                           # Data contract checks before expensive work
+│   ├── embedding/                            # Embedding text construction
+│   ├── loaders/                              # Postgres knowledge_base + pipeline_runs
+│   ├── orchestration/                        # Runnable jobs (incl. run-wechat-pipeline)
+│   └── shared/                               # Paths, storage abstraction, logging, reports
 │
-├── data/                                    # Local data files (not committed to git)
-│   ├── qa_clean_data.json                   # Cleaned QA pairs for training
-│   ├── wechat_articles_processed.json       # Processed records used to rebuild knowledge_base
-│   └── ...                                  # Raw scraped JSONs per source
+├── ops/                                      # Operator scripts
+│   ├── check_config.py                       # Validate runtime config per profile
+│   ├── db_status.py                          # Inspect knowledge_base rows / embeddings
+│   ├── download_models.py                    # Pre-download pinned models
+│   ├── rehearse_local_stack.py               # End-to-end local rehearsal
+│   └── smoke_test_api.py                     # Hit /health, /ready, /chat
 │
+├── migrations/                               # Alembic migrations (knowledge_base, pipeline_runs)
 ├── tests/
-│   └── test_db.py
+│   ├── unit/                                 # Fast, no external services
+│   └── integration/                          # Require Postgres (RUN_INTEGRATION_TESTS=1)
 │
-├── Dockerfile.api                          # Production API image (slim, uv, multi-stage)
-├── Dockerfile.pipeline                     # Data pipeline task image (slim, uv, multi-stage)
-├── docker-compose.yml                       # PostgreSQL + pgvector + app services
-├── pyproject.toml                          # Runtime deps (api/pipeline/dev groups); source for uv.lock
-├── uv.lock                                 # Locked dependency versions (used by images + CI)
-├── environment_cpu.yml                      # DS notebook env (CPU) — not a deployment artifact
-├── environment_gpu.yml                      # DS notebook env (GPU) — not a deployment artifact
-├── branch-policy.md                         # Git branching conventions
-└── docker-command.md                        # Docker usage reference
+├── data/                                     # Local pipeline artifacts
+│   ├── raw/  processed/  current/            # Snapshots → transformed → stable stage inputs
+│   └── checkpoints/  reports/                # Resumable state + run reports
+│
+├── docs/design/                              # Design write-ups (中文)
+├── .github/workflows/                        # Unit / integration / docker CI
+├── Dockerfile.api                            # Production API image (slim, uv, multi-stage)
+├── Dockerfile.pipeline                       # Data pipeline task image (slim, uv, multi-stage)
+├── docker-compose.yml                        # PostgreSQL + pgvector, migrate, api, pipeline
+├── pyproject.toml                            # Runtime deps (api/pipeline/dev groups); source for uv.lock
+├── uv.lock                                   # Locked dependency versions (used by images + CI)
+├── environment_cpu.yml / environment_gpu.yml # Optional DS notebook envs — not deployment artifacts
+├── branch-policy.md                          # Git branching conventions
+├── docker-command.md                         # Docker usage reference
+└── future_plan.md                            # Deployment roadmap
 ```
 
 ---
 
 ## Setup
 
-### 1. Conda (recommended)
+### 1. Install dependencies
+
+The project is locked with [uv](https://docs.astral.sh/uv/); this is what CI and the
+Docker images use, so it is the reproducible path:
 
 ```bash
-# CPU
-conda env create -f environment_cpu.yml
-conda activate cssa-ai
+uv sync --locked          # shared core + dev group (api + pipeline + test tooling)
+```
 
-# GPU
-conda env create -f environment_gpu.yml
+`--locked` fails if `uv.lock` is out of date with `pyproject.toml`. After changing
+dependencies, run `uv lock` and commit the updated lock file.
+
+Role-specific installs (what the images do):
+
+```bash
+uv sync --locked --no-default-groups --group api        # API service only
+uv sync --locked --no-default-groups --group pipeline   # Pipeline tasks only
+```
+
+<details>
+<summary>Optional: conda environment for notebooks</summary>
+
+`environment_cpu.yml` / `environment_gpu.yml` provide a data-science environment for
+the notebooks under `scripts/`. They are **not** deployment artifacts and are not used
+by CI or the Docker images.
+
+```bash
+conda env create -f environment_cpu.yml   # or environment_gpu.yml
 conda activate cssa-ai
 ```
 
-To update an existing environment:
-```bash
-conda env update -f environment_cpu.yml --prune
-```
+</details>
 
-### 2. Environment Variables
+### 2. Environment variables
 
 Copy `.env.example` to `.env` and fill in:
 
-```
-OPENAI_API_KEY=sk-...
-```
+| Variable | Required for | Description |
+|----------|--------------|-------------|
+| `OPENAI_API_KEY` | API | OpenAI key used by the generator |
+| `CHAT_API_KEY` | API | Internal key callers must send as `X-API-Key` on `/chat` and `/status` |
+| `DATABASE_URL` | API, pipeline | PostgreSQL connection string |
+| `WECHAT_API_KEY` | harvester | WeChat article source |
+| `ENV` | optional | `dev` by default |
+| `MODEL_DIR` | optional | Local model directory (set to `/models` in the images) |
+| `LOG_LEVEL` | optional | `INFO` by default |
+| `ALLOWED_ORIGINS` | optional | Comma-separated CORS origins |
+| `CHAT_RATE_LIMIT` | optional | `10/minute` by default |
 
 Check runtime configuration without printing secret values:
 
 ```bash
-python ops/check_config.py --profile api
+python ops/check_config.py --profile api        # also: pipeline, harvester, all
 ```
 
 ### 3. Docker
@@ -134,15 +177,16 @@ python ops/check_config.py --profile api
 docker compose --profile cpu up --build
 ```
 
-This starts PostgreSQL, applies Alembic migrations through the `migrate-cpu`
-service, and then starts the FastAPI service. Open `http://localhost:8000/docs`.
-Use the `gpu` profile instead on a machine with a supported NVIDIA GPU. See
+This starts PostgreSQL, applies Alembic migrations through the `migrate-cpu` service,
+and then starts the FastAPI service. Open `http://localhost:8000/docs`. The pinned
+embedding and reranker models are baked into the image and preloaded at startup, so no
+download happens on the first `/chat` request. Available profiles: `cpu` (API),
+`pipeline` (pipeline tasks + migrations), `test` (throwaway Postgres). See
 [docker-command.md](docker-command.md) for detailed Docker usage.
 
 ### 4. Rebuild the local knowledge base
 
-Database schema is managed by Alembic migrations. Local knowledge-base rows are
-rebuilt from processed files in `data/`:
+Local knowledge-base rows are rebuilt from processed files in `data/`:
 
 ```bash
 docker compose --profile pipeline run --rm migrate-cpu
@@ -155,23 +199,59 @@ python ops/db_status.py
 python ops/smoke_test_api.py --message "墨尔本 校招"
 ```
 
-For Docker-based pipeline runs, see [pipelines/README.md](pipelines/README.md).
+The full harvest-to-import workflow is one command (`run-wechat-pipeline`); for
+checkpoints, batching and the local-only variants see [pipelines/README.md](pipelines/README.md).
 
-PostgreSQL is the canonical RAG store. The API dependency wiring uses
-`PGVectorRetriever`, and readiness checks inspect PostgreSQL rows for the active
-embedding model/revision.
+PostgreSQL is the canonical RAG store. The API dependency wiring uses `PGVectorRetriever`,
+and readiness checks inspect PostgreSQL rows for the active embedding model/revision.
 
-### Running the API
+---
+
+## Running the API
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
 The API is available at `http://localhost:8000`, with interactive documentation at
-`http://localhost:8000/docs`. Use `GET /health` to check the API process,
-`GET /ready` to check database/RAG data readiness, and `POST /chat` to submit a
-message to the RAG pipeline. Use `GET /status` to inspect readiness plus latest
-pipeline run metadata without changing readiness semantics.
+`http://localhost:8000/docs`.
+
+| Endpoint | Auth | Purpose |
+|----------|------|---------|
+| `GET /health` | — | Liveness of the API process |
+| `GET /ready` | — | Database + RAG data/model readiness (503 when not ready) |
+| `GET /status` | `X-API-Key` | Readiness plus latest pipeline run metadata |
+| `POST /chat` | `X-API-Key` | Submit a message to the RAG pipeline |
+
+`/chat` is rate limited (`CHAT_RATE_LIMIT`, default `10/minute`). Failures return a
+stable error shape — `{"error": {"code": ..., "message": ...}}` — with internal details
+kept in the logs only: `503` when retrieval or generation is unavailable, `504` on
+generation timeout, `429` when rate limited.
+
+```bash
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $CHAT_API_KEY" \
+  -d '{"message": "墨尔本 校招"}'
+```
+
+---
+
+## Testing
+
+```bash
+uv run pytest tests/unit -q                     # fast, no external services
+
+# Integration tests need PostgreSQL + pgvector:
+docker compose --profile test up -d postgres-test
+RUN_INTEGRATION_TESTS=1 \
+TEST_DATABASE_URL=postgresql://test:test@localhost:5433/testdb \
+  uv run pytest tests/integration -q
+```
+
+CI runs three workflows on pull requests to `main`: unit tests + config-contract
+validation, integration tests against a pgvector service, and a Docker build that
+smoke-tests both images.
 
 ---
 
@@ -183,7 +263,7 @@ pipeline run metadata without changing readiness semantics.
 - Filters rows by embedding model and revision so retrieval matches the imported vectors
 - Returns ranked `SearchResult` objects (article + similarity score)
 
-### Reranker ([app/services/rag/reranker/cross_encoder.py](app/services/rag/reranker/cross_encoder.py))
+### Reranker ([app/services/rag/reranker/cross_encoder_reranker.py](app/services/rag/reranker/cross_encoder_reranker.py))
 - Re-scores retrieved results using a CrossEncoder model
 - Supports loading a LoRA adapter for domain-specific fine-tuning
 - Training script: [app/services/rag/reranker/train_lora.py](app/services/rag/reranker/train_lora.py)
@@ -196,6 +276,24 @@ pipeline run metadata without changing readiness semantics.
 The optional `LangChainRAGAdapter` wraps the framework-independent components as
 LCEL runnables and returns shared pipeline state containing the answer and sources.
 
+### Model registry ([app/services/rag/model_registry.py](app/services/rag/model_registry.py))
+- Single shared instance of each model, so retriever and reranker do not load duplicates
+- Preloaded during app startup (`lifespan`) instead of on the first request
+- Exposes per-model load state (`not_loaded` / `loading` / `ready` / `failed`) to `/ready`
+
+### Configuration ([app/core/config/rag-config.yaml](app/core/config/rag-config.yaml))
+- Embedding and reranker models pinned by name **and** revision, so imports and retrieval
+  use identical model files
+- Retrieval/rerank `top_k`, pgvector table and pool sizes, generator model, timeouts and
+  the system prompt
+
+### Data pipelines ([pipelines/](pipelines/))
+- One CLI: `python -m pipelines <command>` — `harvest-wechat`, `transform-wechat`,
+  `import-knowledge-base`, `run-wechat-pipeline`
+- Imports are batched, resumable via checkpoints, and idempotent on `(link, question_text)`
+- Artifacts go through a storage abstraction (local today, S3-shaped keys) and every run
+  writes a JSON report plus a `pipeline_runs` row
+
 ### Question Generator ([app/services/question_generator/](app/services/question_generator/))
 - Uses GPT to generate natural Chinese questions for article/question datasets
 - Detects content patterns (cost, requirements, process, comparison, etc.) to generate relevant question types
@@ -205,19 +303,39 @@ LCEL runnables and returns shared pipeline state containing the answer and sourc
 
 ## Data Schema
 
-**Article** (`app/schemas/article.py`):
+**Article** ([app/schemas/article.py](app/schemas/article.py)) — the record shape used by the
+pipeline and returned as a `/chat` source:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | UUID | Unique identifier |
+| `id` | str (UUID) | Unique identifier |
 | `text` | str | Article body |
 | `questions` | List[str] | GPT-generated questions (used for retrieval) |
 | `source` | str | Origin website |
 | `author` | str | Author name |
 | `post_date` | date | Publication date |
+| `created_at` | datetime | Ingestion timestamp |
 | `language` | str | Content language |
 | `tags` | List[str] | Topic tags |
 | `link` | str | Original URL |
+
+In PostgreSQL, one row of `knowledge_base` is one *(question, article)* pair: the article
+fields above plus `question_text`, a 384-dim `embedding`, and the embedding model/revision
+that produced it. Rows are unique on `(link, question_text)`.
+
+---
+
+## Documentation
+
+| Document | Contents |
+|----------|----------|
+| [future_plan.md](future_plan.md) | Deployment roadmap and open decisions (中文) |
+| [docs/design/chat-api-hardening.md](docs/design/chat-api-hardening.md) | `/chat` logging, security and rate limiting (中文) |
+| [docs/design/storage-abstraction.md](docs/design/storage-abstraction.md) | Pipeline storage abstraction (中文) |
+| [docs/design/deployment-packaging.md](docs/design/deployment-packaging.md) | Dependency locking and container images (中文) |
+| [pipelines/README.md](pipelines/README.md) | Pipeline layout, local workflows, checkpoints |
+| [docker-command.md](docker-command.md) | Docker usage reference |
+| [branch-policy.md](branch-policy.md) | Branching conventions |
 
 ---
 

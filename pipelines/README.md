@@ -58,9 +58,16 @@ data/checkpoints/import_knowledge_base.json
 
 Pipeline commands read from `data/current` by default. This gives local
 development a stable path while preserving timestamped source snapshots for
-debugging, reruns and future S3-style storage. During migration, transform also
-falls back to the legacy `data/wechat_articles_all.json` file if the new current
-raw file does not exist.
+debugging, reruns and future S3-style storage.
+
+There is no fallback to the pre-migration layout: `transform-wechat` reads the
+logical key `current/wechat_articles_all.json` and raises `StorageNotFoundError`
+if it is missing. Coming from the old flat layout, move the file into place
+first:
+
+```powershell
+Move-Item data/wechat_articles_all.json data/current/wechat_articles_all.json
+```
 
 Complete pipeline runs also write JSON reports:
 
