@@ -99,7 +99,6 @@ CSSA-DA/
 │   ├── raw/  processed/  current/            # Snapshots → transformed → stable stage inputs
 │   └── checkpoints/  reports/                # Resumable state + run reports
 │
-├── docs/design/                              # Design write-ups (中文)
 ├── .github/workflows/                        # Unit / integration / docker CI
 ├── Dockerfile.api                            # Production API image (slim, uv, multi-stage)
 ├── Dockerfile.pipeline                       # Data pipeline task image (slim, uv, multi-stage)
@@ -107,9 +106,17 @@ CSSA-DA/
 ├── pyproject.toml                            # Runtime deps (api/pipeline/dev groups); source for uv.lock
 ├── uv.lock                                   # Locked dependency versions (used by images + CI)
 ├── environment_cpu.yml / environment_gpu.yml # Optional DS notebook envs — not deployment artifacts
-├── branch-policy.md                          # Git branching conventions
-├── docker-command.md                         # Docker usage reference
-└── future_plan.md                            # Deployment roadmap
+├── CONTRIBUTING.md                           # Branching, commits, PRs, versioning, releases
+└── docs/
+    ├── local-development.md                  # Local Docker workflows and command reference
+    ├── roadmap/                              # What to build and when
+    │   ├── ROADMAP_versions.md               #   Milestone boundaries v1–v4 — start here
+    │   ├── ROADMAP_platform.md               #   Containers, AWS, CI/CD, observability
+    │   ├── ROADMAP_data.md                   #   Corpus, ground truth dataset, data sources
+    │   └── ROADMAP_rag.md                    #   Query path, eval tooling, architecture experiments
+    └── design/                               # Why things are designed this way (中文)
+        ├── implemented/                       #   Shipped — design of record
+        └── planned/                           #   Not started yet
 ```
 
 ---
@@ -182,7 +189,7 @@ and then starts the FastAPI service. Open `http://localhost:8000/docs`. The pinn
 embedding and reranker models are baked into the image and preloaded at startup, so no
 download happens on the first `/chat` request. Available profiles: `cpu` (API),
 `pipeline` (pipeline tasks + migrations), `test` (throwaway Postgres). See
-[docker-command.md](docker-command.md) for detailed Docker usage.
+[docs/local-development.md](docs/local-development.md) for detailed Docker usage.
 
 ### 4. Rebuild the local knowledge base
 
@@ -329,13 +336,18 @@ that produced it. Rows are unique on `(link, question_text)`.
 
 | Document | Contents |
 |----------|----------|
-| [future_plan.md](future_plan.md) | Deployment roadmap and open decisions (中文) |
-| [docs/design/chat-api-hardening.md](docs/design/chat-api-hardening.md) | `/chat` logging, security and rate limiting (中文) |
-| [docs/design/storage-abstraction.md](docs/design/storage-abstraction.md) | Pipeline storage abstraction (中文) |
-| [docs/design/deployment-packaging.md](docs/design/deployment-packaging.md) | Dependency locking and container images (中文) |
+| [docs/roadmap/ROADMAP_versions.md](docs/roadmap/ROADMAP_versions.md) | **版本边界 v1–v4：谁能用、承诺什么、什么时候做（先看这个）** |
+| [docs/roadmap/ROADMAP_platform.md](docs/roadmap/ROADMAP_platform.md) | 平台线：容器、AWS 基础设施、CI/CD、可观测性、安全 (中文) |
+| [docs/roadmap/ROADMAP_data.md](docs/roadmap/ROADMAP_data.md) | 数据线：语料建设、ground truth dataset、数据源接入 (中文) |
+| [docs/roadmap/ROADMAP_rag.md](docs/roadmap/ROADMAP_rag.md) | RAG 线：查询链路、评估工具、架构实验 (中文) |
+| [docs/design/planned/eval-dataset.md](docs/design/planned/eval-dataset.md) | Ground truth dataset 怎么造：pooling / qrels / 难负例 / 标注 (中文) |
+| [docs/design/planned/eval-experiments.md](docs/design/planned/eval-experiments.md) | 检索架构与模型实验矩阵 (中文) |
+| [docs/design/chat-api-hardening.md](docs/design/implemented/chat-api-hardening.md) | `/chat` logging, security and rate limiting (中文) |
+| [docs/design/storage-abstraction.md](docs/design/implemented/storage-abstraction.md) | Pipeline storage abstraction (中文) |
+| [docs/design/deployment-packaging.md](docs/design/implemented/deployment-packaging.md) | Dependency locking and container images (中文) |
 | [pipelines/README.md](pipelines/README.md) | Pipeline layout, local workflows, checkpoints |
-| [docker-command.md](docker-command.md) | Docker usage reference |
-| [branch-policy.md](branch-policy.md) | Branching conventions |
+| [docs/local-development.md](docs/local-development.md) | Local Docker workflows and command reference |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Branching, commits, PRs, versioning and releases |
 
 ---
 
@@ -347,4 +359,4 @@ that produced it. Rows are unique on `(link, question_text)`.
 | **B — AI** | RAG pipeline, reranker, generator, prompt engineering |
 | **C — Platform** | FastAPI layer, database, security, DevOps |
 
-See [branch-policy.md](branch-policy.md) for branching conventions (`feature/`, `bugfix/`, `hotfix/`, `release/`, `chore/`).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for branching, commit and release conventions (`feature/`, `fix/`, `hotfix/`, `chore/`, `dev/`).

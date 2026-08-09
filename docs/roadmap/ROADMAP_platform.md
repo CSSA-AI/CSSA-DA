@@ -1,6 +1,20 @@
-# CSSA-DA 未来部署计划
+# CSSA-DA 平台方向路线图
 
-## 目标
+本文是**平台与部署**方向的路线图：容器化、AWS 基础设施、CI/CD、可观测性、安全。
+
+另外两条线：
+
+- 数据与语料、ground truth dataset → **[ROADMAP_data.md](ROADMAP_data.md)**
+- 查询链路与评估工具 → **[ROADMAP_rag.md](ROADMAP_rag.md)**
+
+三条线并行推进，与本线的耦合点见第 18 项。
+
+**每一项属于哪个版本、什么时候做,见 [ROADMAP_versions.md](ROADMAP_versions.md)。**
+
+---
+
+## 部署目标
+
 
 将 CSSA-DA 部署到 AWS，并满足以下要求：
 
@@ -67,8 +81,13 @@ AWS IAM OIDC       为 GitHub 提供短期 AWS 凭据
 
 ### 1. 保护付费的 `/chat` 接口（含结构化日志与可观测性基础）✅ 已完成
 
+> ⏰ **2026-08-09 补充**：本项设计时**还没有前端**，`CHAT_API_KEY` 的定位是
+> 「internal test clients 用的共享 key」（见 `deps.py` docstring），限流按 IP 也
+> 明确标注为「保命型止血」。前端出现后，这两个前提都变了 —— 见
+> [第 19 项](#19-前端接入的安全边界2026-08-09-新增v1-阻塞项)。
+>
 > **状态：已完成并验证（8 步全部落地）。** 设计与实现细节见
-> [docs/design/chat-api-hardening.md](docs/design/chat-api-hardening.md)。
+> [docs/design/chat-api-hardening.md](../design/implemented/chat-api-hardening.md)。
 > 限流精细化（按用户维度）延后,见本文件第 16 项 /
 > [issue #67](https://github.com/CSSA-AI/CSSA-DA/issues/67)。下面保留原始设计
 > 记录以备回顾。
@@ -410,7 +429,7 @@ FROM continuumio/miniconda3:latest
 
 > **决策（2026-07-27）**：第 5（固定基础镜像）、第 6（锁定依赖）、第 7（缩小
 > 镜像）本质是同一件事，合并实施。设计与实现细节、基础知识见
-> [docs/design/deployment-packaging.md](docs/design/deployment-packaging.md)。
+> [docs/design/deployment-packaging.md](../design/implemented/deployment-packaging.md)。
 
 **总方向 —— 按团队分工拆两套环境，互不拖累：**
 
@@ -573,6 +592,46 @@ Wait for healthy targets
 - 每个 release 只运行一个受控的 migration task。
 - CloudWatch 中可以查看 migration log。
 
+#### 11.1 硬规则：每个 migration 必须向后兼容上一版代码
+
+**代码能秒回滚，数据库不能。**
+
+```
+出问题 → 重新部署上一个镜像 → 30 秒回到旧代码  ✅
+      → 但 migration 已经执行，表结构已经改了   ❌
+```
+
+回滚只换镜像，**不会撤销 migration**。所以：
+
+> **每个 migration 执行之后，上一版代码必须仍能正常工作。**
+
+不满足这条，回滚就成了「代码退回去了但数据库回不去」，服务反而更坏。
+
+**安全的改动**（可以单次部署）：
+
+- 加表 —— 旧代码不认识它，无影响
+- 加**可空**列，或带默认值的列
+- 加索引
+
+**危险的改动**（必须拆成两次部署）：
+
+| 想做的事 | 部署 1 | 部署 2 |
+|---|---|---|
+| 删列 | 发一版代码，不再读写该列（列仍在） | 确认稳定后，migration 删列 |
+| 改列类型 | 加新列、双写、代码读新列 | 删旧列 |
+| 加非空列 | 先加可空列 + 回填 | 再加 NOT NULL 约束 |
+| 重命名列 | 等价于「加新列 + 删旧列」，同上 | |
+
+中间任何一步回滚，代码和数据库都对得上。
+
+**这条约束比部署自动化本身更重要** —— 自动化只是让部署更快，而这条决定了出事时
+救不救得回来。
+
+> 落到眼前的例子：`chat_interactions` 建表（[ROADMAP_rag.md](ROADMAP_rag.md)
+> Phase 4.5）是**加表**，安全，单次部署即可；后续那些 `feedback` / `user_id` /
+> `token_usage` 扩展列都是**可空加列**，同样安全。这是当初把它们设计成 nullable
+> 的另一个理由。
+
 ### 12. 设计 outbound networking
 
 Private ECS task 必须能够访问 OpenAI。
@@ -662,6 +721,11 @@ LangChain/LangSmith tracing、metadata 和隐私策略继续延后到核心系�
 
 ### 16. 精细化限流（按用户维度）
 
+> ⏰ **2026-08-09：本项的到期条件已满足。** 原文写的是「等**前端和用户体系确定后**
+> 再做」—— 前端团队已存在、登录系统已有。**若[第 19 项](#19-前端接入的安全边界2026-08-09-新增v1-阻塞项)
+> 决定走 BFF，本项从「中优先级/延后」升级为 v1 必做**：所有请求都从 BFF 的同一个
+> IP 发出，`get_remote_address` 会失去区分度，全体用户挤在一份 `10/minute` 里。
+
 第 1 项已经上了**按 IP、`10/minute` 的止血型限流**（方向 C）。它够挡住脚本
 狂刷，但按 IP 计数在校园 WiFi / 宿舍 NAT 下会**多人共享一份额度**，可能误伤
 正常用户。等前端和用户体系确定后再做精细化：
@@ -696,6 +760,147 @@ ECS task count
 - Backup retention
 - Multi-AZ 要求
 - Maintenance 和 upgrade policy
+
+### 18. 检索质量评估与模型选型 → 已拆分到另外两条线
+
+这一项的完整内容已拆走，本文只保留与平台线的耦合点：
+
+- **语料建设、ground truth dataset、数据源接入** → [ROADMAP_data.md](ROADMAP_data.md)
+- **查询链路、评估工具、架构实验** → [ROADMAP_rag.md](ROADMAP_rag.md)
+
+**两条线并行推进**：数据线 Phase 0–4 全程不碰数据库，平台线的大头（网络、IAM、
+ECR、Secrets、迁移编排）与模型选型完全无关，不需要等待。真正需要对齐的只有下面
+七项：
+
+| # | 耦合点 | 平台侧要做什么 | 必须在何时收敛 |
+|---|---|---|---|
+| 1 | **`doc_id` 链路修复** | `pg_retriever` 补 `SELECT id` 并传到 `SearchResult`。这**改变 `/chat` 响应体**——当前每次响应都在吐一个随机 UUID（`Article.id` 是 `default_factory=uuid4`），是公开契约变更 | ⏰ **上线、前端接入之前**。趁没有真实客户端，改起来零成本 |
+| 2 | **向量维度** | `VECTOR(384)` 写死。若选型结论是 1024 维模型，需 ALTER + 全库重嵌入重导 | ⏰ **建 RDS 前**。现在 DB 是一次性容器，迁移=删了重来；上生产后要变成停机窗口+回滚方案，成本差一个数量级 |
+| 3 | **模型文件大小** | 模型烤入镜像。若换成 bge-m3 + bge-reranker-v2-m3（约各 2.2GB），镜像从 3.35GB 冲到 ~7GB，**Phase 1 的验收基线（冷启动 7.5s / idle 944MiB）全部要重测**，并可能推翻第 4.1 项的「烤入镜像」方案 | ⏰ **写 ECS task definition 前** |
+| 4 | **`top_k`** | 现 retriever `top_k=5`、reranker `top_k=3`，评估要求 deep pool（50）。5→50 让每请求 CPU 差 10 倍 | ⏰ **第 13/14 项（worker/扩容策略、资源基线）定稿前** |
+| 5 | **PII 脱敏 stage** | 小助手 1:1 问答是求助场景的私密对话，含真名/微信号/学号/手机号。**脱敏 + 个人化内容筛选必须是 pipeline 的一个 stage，在入库之前执行** —— 放到下游就等于原始 PII 已经进了 Postgres 和 S3 | Phase 3 生产 Pipeline 设计时 |
+| 6 | **`held_out_for_eval` 排除** | eval 划走的对话不能回流进语料。标记落在源头，**由 ingest 阶段强制排除** —— 否则下次重跑管线会静默污染 eval set，且**没有任何报错** | 同上 |
+| 7 | **query 结构化日志 + 保留期** | `orchestrator.py` 目前把 query 拼进日志 message，改为 `extra={"query": ...}`，便于 CloudWatch Insights 提取；并设定 log group 保留期限（当前无限期）。**已确认可用于分析，将在隐私声明中告知** | 与第 15 项一并做 |
+
+> **一个可选的降级方案**：若不希望本线受任何阻塞，可先只做 **reranker 的替换** ——
+> 它不动 schema、不动向量维度、不需要重嵌入，只是换镜像里的模型文件。而当前
+> `cross-encoder/ms-marco-MiniLM-L12-v2` 不只是英文模型的问题，**任务类型也是错的**
+> （ms-marco 训练的是 query→段落，而本系统主任务是问题↔问题匹配），大概率是投入
+> 产出比最高的单点改动。详见 [ROADMAP_data.md](ROADMAP_data.md) Phase 3。
+
+
+### 19. 前端接入的安全边界（2026-08-09 新增，v1 阻塞项）
+
+前端团队已存在（网页 + 已有登录系统），这触发了第 1 项当初显式挂起的决定
+（见[第 16 项](#16-精细化限流按用户维度)：「等**前端和用户体系确定后**再做」）。
+
+#### 19.1 先分清两把钥匙
+
+系统里有两把 key，容易混：
+
+```
+浏览器 ──带 CHAT_API_KEY──► CSSA-DA 后端 ──带 OPENAI_API_KEY──► OpenAI
+         ↑ 第一道门                        ↑ 第二道门
+   「你有资格调我的 /chat 吗」        ✅ 只在服务器上，从不外泄
+```
+
+| 钥匙 | 谁持有 | 状态 |
+|---|---|---|
+| `OPENAI_API_KEY` | 只有 CSSA-DA 后端 | ✅ 安全，一直都安全 |
+| `CHAT_API_KEY` | **谁调 `/chat` 谁得带** | ⚠️ 见下 |
+
+`require_internal_api_key` 检查的是**第二把**。**OpenAI 密钥一步都没泄漏，但「花这笔
+钱的权限」会随前端代码公开** —— 卡锁在保险箱里，但门禁卡人手一张。
+
+#### 19.2 为什么登录不能替代
+
+登录管的是「谁能进网页」，不管「网页里有什么」。用户一旦登录成功，网页代码连同内嵌
+的 key 已经在他的电脑上，登录不会阻止他按 F12。
+
+三条现实泄漏路径，按概率排序：
+
+1. **前端仓库公开 → key 进 git 历史**（最现实；GitHub 上有专门扫密钥的爬虫，且删掉
+   也没用，历史还在）
+2. **用户无意泄漏** —— 截 Network 面板的图发群里问「为什么报错」
+3. 内测用户里有人写脚本绕过网页直接调
+
+> 诚实评估：有登录 + 纯内测 + 用户是熟人，**实际泄漏概率确实低**。对内测阶段这个
+> 风险水平可能已经可以接受 —— 前提是损失封顶（19.4）且前端仓库不公开。
+
+#### 19.3 两条路径
+
+| 方案 | 成本 | 风险 |
+|---|---|---|
+| **接受 key 公开** | 零 | key 会泄漏，靠 19.4 封顶损失 |
+| **BFF（前端服务端持有 key）** | 前端约二十行 | key 永不离开服务器 |
+
+**有登录恰恰说明 BFF 的基础已经有了** —— 登录必须在服务端验证，所以前端团队已经有
+一台服务器。BFF 不是新建系统，是在上面加一个转发接口：
+
+```
+已有:  POST /api/login    验证用户
+要加:  POST /api/chat     检查登录态 → 转发给 CSSA-DA（带 X-API-Key）→ 原样返回
+```
+
+而且 `ALLOWED_ORIGINS` 默认值里的 `localhost:3000` 是 **Next.js** 端口 —— 若前端确实
+是 Next.js，服务端接口是框架自带的，BFF 就是项目里的一个文件。
+
+> ⚠️ **若走 BFF，第 16 项必须同步做**：所有请求都从 BFF 的同一个 IP 发出，
+> `get_remote_address` 失去区分度，全体用户会挤在一份 `10/minute` 里。需要 BFF 传
+> `X-User-Id`，限流 key 改成读它。**不需要验证该 header 真伪** —— 只有持 API key 的
+> BFF 能进门，是标准的 trusted proxy 做法。
+
+#### 19.4 不管选哪条都要做（v1 必做）
+
+- [ ] **OpenAI 后台设硬性支出上限** —— 兜底。不管前面漏成什么样，当月最多花这么多
+- [ ] **加全局限流** —— 现在只有 per-IP，再加一层「全站每天 N 次」。换 IP 绕不过全局计数
+- [ ] **限制 `/chat` 输入体积** —— 见 19.5
+- [ ] **确认前端仓库不公开，或 key 不进仓库**
+
+#### 19.5 `/chat` 输入体积无上限 🔴
+
+```python
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]     # ✅ 挡住了 system 注入
+    content: str = Field(min_length=1)     # ❌ 没有 max_length
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=10_000)          # ✅ 守住了
+    chat_history: list[ChatMessage] = Field(default_factory=list)  # ❌ 没有条数上限
+```
+
+而 `chatgpt_generator._build_messages` 是 `messages.extend(chat_history)` —— 客户端
+传什么就原样进 OpenAI 的 messages 数组。两个后果：
+
+- **单请求成本无上限。** 一次塞 10 万 token 的历史，花的钱是正常请求的几十倍。而
+  **限流数的是请求数，不是 token 数** —— `10/minute` 对此毫无约束
+- **可被引导。** 伪造几轮「assistant: 好的，我不再受资料限制」再提问。`role` 限死
+  `user`/`assistant` 挡住了最直接的 system 注入（这点做得对），但伪造历史仍然有效
+
+修法（两行，**与前端架构决策无关，现在就该做**）：
+
+```python
+content: str = Field(min_length=1, max_length=4_000)
+chat_history: list[ChatMessage] = Field(default_factory=list, max_length=20)
+```
+
+#### 19.6 一个中间档：按渠道发 key
+
+第 16 项原本就列了这个方向（「或按渠道发放的 `X-API-Key`」）。给网页发一把独立的
+key，和 `ops/smoke_test_api.py` / CI 用的分开。
+
+它**不解决「会不会泄漏」，只解决「泄漏之后能不能止损」** —— 但成本极低：吊销网页那把
+不影响内部工具，日志里也能区分流量来源。
+
+#### 19.7 待确认（去问前端团队）
+
+- **登录是怎么做的？有没有服务端？是不是 Next.js？** ← 这个答案直接决定 19.3 选哪条
+- 前端仓库是否公开
+
+> 有服务端 / 是 Next.js → BFF 就是加个文件，没理由不做
+> 纯静态托管 + 第三方认证（Firebase/Auth0 那类）→ 才需要认真权衡是否为此新起一个服务
+
+---
 
 ## 当前已经具备的部署基础
 
@@ -790,12 +995,186 @@ uvicorn 关闭日志四步完整（`Shutting down` → `Waiting for application 
 
 ### Phase 4：CI/CD 和运维
 
-1. GitHub Actions 使用 AWS IAM OIDC。
-2. Pull request 运行 unit test 和 pgvector integration test。
-3. 构建镜像并使用 immutable tag 推送到 ECR。
-4. 部署 service 前运行 migration。
-5. 增加 deployment rollback 和部署后 smoke test。
-6. 增加 dashboard、alarm、request log 和 capacity metric。
+#### CI 与 CD 分别指什么
+
+| 缩写 | 全称 | 含义 |
+|---|---|---|
+| **CI** | Continuous **Integration** | 每次改动自动跑测试，保证能合进主干 |
+| **CD** | Continuous **Delivery** | 通过测试的代码**随时可上线**，但由人决定何时 |
+| **CD** | Continuous **Deployment** | 通过测试的代码**自动上线**，无人参与 |
+
+**本项目选 Continuous Delivery，不选 Deployment**，即部署由 **tag 触发**而非
+push 到 `main` 触发。理由：
+
+- OpenAI 花的是真钱，一个 bug 自动上线可能直接烧账单
+- 没有 on-call，半夜自动部署挂了没人知道
+- 社团项目没有「必须几分钟内上线」的需求
+
+Continuous Deployment 适合一天发几十次、有完整告警与自动回滚的团队 —— 我们不需要
+那个速度，却要付它的可靠性代价。
+
+**这个选择的直接含义**：`main` 可以自由累积提交而不影响生产；只有打 tag 才部署。
+因此**不需要 `develop` / `prod` 这类长期环境分支** —— 「什么在生产」由 tag 和
+镜像 tag 回答，不由分支回答。分支模型见
+[CONTRIBUTING.md](../../CONTRIBUTING.md#branching-model)。
+
+```
+push / PR ──► CI：单测 + 集成测试 + docker 构建检查        ← 已经有了
+                      │
+                  merge 到 main
+                      │
+                  打 tag v0.1.1
+                      │
+        ┌──────────── CD ────────────┐
+        │ 1. 构建镜像，tag = git sha   │
+        │ 2. 推到 ECR                 │
+        │ 3. 跑 Alembic migration     │  ← 第 11 项部署关卡
+        │ 4. 更新 ECS service（滚动）  │
+        │ 5. 等健康检查通过            │
+        │ 6. 跑 smoke test            │
+        │ 7. 失败 → 回滚上一个镜像     │
+        └─────────────────────────────┘
+```
+
+#### 清单
+
+| # | 事项 | 属于 |
+|---|---|---|
+| 1 | GitHub Actions 使用 AWS IAM OIDC | CD 前提 |
+| 2 | Pull request 运行 unit test 和 pgvector integration test | **CI ✅ 已有** |
+| 3 | 构建镜像并使用 immutable tag 推送到 ECR | CD |
+| 4 | 部署 service 前运行 migration（见[第 11 项](#11-定义-migration-部署关卡)） | CD |
+| 5 | 增加 deployment rollback 和部署后 smoke test | CD |
+| 6 | 增加 dashboard、alarm、request log 和 capacity metric | 运维 |
+| 7 | 代码质量工具链（见 [4.2](#42-代码质量工具链当前缺口)） | CI |
+| 8 | 发布自动化：校验 Conventional Commits、生成 CHANGELOG、自动打 tag（见 [CONTRIBUTING.md](../../CONTRIBUTING.md#versioning-and-releases)） | CD |
+
+**现状：CI 已经有了，缺的全是 CD。**
+
+#### 4.2 代码质量工具链（当前缺口）
+
+现状：**CI 里没有任何 linter 或 formatter**；`mypy` 在 `dev` 依赖组里，但既没有
+配置文件也不在 CI 里跑。风格与类型问题只能靠人 review 时肉眼发现。
+
+**先说清楚期望值。** 回看目前发现的所有真问题 —— doc_id 链路断裂、两个 evaluator
+口径不一致、`precision_at_k` 除错、随机负例、handbook 抓取中断、`chat_history` 无
+上限、API key 会泄漏 —— **全部是语义问题，lint 一个都抓不到**。所以这一项是**便宜
+的保险，不是提升质量的手段**，不要排在测试前面。
+
+仍然值得做的两个理由：
+
+1. **`ruff check` 不只是格式化**，`F821`（未定义名字）、`F401`（未使用 import）、
+   `B006`（可变默认参数）这些能抓真 bug —— 而且恰好对上 LLM 辅助开发的典型失误：
+   用一个不存在的函数、留下改到一半的死代码。
+2. **review 注意力是瓶颈**。凡是机器能挡的就不该占用人的注意力，人应该盯「这个设计
+   对不对」，而不是「这里少了个 import」。
+
+##### 配置
+
+`pyproject.toml`：
+
+```toml
+[tool.ruff]
+target-version = "py311"
+line-length = 88          # 现有代码 p99 就是 88，几乎不动到现有行
+extend-exclude = ["migrations/versions", "scripts", "cssa-ci"]
+
+[tool.ruff.lint]
+# 只选“能抓 bug”的，不开那 800 条风格规则
+select = [
+    "E4", "E7", "E9",  # pycodestyle：真错误，不含 line-too-long
+    "F",               # pyflakes：未定义名字、未使用 import ← 核心价值
+    "B",               # bugbear：可变默认参数等
+    "I",               # isort：import 排序
+    "UP",              # pyupgrade：py311 现代写法
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]        # 重新导出，不算未使用
+"tests/**" = ["B011"]
+
+[tool.ruff.lint.flake8-bugbear]
+# ⚠️ 没有这段，B008 会把 FastAPI 依赖注入全部误报
+extend-immutable-calls = [
+    "fastapi.Depends", "fastapi.Security", "fastapi.Query",
+    "fastapi.Body", "fastapi.Header", "fastapi.Path",
+]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["app", "pipelines"]
+ignore_missing_imports = true   # sentence_transformers / peft / slowapi 无 stub
+warn_unused_ignores = true
+warn_redundant_casts = true
+# 先不开：disallow_untyped_defs / strict
+```
+
+> **`flake8-bugbear` 那段是关键。** B008 规则是「不要在参数默认值里调用函数」，而
+> FastAPI 的依赖注入正是这么写的（`app/api/deps.py` 的 `Security(...)`、
+> `app/main.py` 的 `Depends(...)`，共 5 处）。不配这段，第一次跑就是一屏假报警，
+> 然后 ruff 就会被整体关掉。
+>
+> **mypy 别一上来开 strict** —— 会产生几百个错误然后被忽略，等于没配。先跑绿，
+> 再逐模块收紧。
+
+`dev` 依赖组加 `"ruff"`。
+
+##### CI：`.github/workflows/lint.yml`
+
+```yaml
+name: lint
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, "feature/**", "dev/**", "chore/**", "fix/**"]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+```
+
+push 的分支列表**必须和 `unit-test.yml` 保持一致**，否则又会出现「某个前缀不跑
+CI」那类不一致（见 [CONTRIBUTING.md](../../CONTRIBUTING.md#branching-model)）。
+
+##### 落地顺序：分两步，别一次做完
+
+**第一步 —— 只上 `ruff check`。** 改动很小（就是修出来的那些真问题），价值立刻兑现：
+
+```bash
+uv add --dev ruff
+uv run ruff check .            # 先看有多少
+uv run ruff check --fix .      # 能自动修的先修
+```
+
+**第二步 —— 再上 `ruff format`。** 这一步会重排全仓库（引号、空行、trailing
+comma），diff 很大。单独一个 commit，并配 blame 忽略：
+
+```bash
+uv run ruff format .
+git commit -am "style: apply ruff format across the repo"
+git rev-parse HEAD >> .git-blame-ignore-revs
+git config blame.ignoreRevsFile .git-blame-ignore-revs   # 每人配一次
+```
+
+**这样 `git blame` 会跳过那个纯格式化 commit**，不会所有行都指向它。GitHub 也认
+`.git-blame-ignore-revs` 这个文件。
+
+##### 时机
+
+**在有大批新代码之前做。** RAG 线 Phase 1/2（评估工具、可插拔架构）会新增不少
+文件，先立规则比事后统一格式便宜得多 —— 后者会产生一个巨大的、和功能无关的 diff，
+既淹没 review 又污染 `git blame`。
+
+因此本项在 [ROADMAP_versions.md](ROADMAP_versions.md) 里标为 **v2 建议提前**，
+而不是跟着 Phase 4 走到 v4。
 
 ### Phase 5：延后处理的改进
 
@@ -877,6 +1256,11 @@ Phase 1 的「收尾验证记录」）：
 因此 Phase 2（AWS 基础设施）现在可以开工。进入 Phase 2 前建议先修掉 Phase 1 记录
 中的 **first-request 冷惩罚**（在 lifespan 预热 orchestrator），否则 `/ready` 通过
 后仍有约 2.1 秒的首请求代价，会干扰后续负载测试的基线。
+
+**与 Phase 2 并线的第二条线**：第 18 项（检索质量评估与模型选型）现在开工，它对
+Phase 2 的依赖已被设计为零（评估 harness 直接读语料快照，不连 DB）。但其中 4 个
+耦合点必须在指定时机收敛，最紧的一个是 `Article.id` 修复 —— 它改变 `/chat` 响应
+体，**必须在 Phase 2 上线、前端接入之前完成**。详见第 18 项。
 
 下一批需要决定的问题落在 Phase 2 自身：
 

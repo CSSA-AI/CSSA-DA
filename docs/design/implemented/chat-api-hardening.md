@@ -1,7 +1,7 @@
 # API 可观测性与安全加固 —— 设计说明
 
 本文记录 `/chat` API 加固工作的设计细节、背后的取舍,以及为看懂这些代码所需的
-基础知识。整体路线图见 [future_plan.md](../../future_plan.md) 第 1 项;本文覆盖已经
+基础知识。整体路线图见 [ROADMAP_platform.md](../../roadmap/ROADMAP_platform.md) 第 1 项;本文覆盖已经
 完成的步骤(Step 1–8,全部完成并验证)。
 
 工作按"每步单独实现、单独验证、单独 review"的方式推进。本文兼作**学习参考**,
@@ -42,7 +42,7 @@
 
 ## 背景
 
-在加固之前,[app/main.py](../../app/main.py) 没有注册任何 middleware:
+在加固之前,[app/main.py](../../../app/main.py) 没有注册任何 middleware:
 
 - 没有结构化日志(`app.*` 的 logger 只是 `logging.getLogger(__name__)`,没有挂
   handler / formatter,日志无处可去)。
@@ -56,7 +56,7 @@
 额外基础设施。
 
 参照物:`pipelines/` 目录下的离线数据管线早已有一套结构化日志
-([pipelines/shared/logging.py](../../pipelines/shared/logging.py)),用 `run_id` 串联
+([pipelines/shared/logging.py](../../../pipelines/shared/logging.py)),用 `run_id` 串联
 一次 pipeline run。API 侧刻意**不共用**这套代码,而是照它的模式另写一套用
 `request_id` 串联一次请求 —— 两者是不同的 bounded context,字段和语义都不一样,
 硬共享只会让两边耦合。
@@ -283,8 +283,8 @@ Handler → Handler 用 Formatter 把日志变成最终字符串 → 写出去�
 `__name__` 是**每个 Python 模块文件自动拥有的内置变量**,不需要你定义。当一个
 `.py` 被当作模块 import 时,解释器把它的"点分路径"赋给这个变量:
 
-- [app/main.py](../../app/main.py) 里 `__name__` == `"app.main"`
-- [app/services/rag/orchestrator.py](../../app/services/rag/orchestrator.py) 里
+- [app/main.py](../../../app/main.py) 里 `__name__` == `"app.main"`
+- [app/services/rag/orchestrator.py](../../../app/services/rag/orchestrator.py) 里
   `__name__` == `"app.services.rag.orchestrator"`
 
 (例外:一个文件被 `python xxx.py` 直接运行时,它的 `__name__` 是特殊值
@@ -428,10 +428,10 @@ RetrievalUnavailableError → RAGServiceError → RuntimeError → Exception →
 
 ## Step 1:结构化 JSON 日志基础
 
-**文件**:新增 [app/core/logging.py](../../app/core/logging.py);
-[app/main.py](../../app/main.py) 顶部调用;
-[app/core/config/settings.py](../../app/core/config/settings.py) 加 `LOG_LEVEL`;
-[.env.example](../../.env.example) 补注释。
+**文件**:新增 [app/core/logging.py](../../../app/core/logging.py);
+[app/main.py](../../../app/main.py) 顶部调用;
+[app/core/config/settings.py](../../../app/core/config/settings.py) 加 `LOG_LEVEL`;
+[.env.example](../../../.env.example) 补注释。
 
 > 前置基础:[3. logging 三层](#3-python-logging-的三层结构)、
 > [4. logger 名字与继承](#4-logger-的名字与父子继承)、
@@ -483,9 +483,9 @@ Step 1 完成后整套日志管道是通的,但**还没有任何地方调用 `bi
 
 ## Step 2:RequestContextMiddleware(请求 ID + access log)
 
-**文件**:[app/core/middleware.py](../../app/core/middleware.py) 新增类;
-[app/main.py](../../app/main.py) 注册;
-[tests/unit/test_api_middleware.py](../../tests/unit/test_api_middleware.py) 新增测试。
+**文件**:[app/core/middleware.py](../../../app/core/middleware.py) 新增类;
+[app/main.py](../../../app/main.py) 注册;
+[tests/unit/test_api_middleware.py](../../../tests/unit/test_api_middleware.py) 新增测试。
 
 > 前置基础:[1. ASGI 三件套](#1-asgi-三件套scope--receive--send)、
 > [2. 中间件的位置](#2-中间件的位置与洋葱结构)。
@@ -515,9 +515,9 @@ middleware,不加判断会把它们当请求处理而出错。
 
 ## Step 3:SecurityHeadersMiddleware(安全响应头)
 
-**文件**:[app/core/middleware.py](../../app/core/middleware.py) 新增类 +
-`SECURITY_HEADERS` 常量;[app/main.py](../../app/main.py) 注册;
-[tests/unit/test_api_middleware.py](../../tests/unit/test_api_middleware.py) 新增测试。
+**文件**:[app/core/middleware.py](../../../app/core/middleware.py) 新增类 +
+`SECURITY_HEADERS` 常量;[app/main.py](../../../app/main.py) 注册;
+[tests/unit/test_api_middleware.py](../../../tests/unit/test_api_middleware.py) 新增测试。
 
 结构与 `RequestContextMiddleware` 几乎相同 —— 同样判断 `http`、同样包
 `send_wrapper`、同样在 `http.response.start` 那趟改 headers,只是塞进去的内容不同
@@ -566,11 +566,11 @@ middleware,不加判断会把它们当请求处理而出错。
 
 ## Step 4:CORS(跨源资源共享)
 
-**文件**:[app/core/config/settings.py](../../app/core/config/settings.py) 加
+**文件**:[app/core/config/settings.py](../../../app/core/config/settings.py) 加
 `ALLOWED_ORIGINS` + `allowed_origins_list` property;
-[app/main.py](../../app/main.py) 注册 Starlette 自带的 `CORSMiddleware`;
-[.env.example](../../.env.example) 补注释;
-[tests/unit/test_api_middleware.py](../../tests/unit/test_api_middleware.py) 新增测试。
+[app/main.py](../../../app/main.py) 注册 Starlette 自带的 `CORSMiddleware`;
+[.env.example](../../../.env.example) 补注释;
+[tests/unit/test_api_middleware.py](../../../tests/unit/test_api_middleware.py) 新增测试。
 
 ### CORS 到底是什么、防谁
 
@@ -673,11 +673,11 @@ app.add_middleware(
 
 ## Step 5:/chat 限流(rate limiting)
 
-**文件**:新增 [app/core/rate_limit.py](../../app/core/rate_limit.py);
-[app/core/config/settings.py](../../app/core/config/settings.py) 加 `CHAT_RATE_LIMIT`;
-[app/main.py](../../app/main.py) 注册 limiter、给 `/chat` 加限流、加 429 处理器;
-[tests/conftest.py](../../tests/conftest.py) 加重置 fixture;依赖 `slowapi` 加到三处
-依赖文件;[.env.example](../../.env.example) 补注释。
+**文件**:新增 [app/core/rate_limit.py](../../../app/core/rate_limit.py);
+[app/core/config/settings.py](../../../app/core/config/settings.py) 加 `CHAT_RATE_LIMIT`;
+[app/main.py](../../../app/main.py) 注册 limiter、给 `/chat` 加限流、加 429 处理器;
+[tests/conftest.py](../../../tests/conftest.py) 加重置 fixture;依赖 `slowapi` 加到三处
+依赖文件;[.env.example](../../../.env.example) 补注释。
 
 ### 为什么只限 `/chat`
 
@@ -699,7 +699,7 @@ app.add_middleware(
 - **维度:按客户端 IP**(从 ASGI `scope` 里的 `client` 拿)。这是止血方案。
   **已知局限**:社团很多用户可能共用同一出口 IP(校园 WiFi / 宿舍 NAT),在服务器
   看来是同一个 IP,因此按 IP 限流会**多人共享一份额度**,可能误伤正常用户。精细化
-  (按登录用户维度)延后,见 [future_plan.md](../../future_plan.md) 第 16 项 /
+  (按登录用户维度)延后,见 [ROADMAP_platform.md](../../roadmap/ROADMAP_platform.md) 第 16 项 /
   [issue #67](https://github.com/CSSA-AI/CSSA-DA/issues/67)。
 - **额度:`CHAT_RATE_LIMIT` 默认 `10/minute`**,存成字符串,部署时用环境变量按
   实际用量调,无需改代码。
@@ -729,8 +729,8 @@ app.add_middleware(
 
 ## Step 6:兜底异常处理器
 
-**文件**:[app/main.py](../../app/main.py) 加 `@app.exception_handler(Exception)`;
-[tests/unit/test_api_middleware.py](../../tests/unit/test_api_middleware.py) 加测试。
+**文件**:[app/main.py](../../../app/main.py) 加 `@app.exception_handler(Exception)`;
+[tests/unit/test_api_middleware.py](../../../tests/unit/test_api_middleware.py) 加测试。
 
 > 前置基础:[7. 框架按继承链(MRO)挑异常处理器](#7-框架按继承链mro挑异常处理器)。
 
@@ -768,7 +768,7 @@ Starlette 的 `ExceptionMiddleware` 那层,而我们的两个 middleware 在它*
 
 ## Step 7:让容器 stdout 只剩结构化日志
 
-**文件**:[Dockerfile](../../Dockerfile) 的 uvicorn 启动命令加 `--no-access-log`。
+**文件**:[Dockerfile.api](../../../Dockerfile.api) 的 uvicorn 启动命令加 `--no-access-log`。
 （当时为 `Dockerfile.cpu` / `Dockerfile.gpu` 两份，后合并为单一 `Dockerfile`。）
 不改 Python 代码、不加测试。
 
@@ -837,7 +837,7 @@ app.add_middleware(CORSMiddleware, ...)         # 最后加 → 最外层
 
 ### 单元/组件层:`tests/unit/test_api_middleware.py`
 
-风格对齐既有的 [tests/unit/test_api.py](../../tests/unit/test_api.py)(`TestClient` +
+风格对齐既有的 [tests/unit/test_api.py](../../../tests/unit/test_api.py)(`TestClient` +
 `app.dependency_overrides`,orchestrator 整个换成 stub)。逐项覆盖各中间件与
 处理器的行为:
 
@@ -898,7 +898,7 @@ Postgres + pgvector,本地用容器里的独立 `testdb` 跑,CI 用其专用 `te
 
 ## 完成情况与后续
 
-「保护 `/chat`」这项工作(future_plan 第 1 项)的 8 步**全部完成并验证**:
+「保护 `/chat`」这项工作(ROADMAP_platform 第 1 项)的 8 步**全部完成并验证**:
 
 - Step 1–6:结构化日志、request_id 中间件、安全头、CORS、限流、兜底异常处理。
 - Step 7:两个 Dockerfile 的 uvicorn 加 `--no-access-log`,stdout 只保留结构化
@@ -907,7 +907,7 @@ Postgres + pgvector,本地用容器里的独立 `testdb` 跑,CI 用其专用 `te
   `/ready`、安全头、`X-Request-ID`、CORS、`/chat` 鉴权;限流 429 由单元 + 集成
   测试覆盖。
 
-后续步骤见 [future_plan.md](../../future_plan.md):模型交付可预测化(第 2 项)、
+后续步骤见 [ROADMAP_platform.md](../../roadmap/ROADMAP_platform.md):模型交付可预测化(第 2 项)、
 持久化存储(第 3 项)、容器加固(non-root、固定基础镜像、锁依赖、瘦身)、以及
-AWS 基础设施与 CI/CD。限流的精细化(按用户维度)见 future_plan 第 16 项 /
+AWS 基础设施与 CI/CD。限流的精细化(按用户维度)见 ROADMAP_platform 第 16 项 /
 [issue #67](https://github.com/CSSA-AI/CSSA-DA/issues/67)。

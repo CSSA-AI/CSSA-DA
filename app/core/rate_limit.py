@@ -6,7 +6,7 @@ from app.core.config import settings
 
 # In-memory limiter keyed by client IP. Single-instance is sufficient for this
 # deployment; a Redis-backed store would only be needed for multi-instance
-# horizontal scaling (see future_plan.md).
+# horizontal scaling (see docs/roadmap/ROADMAP_platform.md).
 limiter = Limiter(key_func=get_remote_address)
 
 

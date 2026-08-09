@@ -2,7 +2,7 @@
 
 本文记录 pipeline「存储抽象（storage abstraction）」工作的设计细节、背后的取舍,
 以及为看懂这些代码所需的基础知识。整体路线图见
-[future_plan.md](../../future_plan.md) 第 3 项;本文是它的详细展开。
+[ROADMAP_platform.md](../../roadmap/ROADMAP_platform.md) 第 3 项;本文是它的详细展开。
 
 工作按「每步单独实现、单独验证、单独 review」的方式推进(与
 [chat-api-hardening.md](./chat-api-hardening.md) 同一套节奏)。本文兼作**学习参考**,
@@ -115,8 +115,8 @@ Postgres knowledge_base 表
 > 这一簇是地基:先知道「有哪些产物、各住哪」,后面「怎么抽象存储」才有对象。
 
 pipeline 的本地产物遵循一套**能干净映射到对象存储**的布局(见
-[pipelines/README.md](../../pipelines/README.md) 与
-[pipelines/shared/paths.py](../../pipelines/shared/paths.py)):
+[pipelines/README.md](../../../pipelines/README.md) 与
+[pipelines/shared/paths.py](../../../pipelines/shared/paths.py)):
 
 ```text
 data/
@@ -132,7 +132,7 @@ data/
 
 **checkpoint(存档)存什么?** 它不存文章正文,只存「进行到哪 + 少量防错校验」,纯为
 断点续跑。例如 wechat 抓取存档
-([HarvestState](../../pipelines/ingestion/wechat/models.py)):
+([HarvestState](../../../pipelines/ingestion/wechat/models.py)):
 
 ```json
 {
@@ -179,7 +179,7 @@ key = "reports/pipelines/wechat_pipeline_<run_id>.json"
 
 > 这一簇是中间人本体:一份接口规格 + 一个本地实现(S3 实现留到 Step 6)。
 
-**接口(规格)** —— [pipelines/shared/storage/base.py](../../pipelines/shared/storage/base.py)
+**接口(规格)** —— [pipelines/shared/storage/base.py](../../../pipelines/shared/storage/base.py)
 定义 `Storage` Protocol,动作如下(key 是字符串,内容是字节):
 
 | 动作 | 含义 | 取代了原来的 |
@@ -194,7 +194,7 @@ key = "reports/pipelines/wechat_pipeline_<run_id>.json"
 这层里**没有任何「磁盘 / 目录 / S3」字眼**——干净、中立,这正是插头规格该有的样子。
 `Protocol` 意为「规格」:只规定必须会这几个动作,不规定怎么实现。
 
-**本地后端** —— [pipelines/shared/storage/local.py](../../pipelines/shared/storage/local.py)
+**本地后端** —— [pipelines/shared/storage/local.py](../../../pipelines/shared/storage/local.py)
 的 `LocalStorage(base_dir)`:
 
 - 把 key 映射到 `base_dir/key`。以 `base_dir=data/` 为例,key
@@ -246,7 +246,7 @@ import 各段;stage 代码不再自己构造 storage、不再处理裸 `Path`。
 > 前置基础:[三、Storage 接口与后端](#三storage-接口与后端)。
 
 纯新增,零风险:落地 `Storage` 接口、`StorageNotFoundError`、`LocalStorage`,配 14 个
-单测([tests/unit/test_storage.py](../../tests/unit/test_storage.py))覆盖读写往返、嵌套
+单测([tests/unit/test_storage.py](../../../tests/unit/test_storage.py))覆盖读写往返、嵌套
 建目录、key→磁盘映射、原子写不留 `.tmp`、`list` 排序与忽略 `.tmp`、`delete` /
 `delete_prefix`。此步不碰任何现有代码。
 
@@ -255,11 +255,11 @@ import 各段;stage 代码不再自己构造 storage、不再处理裸 `Path`。
 > 前置基础:[一、data/ 布局](#一pipeline-的数据住在哪data-布局)、
 > [三、Storage 接口](#三storage-接口与后端)。
 
-最小咽喉点试水:[write_json_report](../../pipelines/shared/reports.py) 改为
+最小咽喉点试水:[write_json_report](../../../pipelines/shared/reports.py) 改为
 `(storage, key, payload)`——只把报告序列化成字节交给中间人,不再自己碰磁盘。唯一调用方
-[wechat_pipeline](../../pipelines/orchestration/wechat_pipeline.py) 用
+[wechat_pipeline](../../../pipelines/orchestration/wechat_pipeline.py) 用
 `LocalStorage(data_dir)` + `report_file.relative_to(data_dir)` 推出 key,**输出字节与
-落盘位置均不变**。配 [test_reports.py](../../tests/unit/test_reports.py) 3 个测试(含
+落盘位置均不变**。配 [test_reports.py](../../../tests/unit/test_reports.py) 3 个测试(含
 「JSON + 末尾换行」的格式锁定)。
 
 > 这是中间人第一次真正接进 pipeline——最小、最独立的一处,证明整条链路可通。
@@ -269,10 +269,10 @@ import 各段;stage 代码不再自己构造 storage、不再处理裸 `Path`。
 > 前置基础:[一(checkpoint 存什么)](#一pipeline-的数据住在哪data-布局)、
 > [三、Storage 接口](#三storage-接口与后端)。
 
-[JsonFileCheckpointStore](../../pipelines/ingestion/wechat/storage/local.py) 的构造函数从
+[JsonFileCheckpointStore](../../../pipelines/ingestion/wechat/storage/local.py) 的构造函数从
 收 `state_file: Path` 改为 `(storage, key)`;`load` / `save` / `clear` 改用
 `storage.exists / read / write / delete`。唯一构造点
-[harvest_wechat](../../pipelines/orchestration/harvest_wechat.py) 用
+[harvest_wechat](../../../pipelines/orchestration/harvest_wechat.py) 用
 `LocalStorage(data_dir)` + key `checkpoints/wechat_scraper_state.json`。字节与位置不变;
 同步更新了直接测试它的 round-trip 用例。
 
@@ -280,7 +280,7 @@ import 各段;stage 代码不再自己构造 storage、不再处理裸 `Path`。
 
 > 前置基础:[三、Storage 接口(全部 6 个动作)](#三storage-接口与后端)。
 
-[JsonChunkArticleSink](../../pipelines/ingestion/wechat/storage/local.py) 负责「抓取时
+[JsonChunkArticleSink](../../../pipelines/ingestion/wechat/storage/local.py) 负责「抓取时
 分批落盘 + 最后合并定稿」,是 A 类里最重的一个,几乎用到接口的全部动作:`write_batch`
 → `write`;`finalize` 里 `glob` → `list`(仍需按批次号数字排序,`list` 只保证字典序)、
 读各批 → `read`、写 final 与 current → `write`、`rmtree` 临时目录 → `delete_prefix`。
@@ -297,14 +297,14 @@ key。
 
 这一步是**收口**:落实组合根 + 方案②,把整条管线改成「认接口不认磁盘」。落地内容:
 
-- **组合根**:[cli.py](../../pipelines/cli.py) 在入口**只建一次** `LocalStorage(DEFAULT_DATA_DIR)`,
+- **组合根**:[cli.py](../../../pipelines/cli.py) 在入口**只建一次** `LocalStorage(DEFAULT_DATA_DIR)`,
   positional 传给每个 `run_local_*`;各编排函数**不再收 `data_dir`、不再自己建 storage**,
   改收 `storage` + 逻辑 key。换 S3 从此只改 cli 这一行。
-- **B 类咽喉点迁完**:[json_records](../../pipelines/shared/json_records.py)
+- **B 类咽喉点迁完**:[json_records](../../../pipelines/shared/json_records.py)
   (`load/write_json_records(storage, key[, records])`)与
-  [JsonImportCheckpointStore](../../pipelines/shared/import_checkpoint.py)
+  [JsonImportCheckpointStore](../../../pipelines/shared/import_checkpoint.py)
   (`(storage, key)`,`load` 用 `StorageNotFoundError` 判缺失)。
-- **key 常量化**:[paths.py](../../pipelines/shared/paths.py) 把原来的 `DEFAULT_*_FILE`
+- **key 常量化**:[paths.py](../../../pipelines/shared/paths.py) 把原来的 `DEFAULT_*_FILE`
   路径常量换成逻辑 key 常量(`WECHAT_CHECKPOINT_KEY`、`IMPORT_CHECKPOINT_KEY`……)。
 - **方案② 落地**:CLI 的 `--input` / `--checkpoint-file` 从「文件路径」改为「逻辑 key」;
   pipeline 存进 DB 的 `input_path` / `output_path` / `report_path` 元数据、以及
@@ -322,7 +322,7 @@ B 类为何必须压到这一步(而不能随 A 类提前迁),见下节。
 > 前置基础:[三(S3 后端)](#三storage-接口与后端)。
 
 等真正上 AWS 时,新增 `S3Storage` 类(同一套 6 个动作,内部走 S3),入口把
-`LocalStorage` 换成 `S3Storage` 即可,上层 stage 代码不改。属 future_plan 的 Phase 3。
+`LocalStorage` 换成 `S3Storage` 即可,上层 stage 代码不改。属 ROADMAP_platform 的 Phase 3。
 
 ---
 
@@ -359,6 +359,6 @@ B 类为何必须压到这一步(而不能随 A 类提前迁),见下节。
 
 - **Step 6:S3Storage 实现**与 AWS 相关配置 —— 全部本地咽喉点(A + B 类)已迁完,入口
   已收成组合根;只差照同一套 6 个动作写一个走 S3 的后端,入口换一行即可切换。留到
-  future_plan 的 Phase 3。
+  ROADMAP_platform 的 Phase 3。
 - 一个已知的小取舍:失败分支「先写报告 → 再写 DB 记录 → 抛出」,若 DB 写入本身抛错,会
   出现「有报告但无 DB 行」的部分追踪。影响很小,暂不处理。

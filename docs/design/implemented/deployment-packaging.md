@@ -1,7 +1,7 @@
 # 部署打包:依赖锁定与容器镜像 —— 设计说明
 
 本文记录「把项目打包成可部署产物」这项工作的设计细节、背后的取舍,以及为看懂
-这些配置所需的基础知识。整体路线图见 [future_plan.md](../../future_plan.md)
+这些配置所需的基础知识。整体路线图见 [ROADMAP_platform.md](../../roadmap/ROADMAP_platform.md)
 第 5 / 6 / 7 项(并涉及第 2、4 项),本文是它们的详细展开。
 
 工作按「每步单独实现、单独验证、单独 review」的方式推进(与
@@ -297,7 +297,7 @@ hash"。如果生成锁时没配 index,锁进去的就是 CUDA 变体——之�
 > [基础二(group / 虚拟项目)](#二按角色切分依赖group-与虚拟项目)、
 > [基础四(torch CPU)](#四torch-为什么特殊粘合依赖--镜像大小)。
 
-新增 [pyproject.toml](../../pyproject.toml) + [uv.lock](../../uv.lock)。声明共享核心 +
+新增 [pyproject.toml](../../../pyproject.toml) + [uv.lock](../../../uv.lock)。声明共享核心 +
 `api`/`pipeline`/`dev` 三组;`package = false`(虚拟项目);torch 走 CPU index;ML 栈
 钉版本;`requires-python = ">=3.11,<3.12"`(与本地 .venv 3.11.9、CI 3.11 一致)。
 `ops/download_models.py` 后续新增 `--models` 选择(见 Step 3)。此步**纯新增,不动
@@ -307,8 +307,8 @@ CI / Dockerfile**,零风险。锁定 94 个包。
 
 > 先备知识:[基础一](#一可复现的两层声明-vs-锁定)。
 
-[unit-test.yml](../../.github/workflows/unit-test.yml) 与
-[integration-test.yml](../../.github/workflows/integration-test.yml) 改用
+[unit-test.yml](../../../.github/workflows/unit-test.yml) 与
+[integration-test.yml](../../../.github/workflows/integration-test.yml) 改用
 `astral-sh/setup-uv@v6`(开缓存)+ `uv sync --locked` + `uv run pytest`;删除
 `requirements-ci.txt`。
 
@@ -326,9 +326,9 @@ CI / Dockerfile**,零风险。锁定 94 个包。
 把 conda 版 `Dockerfile.cpu`/`Dockerfile.gpu` 替换为两个 slim、多阶段、uv 锁定的
 镜像,同一 `python:3.11-slim@sha256:db3ff2…` 固定 digest 起步:
 
-- [Dockerfile.api](../../Dockerfile.api):`--group api`,下 **embedding + reranker**
+- [Dockerfile.api](../../../Dockerfile.api):`--group api`,下 **embedding + reranker**
   两模型,`uvicorn` 常驻 + HTTP healthcheck。
-- [Dockerfile.pipeline](../../Dockerfile.pipeline):`--group pipeline`,**只下
+- [Dockerfile.pipeline](../../../Dockerfile.pipeline):`--group pipeline`,**只下
   embedding**(管线在 import 时给文档算 embedding;reranking 是查询期的 API 才需要),
   无端口/无 healthcheck(批处理任务),`ENTRYPOINT python -m pipelines`。
 
@@ -341,10 +341,10 @@ pipeline 是**定时/一次性任务**、跑完就退——两者需要不同的
 **`download_models.py --models` 选择。** 为让 pipeline 镜像真省掉 reranker,给下载
 脚本加了 `--models` 选择(默认下全部,保持既有测试绿),pipeline 只传 `embedding`。
 
-配套同步:[docker-compose.yml](../../docker-compose.yml)(api/migrate 用
+配套同步:[docker-compose.yml](../../../docker-compose.yml)(api/migrate 用
 `Dockerfile.api`、pipeline 用 `Dockerfile.pipeline`、删 `api-gpu` 服务、镜像名
 `cssa-da-api`/`cssa-da-pipeline`)、
-[docker-check.yml](../../.github/workflows/docker-check.yml)(build 两镜像各自冒烟)、
+[docker-check.yml](../../../.github/workflows/docker-check.yml)(build 两镜像各自冒烟)、
 README、本设计文档。
 
 > **一个决策记录(2026-07-27)**:原本有 CPU/GPU 两个 Dockerfile。因 DS 的 GPU 训练
@@ -356,8 +356,8 @@ README、本设计文档。
 
 > 先备知识:[背景里的「两条线」边界](#背景)、[基础二](#二按角色切分依赖group-与虚拟项目)。
 
-[environment_cpu.yml](../../environment_cpu.yml) /
-[environment_gpu.yml](../../environment_gpu.yml) 加英文注释 + 头部声明:**它们是 DS
+[environment_cpu.yml](../../../environment_cpu.yml) /
+[environment_gpu.yml](../../../environment_gpu.yml) 加英文注释 + 头部声明:**它们是 DS
 的 notebook 环境(交互/微调用),不是部署产物;部署走 `Dockerfile.*` + `uv.lock`**。
 依赖全部保留、**版本刻意不锁**(DS 需要实验灵活性);两个 yml 都留(GPU 版供 DS 在
 显卡机上微调)。
@@ -431,5 +431,5 @@ README、本设计文档。
 - **DS 环境上锁 + ML 核心对齐**(`conda-lock`)→ 真做 golden test / 可复现微调时。
 - **GPU serving 镜像** → Phase 5 真需要 GPU 推理时按需另建(现 CPU 足够)。
 - **ECS 层面**(container/ALB health check、migration 部署关卡、outbound network、
-  Fargate size、生产 RDS)→ Phase 2,见 [future_plan.md](../../future_plan.md)
+  Fargate size、生产 RDS)→ Phase 2,见 [ROADMAP_platform.md](../../roadmap/ROADMAP_platform.md)
   第 8、11、12、17 项。
