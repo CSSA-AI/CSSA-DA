@@ -6,6 +6,7 @@ from psycopg2.pool import PoolError
 
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
+from app.services.rag.doc_id import derive_doc_id
 from app.services.rag.errors import RetrievalUnavailableError
 from app.services.rag.model_registry import model_registry
 from app.services.rag.retriever.pg_retriever import PGVectorRetriever
@@ -220,10 +221,23 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
         self.assertEqual(results[0].article.questions, ["How to apply for a student visa?"])
         self.assertEqual(results[0].score, -0.12)
         self.assertEqual(results[0].rank, 1)
+        self.assertEqual(
+            results[0].article.id,
+            derive_doc_id(
+                link="https://example.com/student-visa",
+                text="Student visa application information.",
+            ),
+        )
 
         self.assertEqual(results[1].article.tags, [])
         self.assertEqual(results[1].score, -0.25)
         self.assertEqual(results[1].rank, 2)
+        # This row has no link -- id must still be present and deterministic,
+        # not the random uuid.uuid4() default (see CSS-7).
+        self.assertEqual(
+            results[1].article.id,
+            derive_doc_id(link=None, text="485 visa requirement details."),
+        )
 
         mock_cursor.execute.assert_called_once()
         _, params = mock_cursor.execute.call_args[0]
@@ -239,6 +253,14 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
         )
         mock_conn.rollback.assert_called_once_with()
         mock_pool.putconn.assert_called_once_with(mock_conn, close=False)
+
+        # Same query, second call: ids must be identical to the first call so
+        # eval metrics and logging can key off them (see CSS-7).
+        second_call_results = retriever.search("student visa")
+        self.assertEqual(
+            [r.article.id for r in results],
+            [r.article.id for r in second_call_results],
+        )
 
     @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
     @patch("app.services.rag.retriever.pg_retriever.ThreadedConnectionPool")

@@ -8,6 +8,7 @@ from typing import List, Optional
 from app.core.config import settings, rag_config
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
+from app.services.rag.doc_id import derive_doc_id
 from app.services.rag.errors import RetrievalUnavailableError
 from app.services.rag.model_registry import model_registry
 from app.services.rag.retriever.base import BaseRetriever
@@ -147,6 +148,7 @@ class PGVectorRetriever(BaseRetriever):
 
         for rank, row in enumerate(rows, start=1):
             article = Article(
+                id=derive_doc_id(link=row["link"], text=row["content"]),
                 text=row["content"],
                 questions=[row["question_text"]] if row["question_text"] else [],
                 source=row["source"],
