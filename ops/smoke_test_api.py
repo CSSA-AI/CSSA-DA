@@ -85,7 +85,7 @@ def smoke_test_api(
 
     chat = request_json(
         "POST",
-        f"{base_url}/chat",
+        f"{base_url}/v1/chat",
         payload={
             "message": message,
             "top_k": top_k,
@@ -120,19 +120,19 @@ def main() -> int:
     parser.add_argument(
         "--message",
         default="墨尔本 校招",
-        help="Message to send to POST /chat.",
+        help="Message to send to POST /v1/chat.",
     )
     parser.add_argument(
         "--top-k",
         type=int,
         default=3,
-        help="Retriever top_k for /chat.",
+        help="Retriever top_k for /v1/chat.",
     )
     parser.add_argument(
         "--rerank-top-k",
         type=int,
         default=3,
-        help="Reranker top_k for /chat.",
+        help="Reranker top_k for /v1/chat.",
     )
     parser.add_argument(
         "--health-only",
@@ -142,7 +142,7 @@ def main() -> int:
     parser.add_argument(
         "--ready-only",
         action="store_true",
-        help="Check GET /health and GET /ready without calling /chat.",
+        help="Check GET /health and GET /ready without calling /v1/chat.",
     )
     parser.add_argument(
         "--api-key",

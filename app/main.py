@@ -211,7 +211,7 @@ def status(
     return get_system_status().to_dict()
 
 
-@app.post("/chat", response_model=ChatResponse, tags=["chat"])
+@app.post("/v1/chat", response_model=ChatResponse, tags=["chat"])
 @limiter.limit(chat_rate_limit)
 def chat(
     request: Request,  # required by slowapi (looked up by this exact name)

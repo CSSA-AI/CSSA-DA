@@ -109,7 +109,7 @@ def real_stack_client(test_database_url, monkeypatch):
 
 def test_chat_end_to_end_over_real_stack(real_stack_client):
     response = real_stack_client.post(
-        "/chat",
+        "/v1/chat",
         headers={"X-API-Key": API_KEY},
         json={"message": "How do I apply for special consideration?"},
     )
@@ -133,12 +133,12 @@ def test_rate_limit_429_still_carries_middleware_headers(
     monkeypatch.setattr(settings, "CHAT_RATE_LIMIT", "1/minute")
 
     first = real_stack_client.post(
-        "/chat",
+        "/v1/chat",
         headers={"X-API-Key": API_KEY},
         json={"message": "How do I apply for special consideration?"},
     )
     second = real_stack_client.post(
-        "/chat",
+        "/v1/chat",
         headers={"X-API-Key": API_KEY},
         json={"message": "How do I apply for special consideration?"},
     )

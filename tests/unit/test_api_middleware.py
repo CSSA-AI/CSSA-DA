@@ -125,7 +125,7 @@ def test_access_log_emitted_with_request_metadata(captured_app_logs):
 
 def test_deep_log_carries_same_request_id_as_response(captured_app_logs):
     response = client().post(
-        "/chat",
+        "/v1/chat",
         headers={"X-Request-ID": "trace-me-deeply"},
         json={"message": "How do I enrol?"},
     )
@@ -179,7 +179,7 @@ def test_security_headers_present_on_error():
     )
     app.dependency_overrides[require_internal_api_key] = lambda: None
     response = TestClient(app).post(
-        "/chat",
+        "/v1/chat",
         json={"message": "How do I enrol?"},
     )
 
@@ -190,7 +190,7 @@ def test_security_headers_present_on_error():
 
 def test_cors_preflight_allows_configured_origin():
     response = client().options(
-        "/chat",
+        "/v1/chat",
         headers={
             "Origin": "http://localhost:3000",
             "Access-Control-Request-Method": "POST",
@@ -204,7 +204,7 @@ def test_cors_preflight_allows_configured_origin():
 
 def test_cors_omits_headers_for_unconfigured_origin():
     response = client().options(
-        "/chat",
+        "/v1/chat",
         headers={
             "Origin": "http://evil.example.com",
             "Access-Control-Request-Method": "POST",
@@ -218,9 +218,9 @@ def test_chat_rate_limit_returns_safe_429(monkeypatch):
     monkeypatch.setattr(settings, "CHAT_RATE_LIMIT", "2/minute")
     test_client = client()
 
-    first = test_client.post("/chat", json={"message": "hi"})
-    second = test_client.post("/chat", json={"message": "hi"})
-    third = test_client.post("/chat", json={"message": "hi"})
+    first = test_client.post("/v1/chat", json={"message": "hi"})
+    second = test_client.post("/v1/chat", json={"message": "hi"})
+    third = test_client.post("/v1/chat", json={"message": "hi"})
 
     assert first.status_code == 200
     assert second.status_code == 200
@@ -241,7 +241,7 @@ def test_catch_all_handler_returns_safe_500():
     # raise_server_exceptions=False lets the registered handler produce the
     # response instead of the TestClient re-raising the exception.
     response = TestClient(app, raise_server_exceptions=False).post(
-        "/chat",
+        "/v1/chat",
         json={"message": "How do I enrol?"},
     )
 

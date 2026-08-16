@@ -189,7 +189,7 @@ def test_status_reports_readiness_and_pipeline_metadata(monkeypatch):
 
 def test_chat_returns_answer_and_sources():
     response = client().post(
-        "/chat",
+        "/v1/chat",
         json={
             "message": "How do I enrol?",
             "chat_history": [{"role": "user", "content": "Hello"}],
@@ -206,7 +206,7 @@ def test_chat_returns_answer_and_sources():
 
 
 def test_chat_rejects_an_empty_message():
-    response = client().post("/chat", json={"message": ""})
+    response = client().post("/v1/chat", json={"message": ""})
 
     assert response.status_code == 422
 
@@ -225,7 +225,7 @@ def test_chat_rejects_invalid_or_missing_api_key(
     )
 
     response = TestClient(app).post(
-        "/chat",
+        "/v1/chat",
         headers=headers,
         json={"message": "How do I enrol?"},
     )
@@ -239,7 +239,7 @@ def test_chat_returns_503_when_api_key_is_not_configured(monkeypatch):
     app.dependency_overrides[get_rag_orchestrator] = lambda: StubOrchestrator()
 
     response = TestClient(app).post(
-        "/chat",
+        "/v1/chat",
         headers={"X-API-Key": "any-key"},
         json={"message": "How do I enrol?"},
     )
@@ -255,7 +255,7 @@ def test_chat_accepts_configured_api_key(monkeypatch):
     app.dependency_overrides[get_rag_orchestrator] = lambda: StubOrchestrator()
 
     response = TestClient(app).post(
-        "/chat",
+        "/v1/chat",
         headers={"X-API-Key": "expected-key"},
         json={"message": "How do I enrol?"},
     )
@@ -302,7 +302,7 @@ def test_chat_returns_safe_service_errors(
     app.dependency_overrides[require_internal_api_key] = lambda: None
 
     response = TestClient(app).post(
-        "/chat",
+        "/v1/chat",
         json={"message": "How do I enrol?"},
     )
 
