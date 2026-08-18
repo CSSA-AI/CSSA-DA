@@ -39,7 +39,8 @@ api = [
 # Data-pipeline-only deps. Installed into the pipeline image via:
 #   uv sync --no-default-groups --group pipeline
 pipeline = [
-    "requests",             # wechat ingestion client
+    "requests",             # wechat ingestion client + handbook harvester
+    "beautifulsoup4",       # scripts/handbook_harvester_all.py HTML parsing
 ]
 
 # Development / CI: everything needed to run the full test suite (which imports
@@ -50,6 +51,7 @@ dev = [
     "httpx",                # fastapi.testclient transport + integration tests
     "numpy",                # imported directly by several tests
     "mypy",
+    "playwright>=1.62.0",
     { include-group = "api" },
     { include-group = "pipeline" },
 ]
