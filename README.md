@@ -111,6 +111,7 @@ CSSA-DA/
     ├── local-development.md                  # Local Docker workflows and command reference
     ├── roadmap/                              # What to build and when
     │   ├── ROADMAP_versions.md               #   Milestone boundaries v1–v4 — start here
+    │   ├── BACKLOG.md                        #   Flattened issue list for Linear import
     │   ├── ROADMAP_platform.md               #   Containers, AWS, CI/CD, observability
     │   ├── ROADMAP_data.md                   #   Corpus, ground truth dataset, data sources
     │   └── ROADMAP_rag.md                    #   Query path, eval tooling, architecture experiments
@@ -337,6 +338,7 @@ that produced it. Rows are unique on `(link, question_text)`.
 | Document | Contents |
 |----------|----------|
 | [docs/roadmap/ROADMAP_versions.md](docs/roadmap/ROADMAP_versions.md) | **版本边界 v1–v4：谁能用、承诺什么、什么时候做（先看这个）** |
+| [docs/roadmap/BACKLOG.md](docs/roadmap/BACKLOG.md) | 摊平的 issue 清单（Linear 首次导入用；之后以 Linear 为准） |
 | [docs/roadmap/ROADMAP_platform.md](docs/roadmap/ROADMAP_platform.md) | 平台线：容器、AWS 基础设施、CI/CD、可观测性、安全 (中文) |
 | [docs/roadmap/ROADMAP_data.md](docs/roadmap/ROADMAP_data.md) | 数据线：语料建设、ground truth dataset、数据源接入 (中文) |
 | [docs/roadmap/ROADMAP_rag.md](docs/roadmap/ROADMAP_rag.md) | RAG 线：查询链路、评估工具、架构实验 (中文) |
