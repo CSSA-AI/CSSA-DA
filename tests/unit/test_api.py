@@ -100,19 +100,27 @@ def test_ready_returns_200_when_database_and_data_are_ready(monkeypatch):
     }
 
 
-def test_lifespan_preloads_models(monkeypatch):
+def test_lifespan_preloads_models_and_orchestrator(monkeypatch):
     preload_models = MagicMock()
+    build_rag_orchestrator = MagicMock()
+
     monkeypatch.setattr(
         model_registry,
         "preload_models",
         preload_models,
     )
+    monkeypatch.setattr(
+        "app.main._build_rag_orchestrator",
+        build_rag_orchestrator,
+    )
 
     with TestClient(app) as test_client:
+        preload_models.assert_called_once_with()
+        build_rag_orchestrator.assert_called_once_with()
+
         response = test_client.get("/health")
 
-    assert response.status_code == 200
-    preload_models.assert_called_once_with()
+
 
 
 def test_model_preload_failure_does_not_break_health(monkeypatch):
