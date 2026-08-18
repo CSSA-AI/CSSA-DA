@@ -10,5 +10,6 @@ update it to describe what was actually built rather than what was proposed.
 |---|---|
 | [eval-dataset.md](eval-dataset.md) | How to build the ground truth dataset: pooling, qrels, hard negatives, annotation |
 | [eval-experiments.md](eval-experiments.md) | Retrieval architecture and model experiment matrix |
+| [frontend-v1-requirements.md](frontend-v1-requirements.md) | UI/UX requirements for the v1 web chat frontend (中文) |
 
 Status and sequencing live in [../../roadmap/](../../roadmap/).
