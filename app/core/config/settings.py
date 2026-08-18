@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
     CHAT_RATE_LIMIT: str = "10/minute"
+    CHAT_GLOBAL_RATE_LIMIT: str = "1000/day"
 
     @property
     def allowed_origins_list(self) -> list[str]:

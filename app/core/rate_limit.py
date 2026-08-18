@@ -18,3 +18,19 @@ def chat_rate_limit() -> str:
     tight limit without affecting other tests.
     """
     return settings.CHAT_RATE_LIMIT
+
+
+def chat_global_rate_limit() -> str:
+    """Return the site-wide /chat rate limit, read live like chat_rate_limit."""
+    return settings.CHAT_GLOBAL_RATE_LIMIT
+
+
+def global_rate_limit_key() -> str:
+    """Constant key so every request shares one counter.
+
+    The per-IP limit can be dodged by rotating IPs; this layer caps total
+    spend regardless of how many addresses the traffic comes from
+    (ROADMAP_platform.md 19.4). slowapi calls a route-level key_func with no
+    arguments (unlike the limiter-level default, which receives the request).
+    """
+    return "global"

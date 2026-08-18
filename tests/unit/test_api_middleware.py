@@ -233,6 +233,27 @@ def test_chat_rate_limit_returns_safe_429(monkeypatch):
     }
 
 
+def test_chat_global_rate_limit_returns_safe_429(monkeypatch):
+    # Per-IP limit stays at its loose default (10/minute), so the third
+    # request can only be rejected by the site-wide counter.
+    monkeypatch.setattr(settings, "CHAT_GLOBAL_RATE_LIMIT", "2/day")
+    test_client = client()
+
+    first = test_client.post("/chat", json={"message": "hi"})
+    second = test_client.post("/chat", json={"message": "hi"})
+    third = test_client.post("/chat", json={"message": "hi"})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 429
+    assert third.json() == {
+        "error": {
+            "code": "rate_limited",
+            "message": "Too many requests. Please slow down and try again shortly.",
+        }
+    }
+
+
 def test_catch_all_handler_returns_safe_500():
     app.dependency_overrides[get_rag_orchestrator] = lambda: (
         UnexpectedlyFailingOrchestrator()

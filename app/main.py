@@ -20,7 +20,12 @@ from app.core.middleware import (
     RequestContextMiddleware,
     SecurityHeadersMiddleware,
 )
-from app.core.rate_limit import chat_rate_limit, limiter
+from app.core.rate_limit import (
+    chat_global_rate_limit,
+    chat_rate_limit,
+    global_rate_limit_key,
+    limiter,
+)
 from app.schemas.search_result import SearchResult
 from app.services.readiness import check_readiness
 from app.services.system_status import get_system_status
@@ -213,6 +218,7 @@ def status(
 
 @app.post("/chat", response_model=ChatResponse, tags=["chat"])
 @limiter.limit(chat_rate_limit)
+@limiter.limit(chat_global_rate_limit, key_func=global_rate_limit_key)
 def chat(
     request: Request,  # required by slowapi (looked up by this exact name)
     payload: ChatRequest,
