@@ -1,8 +1,8 @@
 # OpenAI 硬性支出上限（运维手册）
 
 > 对应 [ROADMAP_platform.md](roadmap/ROADMAP_platform.md) 19.4「OpenAI 后台设硬性
-> 支出上限」。这是控制台操作，代码管不到，必须由持有 OpenAI 账号管理权限的人手动
-> 完成，并在完成后勾掉 roadmap 里的复选框。
+> 支出上限」。这是控制台操作，代码管不到，必须由持有 OpenAI 账号管理权限
+> （org Owner）的人手动完成，并在完成后勾掉 roadmap 里的复选框。
 
 ## 为什么必须设
 
@@ -10,21 +10,32 @@
 
 - 全局限流数的是**请求数**，不是 token 数——单个大请求的成本仍然远高于平均值
   （输入体积上限见 roadmap 19.5，是独立任务）
+- 全局限流是进程内存计数：重启清零，将来多 worker 部署时有效额度会 ×N
 - 任何代码层的防线都可能有漏洞；支出上限是 OpenAI 侧的兜底，**不管前面漏成
   什么样，当月最多花这么多**
+
+## ⚠️ 最大的坑：只填金额不等于封顶
+
+2026 年初 OpenAI 曾把硬性支出上限**静默降级为仅邮件预警**（只剩 alerts），
+2026 年 7 月下旬才恢复。当前控制台里，**必须显式打开 "Enforce a hard limit"
+开关**——只填金额不开开关，就只是预警线，不会拒绝请求。设完后务必目视确认
+开关状态为 ON 并截图存档。
 
 ## 操作步骤
 
 1. 登录 [platform.openai.com](https://platform.openai.com/)，切到本项目所用的
    organization（右上角头像 → 确认 org）
-2. 进入 **Settings → Organization → Limits**（或直接访问
-   [platform.openai.com/settings/organization/limits](https://platform.openai.com/settings/organization/limits)）
-3. 在 **Usage limits** 里设置：
-   - **Budget limit（硬上限）**：当月用量达到该金额后 API 请求直接被拒绝
-   - **Notification threshold（告警线）**：建议设为硬上限的 50%–80%，达到时
-     OpenAI 会给账号邮箱发邮件，留出反应时间
-4. 若项目使用了 OpenAI 的 **Projects** 功能，可在 **Settings → Project →
-   Limits** 里再给单个 project 设更细的月度预算，与 org 级上限叠加生效
+2. 建议为 CSSA-DA 使用**独立的 Project**（若还没有：Settings → Projects →
+   Create project，并把后端用的 API key 换成该 project 的 key）——这样上限只
+   约束本项目，不影响同 org 下其他用途
+3. 进入 **Settings → Project → Limits → Spend**，点 **Edit spend limit**：
+   - 填月度金额（见下节），**打开 "Enforce a hard limit" 开关**，保存
+4. 再到 **Settings → Organization → Limits → Spend** 设一个更高的 org 级
+   上限作为二道兜底（project 级与 org 级叠加生效，任一触顶即拒绝）
+5. 在 **Spend alerts** 里设 50% 和 80% 两档告警，确认告警邮箱是有人看的邮箱
+6. **实测一次**：鉴于「静默降级」的前科，用一个小额 scratch project（如上限
+   $1）真实打到触顶，确认 API 返回 429 且错误码为 `*_spend_limit_exceeded`，
+   再相信生产上限已生效
 
 ## 上限设多少
 
@@ -34,20 +45,29 @@
 月成本上界 ≈ 单请求最大成本 × CHAT_GLOBAL_RATE_LIMIT(每天) × 31
 ```
 
-内测阶段全局限流默认 `1000/day`，正常单请求成本远低于 $0.01；建议先设一个
-**明显高于正常月账单、又低到出事时亏得起**的整数（例如正常月账单的 3–5 倍），
-跑一个月后按实际用量回调。
+内测阶段全局限流默认 `500/day`（gpt-4o-mini，正常单请求成本约 $0.0005–0.002，
+典型月成本 $10 上下）。建议 **project 级 $20/月 + org 级 $50/月**：明显高于
+正常月账单、又低到出事时亏得起，跑一个月后按实际用量回调。若要调大
+`CHAT_GLOBAL_RATE_LIMIT`，先按上式重算并同步上调这里的金额。
 
 ## 触顶之后会发生什么
 
-- OpenAI API 对后续请求返回 `429 insufficient_quota`，SDK 抛 `RateLimitError`
-- 后端把它映射为 `GenerationUnavailableError`，`/chat` 返回 `503` 和统一错误体
-  （见 [chatgpt_generator.py](../app/services/rag/generator/chatgpt_generator.py)
+- OpenAI API 对后续请求返回 429，错误码为 `project_spend_limit_exceeded` /
+  `organization_spend_limit_exceeded`（注意与预付费余额耗尽的
+  `insufficient_quota` 是两回事，排障时先分清是哪个）
+- SDK 抛 `RateLimitError`，后端把它映射为 `GenerationUnavailableError`，
+  `/chat` 返回 `503` 和统一错误体（见
+  [chatgpt_generator.py](../app/services/rag/generator/chatgpt_generator.py)
   的异常处理）——服务降级但不崩溃，检索仍可用
-- 恢复方式：等下月额度刷新，或管理员在控制台上调 Budget limit
+- usage 统计有约几十分钟延迟，触顶前后的少量请求可能漏过，上限金额不必精确
+  到美分
+- 恢复方式：等下月额度刷新，或管理员在控制台上调 spend limit
 
 ## 完成后核对
 
-- [ ] Budget limit 已设置并截图存档（金额多少记录在团队内部渠道，不进仓库）
-- [ ] Notification threshold 已设置，告警邮箱是有人看的邮箱
+- [ ] Project 级 spend limit 已设置，**"Enforce a hard limit" 开关为 ON**，
+      已截图存档（金额记录在团队内部渠道，不进仓库）
+- [ ] Org 级 spend limit 已设置为二道兜底
+- [ ] Spend alerts（50%/80%）已设置，告警邮箱是有人看的邮箱
+- [ ] 已用 scratch project 实测过一次 `*_spend_limit_exceeded` 429
 - [ ] 勾掉 [ROADMAP_platform.md](roadmap/ROADMAP_platform.md) 19.4 的对应复选框

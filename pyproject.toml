@@ -34,6 +34,7 @@ api = [
     "fastapi",
     "uvicorn[standard]",
     "slowapi",              # /chat rate limiting
+    "limits",               # startup validation of rate-limit strings (parse_many)
 ]
 
 # Data-pipeline-only deps. Installed into the pipeline image via:

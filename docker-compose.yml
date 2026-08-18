@@ -53,6 +53,10 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       CHAT_API_KEY: ${CHAT_API_KEY:-}
       DATABASE_URL: postgresql://rag_user:rag_password@postgres:5432/rag_vectordb
+      # The image has no .env file (.dockerignore excludes it), so rate
+      # limits are tunable in production only if compose passes them in.
+      CHAT_RATE_LIMIT: ${CHAT_RATE_LIMIT:-10/minute}
+      CHAT_GLOBAL_RATE_LIMIT: ${CHAT_GLOBAL_RATE_LIMIT:-500/day}
     volumes:
       - huggingface_cache:/root/.cache/huggingface
 

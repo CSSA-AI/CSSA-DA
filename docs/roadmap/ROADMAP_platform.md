@@ -861,7 +861,8 @@ ECR、Secrets、迁移编排）与模型选型完全无关，不需要等待。�
       控制台手动完成后勾掉本项
 - [x] **加全局限流** —— 现在只有 per-IP，再加一层「全站每天 N 次」。换 IP 绕不过全局计数。
       ✅ 已实现：`/chat` 上叠加常量 key 的第二层 slowapi 限流，`CHAT_GLOBAL_RATE_LIMIT`
-      默认 `1000/day`（CSS-10）
+      默认 `500/day`（CSS-10，实现细节与不变量见
+      [docs/design/implemented/global-rate-limit.md](../design/implemented/global-rate-limit.md)）
 - [ ] **限制 `/chat` 输入体积** —— 见 19.5
 - [ ] **确认前端仓库不公开，或 key 不进仓库**
 
