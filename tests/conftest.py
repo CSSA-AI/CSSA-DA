@@ -26,7 +26,9 @@ def reset_rate_limiter():
 
     TestClient always uses the same synthetic client address, so without a
     reset the /chat rate-limit counter accumulates across unrelated tests and
-    test order starts to matter.
+    test order starts to matter. limiter.reset() clears every key in the
+    shared storage — the per-IP counters and the site-wide "global" one. If
+    a second Limiter instance is ever created, it must be reset here too.
     """
     from app.core.rate_limit import limiter
 

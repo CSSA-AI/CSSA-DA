@@ -171,7 +171,8 @@ Copy `.env.example` to `.env` and fill in:
 | `MODEL_DIR` | optional | Local model directory (set to `/models` in the images) |
 | `LOG_LEVEL` | optional | `INFO` by default |
 | `ALLOWED_ORIGINS` | optional | Comma-separated CORS origins |
-| `CHAT_RATE_LIMIT` | optional | `10/minute` by default |
+| `CHAT_RATE_LIMIT` | optional | Per-IP `/chat` limit, `10/minute` by default |
+| `CHAT_GLOBAL_RATE_LIMIT` | optional | Site-wide `/chat` limit shared by all clients, `500/day` by default |
 
 Check runtime configuration without printing secret values:
 
@@ -231,10 +232,12 @@ The API is available at `http://localhost:8000`, with interactive documentation 
 | `GET /status` | `X-API-Key` | Readiness plus latest pipeline run metadata |
 | `POST /chat` | `X-API-Key` | Submit a message to the RAG pipeline |
 
-`/chat` is rate limited (`CHAT_RATE_LIMIT`, default `10/minute`). Failures return a
-stable error shape — `{"error": {"code": ..., "message": ...}}` — with internal details
-kept in the logs only: `503` when retrieval or generation is unavailable, `504` on
-generation timeout, `429` when rate limited.
+`/chat` is rate limited on two layers: per client IP (`CHAT_RATE_LIMIT`, default
+`10/minute`) and site-wide across all clients (`CHAT_GLOBAL_RATE_LIMIT`, default
+`500/day`) — rotating IPs cannot get past the shared counter, which caps total OpenAI
+spend. Failures return a stable error shape — `{"error": {"code": ..., "message": ...}}`
+— with internal details kept in the logs only: `503` when retrieval or generation is
+unavailable, `504` on generation timeout, `429` when rate limited.
 
 ```bash
 curl -X POST http://localhost:8000/chat \
