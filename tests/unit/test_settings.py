@@ -5,6 +5,15 @@ import pytest
 from app.core.config.settings import Settings
 
 
+def test_rate_limit_defaults():
+    settings = Settings(_env_file=None)
+
+    assert settings.CHAT_RATE_LIMIT == "10/minute"
+    # Sized to fit under the $20/month OpenAI project hard cap
+    # (docs/openai-spend-cap.md); change both together.
+    assert settings.CHAT_GLOBAL_RATE_LIMIT == "500/day"
+
+
 def test_local_model_path_is_disabled_by_default():
     settings = Settings(_env_file=None)
 

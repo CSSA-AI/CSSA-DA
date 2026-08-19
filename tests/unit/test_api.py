@@ -205,10 +205,70 @@ def test_chat_returns_answer_and_sources():
     assert payload["sources"][0]["score"] == 0.95
 
 
+def test_unversioned_chat_path_is_gone():
+    # This change has two halves: /v1/chat exists AND /chat no longer does.
+    # Without this, nothing stops the unversioned route being re-added later.
+    response = client().post("/chat", json={"message": "How do I enrol?"})
+
+    assert response.status_code == 404
+
+
 def test_chat_rejects_an_empty_message():
     response = client().post("/v1/chat", json={"message": ""})
 
     assert response.status_code == 422
+
+
+def test_chat_rejects_a_chat_history_message_over_the_length_cap():
+    response = client().post(
+        "/v1/chat",
+        json={
+            "message": "How do I enrol?",
+            "chat_history": [{"role": "user", "content": "x" * 4_001}],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_chat_accepts_a_chat_history_message_at_the_length_cap():
+    response = client().post(
+        "/v1/chat",
+        json={
+            "message": "How do I enrol?",
+            "chat_history": [{"role": "user", "content": "x" * 4_000}],
+        },
+    )
+
+    assert response.status_code == 200
+
+
+def test_chat_rejects_chat_history_over_the_item_count_cap():
+    response = client().post(
+        "/v1/chat",
+        json={
+            "message": "How do I enrol?",
+            "chat_history": [
+                {"role": "user", "content": "hi"} for _ in range(21)
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_chat_accepts_chat_history_at_the_item_count_cap():
+    response = client().post(
+        "/v1/chat",
+        json={
+            "message": "How do I enrol?",
+            "chat_history": [
+                {"role": "user", "content": "hi"} for _ in range(20)
+            ],
+        },
+    )
+
+    assert response.status_code == 200
 
 
 @pytest.mark.parametrize("provided_api_key", [None, "wrong-key"])

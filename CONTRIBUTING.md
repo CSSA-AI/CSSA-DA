@@ -264,7 +264,7 @@ release, publish a new version — never move an existing tag.
 
 ### API versioning
 
-Once the frontend consumes `/chat`, any change to the response schema is
+Once the frontend consumes `/v1/chat`, any change to the response schema is
 breaking. Therefore:
 
 - Version the path: `/v1/chat`
