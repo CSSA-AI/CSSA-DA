@@ -225,7 +225,7 @@ def status(
     return get_system_status().to_dict()
 
 
-@app.post("/chat", response_model=ChatResponse, tags=["chat"])
+@app.post("/v1/chat", response_model=ChatResponse, tags=["chat"])
 # Decorator order is load-bearing: slowapi evaluates callable limits in
 # bottom-up registration order and charges a counter before judging it, so
 # the per-IP limit must sit closest to the function — its 429 then breaks
