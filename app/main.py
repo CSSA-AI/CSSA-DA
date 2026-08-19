@@ -116,14 +116,20 @@ def handle_rate_limit_exceeded(
     # which tells ops whether one IP is being throttled or the site-wide
     # budget is exhausted — it goes to the logs only, never the response.
     logger.warning("Rate limit exceeded: %s", exc.detail)
+
+    retry_after = 60  # conservative default
+    if exc.limit is not None and exc.limit.limit is not None:
+        retry_after = exc.limit.limit.get_expiry()
+
     return JSONResponse(
         status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
         content={
             "error": {
                 "code": "rate_limited",
-                "message": "Too many requests. Please slow down and try again shortly.",
+                "message": "Rate limit exceeded. Please wait before retrying.",
             }
         },
+        headers={"Retry-After": str(retry_after)},
     )
 
 
