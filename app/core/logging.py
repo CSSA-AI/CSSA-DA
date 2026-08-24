@@ -18,6 +18,11 @@ STRUCTURED_FIELDS = (
     "status_code",
     "duration_ms",
     "error_code",
+    # The chat_interactions payload of a row that could not be written. The
+    # formatter drops any field not listed here, so without this entry the
+    # write-failure line would lose exactly the query it exists to preserve
+    # (ROADMAP_rag.md Phase 4.5).
+    "chat_interaction",
 )
 
 

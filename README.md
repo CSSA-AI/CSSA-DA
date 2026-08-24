@@ -90,7 +90,7 @@ CSSA-DA/
 │   ├── rehearse_local_stack.py               # End-to-end local rehearsal
 │   └── smoke_test_api.py                     # Hit /health, /ready, /v1/chat
 │
-├── migrations/                               # Alembic migrations (knowledge_base, pipeline_runs)
+├── migrations/                               # Alembic migrations (knowledge_base, pipeline_runs, chat_interactions)
 ├── tests/
 │   ├── unit/                                 # Fast, no external services
 │   └── integration/                          # Require Postgres (RUN_INTEGRATION_TESTS=1)
@@ -333,6 +333,29 @@ pipeline and returned as a `/v1/chat` source:
 In PostgreSQL, one row of `knowledge_base` is one *(question, article)* pair: the article
 fields above plus `question_text`, a 384-dim `embedding`, and the embedding model/revision
 that produced it. Rows are unique on `(link, question_text)`.
+
+**chat_interactions** ([app/services/chat_interactions.py](app/services/chat_interactions.py)) —
+one row per answered `/v1/chat` request, written by a `BackgroundTasks` task after the
+response has been sent:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `request_id` | text (PK) | The `X-Request-ID` from the response header — the join key to that request's log lines |
+| `created_at` | timestamptz | Write time (`now()`) |
+| `query` | text | The user's message |
+| `answer` | text | The generated answer |
+| `retrieved` | jsonb | `[{doc_id, score, rank}]`, post-rerank order |
+| `config` | jsonb | Config fingerprint: embedding/reranker/generator model + revision, effective `top_k` / `rerank_top_k`, `prompt_version`, `corpus_sha256`, `git_sha` |
+
+This is the analysis surface for real traffic, and **not a corpus source** — never write
+generated answers back into `knowledge_base`. Recording is best-effort: a failed write is
+logged with the full payload and never reaches the user. Set `GIT_SHA` and `CORPUS_SHA256`
+in production, or those fingerprint coordinates are recorded as null. See
+[ROADMAP_rag.md](docs/roadmap/ROADMAP_rag.md) Phase 4.5.
+
+> ⚠️ `retrieved.doc_id` is only meaningful once the doc_id chain is fixed
+> ([ROADMAP_rag.md](docs/roadmap/ROADMAP_rag.md) 0.1) — until then the retriever mints a
+> fresh UUID per search, so those ids cannot be joined back to `knowledge_base`.
 
 ---
 

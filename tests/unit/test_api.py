@@ -369,3 +369,77 @@ def test_chat_returns_safe_service_errors(
     assert response.status_code == status_code
     assert response.json()["error"]["code"] == error_code
     assert str(error) not in response.text
+
+
+def test_chat_records_the_interaction_after_responding(monkeypatch):
+    """The row must be written by a BackgroundTask, not inline.
+
+    TestClient runs background tasks before returning, so seeing the record
+    here proves it was queued; `test_chat_survives_a_failed_recording_write`
+    covers the half that matters to the user.
+    """
+    written = []
+    monkeypatch.setattr(
+        "app.services.chat_interactions.record_chat_interaction",
+        lambda record, **kwargs: written.append(record),
+    )
+
+    response = client().post(
+        "/v1/chat",
+        json={"message": "How do I enrol?", "top_k": 5, "rerank_top_k": 3},
+    )
+
+    assert response.status_code == 200
+    assert len(written) == 1
+    record = written[0]
+    # The primary key is the id the client got back, so a user reporting a
+    # bad answer by request id can be traced to their row.
+    assert record.request_id == response.headers["X-Request-ID"]
+    assert record.query == "How do I enrol?"
+    assert record.answer == "Answer for: How do I enrol?"
+    assert record.retrieved[0]["rank"] == 1
+    assert record.retrieved[0]["score"] == 0.95
+    assert record.config["top_k"] == 5
+    assert record.config["rerank_top_k"] == 3
+
+
+def test_chat_survives_a_failed_recording_write(monkeypatch):
+    """Recording is best-effort: a dead database must not reach the user."""
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("database is down")
+
+    monkeypatch.setattr(
+        "app.services.chat_interactions.psycopg2.connect",
+        explode,
+    )
+    monkeypatch.setattr(
+        "app.core.config.settings.DATABASE_URL",
+        "postgresql://example",
+    )
+
+    response = client().post("/v1/chat", json={"message": "How do I enrol?"})
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "Answer for: How do I enrol?"
+
+
+def test_chat_does_not_record_when_the_pipeline_failed(monkeypatch):
+    """A 503 has no answer to record; the write must not be queued at all."""
+    written = []
+    monkeypatch.setattr(
+        "app.services.chat_interactions.record_chat_interaction",
+        lambda record, **kwargs: written.append(record),
+    )
+    app.dependency_overrides[get_rag_orchestrator] = lambda: (
+        FailingOrchestrator(RetrievalUnavailableError("boom"))
+    )
+    app.dependency_overrides[require_internal_api_key] = lambda: None
+
+    response = TestClient(app).post(
+        "/v1/chat",
+        json={"message": "How do I enrol?"},
+    )
+
+    assert response.status_code == 503
+    assert written == []

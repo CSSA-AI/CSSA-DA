@@ -33,6 +33,15 @@ class Settings(BaseSettings):
     # counter resets on process restart.
     CHAT_GLOBAL_RATE_LIMIT: str = "500/day"
 
+    # Deploy-time coordinates stamped onto every chat_interactions row's
+    # config fingerprint (ROADMAP_rag.md Phase 4.5). Optional: unset means the
+    # fingerprint records null, which is honest. GIT_SHA is the "which code"
+    # coordinate and equals the image tag (CONTRIBUTING.md "Four version
+    # coordinates"); CORPUS_SHA256 is what lets an online row and an offline
+    # eval report be compared on the same ruler.
+    GIT_SHA: str | None = None
+    CORPUS_SHA256: str | None = None
+
     @property
     def allowed_origins_list(self) -> list[str]:
         return [
