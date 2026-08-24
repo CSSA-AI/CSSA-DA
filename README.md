@@ -315,7 +315,7 @@ pipeline and returned as a `/chat` source:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | str (UUID) | Unique identifier |
+| `id` | str | Stable, source-prefixed document id derived from `link` (e.g. `wx_<slug>`), not a random UUID — see [app/services/rag/doc_id.py](app/services/rag/doc_id.py) |
 | `text` | str | Article body |
 | `questions` | List[str] | GPT-generated questions (used for retrieval) |
 | `source` | str | Origin website |

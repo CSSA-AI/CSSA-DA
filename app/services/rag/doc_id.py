@@ -20,7 +20,7 @@ failures just because one row is missing a link.
 
 import hashlib
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 _WECHAT_HOST = "mp.weixin.qq.com"
 _HASH_LENGTH = 16
@@ -31,14 +31,26 @@ def derive_doc_id(*, link: Optional[str], text: str) -> str:
 
     `link` is preferred when it's a recognised source URL. `text` (the
     row's content) is the fallback key when there's no usable link, so a
-    missing link still produces a deterministic id rather than a crash.
+    missing link still produces a deterministic id rather than a crash
+    (the ingestion pipeline defaults a missing link to `""`, not `None`,
+    so this path is reachable in production, not just a defensive extra).
     """
     if link:
         parsed = urlparse(link)
         if parsed.netloc == _WECHAT_HOST:
             slug = parsed.path.rstrip("/").rsplit("/", 1)[-1]
-            if slug:
+            # WeChat articles use two URL shapes. Path-style
+            # (/s/<slug>) gives a real per-article slug. Query-style
+            # (/s?...&sn=...) has nothing in the path -- its last
+            # segment is literally "s", which would collapse every
+            # query-style article onto the same id. Read the `sn`
+            # query param instead; it's WeChat's own per-article id
+            # in that URL shape.
+            if slug and slug != "s":
                 return f"wx_{slug}"
+            sn = parse_qs(parsed.query).get("sn", [""])[0]
+            if sn:
+                return f"wx_{sn}"
         return f"kb_{_digest(link)}"
 
     return f"kb_{_digest(text)}"
