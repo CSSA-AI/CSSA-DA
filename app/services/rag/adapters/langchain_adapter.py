@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
 
 from langchain_core.runnables import RunnableLambda
+
+from app.schemas.search_result import SearchResult
 
 logger = logging.getLogger(__name__)
 
 
-def _log_results(message: str, stage: str, results) -> None:
+def _log_results(
+    message: str,
+    stage: str,
+    results: Iterable[SearchResult],
+) -> None:
     """Log doc_id/score/rank for a retrieval stage -- never the query or
     article text. `request_id` is attached automatically by the JSON
     formatter, so this is enough to trace a stage's output back to a
