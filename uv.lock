@@ -174,12 +174,14 @@ dependencies = [
 [package.dev-dependencies]
 api = [
     { name = "fastapi" },
+    { name = "limits" },
     { name = "slowapi" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 dev = [
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "limits" },
     { name = "mypy" },
     { name = "numpy" },
     { name = "pytest" },
@@ -211,12 +213,14 @@ requires-dist = [
 [package.metadata.requires-dev]
 api = [
     { name = "fastapi" },
+    { name = "limits" },
     { name = "slowapi" },
     { name = "uvicorn", extras = ["standard"] },
 ]
 dev = [
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "limits" },
     { name = "mypy" },
     { name = "numpy" },
     { name = "pytest" },

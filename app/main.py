@@ -20,7 +20,13 @@ from app.core.middleware import (
     RequestContextMiddleware,
     SecurityHeadersMiddleware,
 )
-from app.core.rate_limit import chat_rate_limit, limiter
+from app.core.rate_limit import (
+    chat_global_rate_limit,
+    chat_rate_limit,
+    global_rate_limit_key,
+    limiter,
+    validate_rate_limit_config,
+)
 from app.schemas.search_result import SearchResult
 from app.services.readiness import check_readiness
 from app.services.system_status import get_system_status
@@ -41,6 +47,10 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # Must stay OUTSIDE the preload try/except below: a malformed limit
+    # string has to stop the container at startup, not be logged and
+    # tolerated (slowapi would otherwise skip the layer per-request).
+    validate_rate_limit_config()
     try:
         await asyncio.to_thread(model_registry.preload_models)
     except Exception:
@@ -99,9 +109,13 @@ def _service_error_response(
 @app.exception_handler(RateLimitExceeded)
 def handle_rate_limit_exceeded(
     _: Request,
-    __: RateLimitExceeded,
+    exc: RateLimitExceeded,
 ) -> JSONResponse:
     # Override slowapi's default body with our shared safe error shape.
+    # exc.detail is the limit string ("10 per 1 minute" vs "500 per 1 day"),
+    # which tells ops whether one IP is being throttled or the site-wide
+    # budget is exhausted — it goes to the logs only, never the response.
+    logger.warning("Rate limit exceeded: %s", exc.detail)
     return JSONResponse(
         status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
         content={
@@ -175,12 +189,12 @@ class HealthResponse(BaseModel):
 
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
-    content: str = Field(min_length=1)
+    content: str = Field(min_length=1, max_length=4_000)
 
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=10_000)
-    chat_history: list[ChatMessage] = Field(default_factory=list)
+    chat_history: list[ChatMessage] = Field(default_factory=list, max_length=20)
     top_k: int | None = Field(default=None, ge=1, le=50)
     rerank_top_k: int | None = Field(default=None, ge=1, le=50)
 
@@ -211,7 +225,15 @@ def status(
     return get_system_status().to_dict()
 
 
-@app.post("/chat", response_model=ChatResponse, tags=["chat"])
+@app.post("/v1/chat", response_model=ChatResponse, tags=["chat"])
+# Decorator order is load-bearing: slowapi evaluates callable limits in
+# bottom-up registration order and charges a counter before judging it, so
+# the per-IP limit must sit closest to the function — its 429 then breaks
+# before the site-wide counter is charged. Swapped, one spamming IP could
+# burn the whole site's daily budget with rejected requests (see
+# docs/design/implemented/global-rate-limit.md and
+# test_per_ip_429s_do_not_burn_the_global_budget).
+@limiter.limit(chat_global_rate_limit, key_func=global_rate_limit_key)
 @limiter.limit(chat_rate_limit)
 def chat(
     request: Request,  # required by slowapi (looked up by this exact name)
