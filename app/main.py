@@ -228,11 +228,12 @@ def status(
 @app.post("/v1/chat", response_model=ChatResponse, tags=["chat"])
 # Decorator order is load-bearing: slowapi evaluates callable limits in
 # bottom-up registration order and charges a counter before judging it, so
-# the per-IP limit must sit closest to the function — its 429 then breaks
-# before the site-wide counter is charged. Swapped, one spamming IP could
-# burn the whole site's daily budget with rejected requests (see
-# docs/design/implemented/global-rate-limit.md and
-# test_per_ip_429s_do_not_burn_the_global_budget).
+# the per-caller limit must sit closest to the function — its 429 then
+# breaks before the site-wide counter is charged. Swapped, one spamming
+# caller could burn the whole site's daily budget with rejected requests
+# (see docs/design/implemented/global-rate-limit.md,
+# test_per_ip_429s_do_not_burn_the_global_budget and
+# test_per_user_429s_do_not_burn_the_global_budget).
 @limiter.limit(chat_global_rate_limit, key_func=global_rate_limit_key)
 @limiter.limit(chat_rate_limit)
 def chat(

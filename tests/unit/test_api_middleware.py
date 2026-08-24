@@ -300,6 +300,90 @@ def test_per_ip_429s_do_not_burn_the_global_budget(monkeypatch):
     assert victim.status_code == 200
 
 
+def test_rate_limit_counts_per_user_not_per_ip(monkeypatch):
+    # The BFF sends every request from one address, so the counter has to key
+    # on X-User-Id: two users behind that one address must not share a bucket.
+    monkeypatch.setattr(settings, "CHAT_RATE_LIMIT", "1/minute")
+    client()  # installs the dependency overrides on the shared app
+
+    bff = TestClient(app, client=("10.0.0.1", 50000))
+    alice = bff.post("/v1/chat", json={"message": "hi"}, headers={"X-User-Id": "alice"})
+    alice_again = bff.post("/v1/chat", json={"message": "hi"}, headers={"X-User-Id": "alice"})
+    bob = bff.post("/v1/chat", json={"message": "hi"}, headers={"X-User-Id": "bob"})
+
+    assert alice.status_code == 200
+    assert alice_again.status_code == 429  # alice spent her one slot
+    assert bob.status_code == 200  # bob has his own
+
+
+def test_rate_limit_follows_the_user_across_ips(monkeypatch):
+    # The user's quota must travel with the user, otherwise rotating source
+    # addresses would reset it.
+    monkeypatch.setattr(settings, "CHAT_RATE_LIMIT", "1/minute")
+    client()
+
+    headers = {"X-User-Id": "alice"}
+    first = TestClient(app, client=("10.0.0.1", 50000)).post(
+        "/v1/chat", json={"message": "hi"}, headers=headers
+    )
+    second = TestClient(app, client=("10.0.0.2", 50000)).post(
+        "/v1/chat", json={"message": "hi"}, headers=headers
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+
+
+def test_rate_limit_falls_back_to_ip_without_the_header(monkeypatch):
+    # Regression guard for the pre-BFF world: with no X-User-Id anywhere, the
+    # behaviour must stay exactly what it was before CSS-11 — per-IP counting.
+    # A missing fallback would drop every caller into one shared bucket.
+    monkeypatch.setattr(settings, "CHAT_RATE_LIMIT", "1/minute")
+    client()
+
+    one = TestClient(app, client=("10.0.0.1", 50000))
+    other = TestClient(app, client=("10.0.0.2", 50000))
+
+    assert one.post("/v1/chat", json={"message": "hi"}).status_code == 200
+    assert one.post("/v1/chat", json={"message": "hi"}).status_code == 429
+    assert other.post("/v1/chat", json={"message": "hi"}).status_code == 200
+
+
+def test_claimed_user_id_cannot_drain_a_real_ip_bucket(monkeypatch):
+    # The key spaces are prefixed, so a caller claiming to be user "10.0.0.2"
+    # gets its own counter instead of eating that address's quota.
+    monkeypatch.setattr(settings, "CHAT_RATE_LIMIT", "1/minute")
+    client()
+
+    impersonator = TestClient(app, client=("10.0.0.1", 50000)).post(
+        "/v1/chat", json={"message": "hi"}, headers={"X-User-Id": "10.0.0.2"}
+    )
+    real_host = TestClient(app, client=("10.0.0.2", 50000)).post("/v1/chat", json={"message": "hi"})
+
+    assert impersonator.status_code == 200
+    assert real_host.status_code == 200
+
+
+def test_per_user_429s_do_not_burn_the_global_budget(monkeypatch):
+    # Same decorator-order invariant as the per-IP sentinel above, exercised
+    # through the user key: one spamming user must not consume the site's
+    # daily budget with requests that were rejected anyway.
+    monkeypatch.setattr(settings, "CHAT_RATE_LIMIT", "1/minute")
+    monkeypatch.setattr(settings, "CHAT_GLOBAL_RATE_LIMIT", "3/day")
+    client()
+
+    bff = TestClient(app, client=("10.0.0.1", 50000))
+    statuses = [
+        bff.post("/v1/chat", json={"message": "hi"}, headers={"X-User-Id": "spammer"}).status_code
+        for _ in range(4)
+    ]
+    assert statuses == [200, 429, 429, 429]
+
+    # The spammer consumed 1 of 3 global slots, not 4: others still get in.
+    innocent = bff.post("/v1/chat", json={"message": "hi"}, headers={"X-User-Id": "innocent"})
+    assert innocent.status_code == 200
+
+
 def test_rate_limit_429_logs_which_layer_tripped(
     monkeypatch, captured_app_logs
 ):
