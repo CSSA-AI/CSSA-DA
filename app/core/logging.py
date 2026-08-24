@@ -18,6 +18,8 @@ STRUCTURED_FIELDS = (
     "status_code",
     "duration_ms",
     "error_code",
+    "stage",
+    "results",
 )
 
 

@@ -10,5 +10,7 @@ code, it is worse than no document.
 | Document | Covers |
 |---|---|
 | [chat-api-hardening.md](chat-api-hardening.md) | `/chat` structured logging, security headers, CORS, rate limiting |
+| [global-rate-limit.md](global-rate-limit.md) | Site-wide `/chat` rate limit and the OpenAI spend cap |
+| [retrieval-logging.md](retrieval-logging.md) | What the RAG pipeline logs per stage, and why no user content goes to CloudWatch |
 | [deployment-packaging.md](deployment-packaging.md) | Dependency locking, slim multi-stage images |
 | [storage-abstraction.md](storage-abstraction.md) | Pipeline storage interface (`S3Storage` still pending — see [ROADMAP_platform](../../roadmap/ROADMAP_platform.md) Phase 3) |
