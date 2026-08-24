@@ -158,7 +158,7 @@ answer。** 需要看文档正文?`doc_id` 直接去 `knowledge_base` 查。
 |---|---|---|
 | `stage` | `"retrieve"` \| `"rerank"` | 哪一段产生的 |
 | `results` | array | 该段的输出,**数组顺序即该段的排序结果** |
-| `results[].doc_id` | str | 文档 id,取自 `SearchResult.article.id` |
+| `results[].doc_id` | str | 文档 id,取自 `SearchResult.article.id`。微信文章为 `wx_<slug>`,由 [doc_id.py](../../../app/services/rag/doc_id.py) 从 `link` 派生(CSS-7);无法识别的链接形状走 `kb_<hash>` 兜底 |
 | `results[].score` | float | 该段自己的分数 —— 两段的分数**不可比**(见下) |
 | `results[].rank` | int \| null | 该段内的排名,1-based |
 
@@ -268,20 +268,11 @@ bind、从白名单里删掉 `results`,三种改法各自只挂掉对应的那�
 
 ## 已知边界
 
-**1. `doc_id` 目前是随机 UUID。**
-[pg_retriever.py](../../../app/services/rag/retriever/pg_retriever.py) 构造 `Article`
-时没传 `id`,而 [article.py](../../../app/schemas/article.py) 的 `id` 默认值是
-`uuid.uuid4()` —— 同一篇文档每次检索都是新 id。**在 CSS-7 落地之前,日志里的
-`doc_id` 无法跨请求比对,也无法回查 `knowledge_base`。** 分数和顺序仍然有效。
-
-这是 CSS-15 立项时就接受的顺序问题:CSS-7 改的是 `pg_retriever` 怎么**填**这个 id,
-不改这里怎么**读**,两边不冲突。发布时先合 CSS-7,这套日志上线即可用。
-
-**2. `chat_interactions` 还不存在(CSS-17)。** 在它落地之前,`request_id` 只能把日志
+**1. `chat_interactions` 还不存在(CSS-17)。** 在它落地之前,`request_id` 只能把日志
 内部串起来,回查 query / answer 的那一半还接不上。**这段时间 query 分布无处可查** ——
 这是[基础知识一](#一为什么用户内容不能进日志)里那个取舍的现金代价。
 
-**3. Phase 4 其余部分未做。** 分阶段延迟(retrieve / rerank / generate 各自的
+**2. Phase 4 其余部分未做。** 分阶段延迟(retrieve / rerank / generate 各自的
 p50 / p95)、token 计数与成本都还没有,见
 [ROADMAP_rag.md Phase 4.1](../../roadmap/ROADMAP_rag.md)。当前只有整个请求的
 `duration_ms`(access log 里)。

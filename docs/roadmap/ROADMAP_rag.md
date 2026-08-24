@@ -572,8 +572,8 @@ CREATE TABLE chat_interactions (
 
 ### 依赖
 
-⚠️ **`retrieved` 这一列的价值依赖 [0.1](#01-doc_id-链路是断的-) 修好** —— 否则记下
-来的是一堆随机 UUID。两件事绑在一起做。
+✅ **`retrieved` 这一列依赖的 [0.1](#01-doc_id-链路是断的-) 已经修好**(CSS-7 / PR #74),
+记下来的是稳定的 `wx_<slug>`,不再是随机 UUID。这个前置条件不再是阻塞项。
 
 ### 后续扩展(全部是 nullable 加列,零风险)
 
