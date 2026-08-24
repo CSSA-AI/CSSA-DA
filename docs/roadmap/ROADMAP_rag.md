@@ -78,7 +78,14 @@ Phase 6  上线与持续调优
 
 **目标**:把现在就知道是错的东西改掉。全部不需要任何数据支撑。
 
-### 0.1 doc_id 链路是断的 🔴
+### 0.1 doc_id 链路是断的 ✅
+
+> **已修复**(CSS-7 / [PR #74](https://github.com/CSSA-AI/CSSA-DA/pull/74))。
+> 实现与下面的原计划有一处偏离:`knowledge_base` 表里**没有**稳定 id 列可 `SELECT`,
+> 所以改为由 [doc_id.py](../../app/services/rag/doc_id.py) 从 `link` **派生**
+> —— 微信文章取 `wx_<slug>`,无法识别的链接形状走确定性 hash 兜底并记 warning。
+> 效果与验收标准一致:同一 query 两次请求返回同样的 id。
+> 下面是当初的问题描述,保留备查。
 
 [pg_retriever.py](../../app/services/rag/retriever/pg_retriever.py) 的 SQL 没有
 `SELECT id`,构造 `Article` 时也没传 id;而 [article.py](../../app/schemas/article.py) 的
@@ -678,7 +685,7 @@ RAG       ←  Data(仅 Phase 5 起)
 
 | Phase | 依赖 ground truth | 状态 |
 |---|---|---|
-| **0.1** doc_id 链路 + `/v1/chat` | ❌ | 🔴 未开始,**有上线截止** |
+| **0.1** doc_id 链路 + `/v1/chat` | ❌ | ✅ 已完成 —— doc_id (CSS-7 #74)、`/v1/chat` (#73) |
 | **0.2** 合并 evaluator | ❌ | 🔴 未开始 |
 | **0.3** `top_k` 结构性 | ❌ | 🔴 未开始 |
 | **0.4** 换 reranker | ❌ | 🔴 未开始 —— **✅ 已定进 v1**(待 Phase 5 验证) |
