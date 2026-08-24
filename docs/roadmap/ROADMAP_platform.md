@@ -204,6 +204,8 @@ Starlette 按异常类型的 MRO 找 handler，已有的具体异常类型 handl
   校园网下是**多人共享一份额度**，可能误伤正常用户。当前接受这个不完美——它
   仍能挡住主要威胁（脚本狂刷）。精细化按用户维度的限流延后（见下方"精细化
   限流"）。
+  ✅ **2026-08-25 已解决（CSS-11）**：限流维度改为 `X-User-Id`，缺失时回退到 IP，
+  共用出口 IP 的用户不再共享一份额度。
 - 鉴权失败（`require_internal_api_key` 拒绝）不计入 rate limit 次数，因为
   slowapi 的检查在 endpoint 函数内部、鉴权 dependency 之后才执行。要修的话
   需要把限流挪到鉴权之前，改动更大，本阶段不做。
@@ -729,12 +731,21 @@ LangChain/LangSmith tracing、metadata 和隐私策略继续延后到核心系�
 > **实现要点**：`key_func` 改读 `X-User-Id`；**该 header 缺失时回退到 IP**，否则在
 > BFF 上线之前所有请求会挤进同一个桶，比现状更糟。不需要验证 header 真伪 —— 只有
 > 持 `CHAT_API_KEY` 的 BFF 能进门，这是标准的 trusted proxy 做法。
+>
+> ✅ **2026-08-25 已完成（CSS-11）。** `app/core/rate_limit.py` 的
+> `client_rate_limit_key()` 读 `X-User-Id`，缺失时回退到客户端 IP。两处实现
+> 细节值得记住：两个 key 空间加了 `user:` / `ip:` 前缀，否则形如 IP 的 user id
+> 会与同名真实 IP 撞进同一个桶；header 截断到 64 字符，否则内存态计数器的 key
+> 空间可被无限撑大。header 不验真伪（trusted proxy）。轮换 `X-User-Id` 仍可
+> 绕过本层，兜底是 19.4 的全站限流。实现记录见
+> [global-rate-limit.md](../design/implemented/global-rate-limit.md)。
 
 第 1 项已经上了**按 IP、`10/minute` 的止血型限流**（方向 C）。它够挡住脚本
 狂刷，但按 IP 计数在校园 WiFi / 宿舍 NAT 下会**多人共享一份额度**，可能误伤
-正常用户。等前端和用户体系确定后再做精细化：
+正常用户。精细化的原始清单及完成情况：
 
-- 确定限流维度：登录用户 ID、会话 token，或按渠道发放的 `X-API-Key`。
+- ✅ **已完成（CSS-11）** 确定限流维度：登录用户 ID，由 BFF 经 `X-User-Id` 传入。
+  当时的备选是会话 token 或按渠道发放的 `X-API-Key`。
 - 可能需要把限流检查挪到鉴权**之前 / 同层**，以便对"狂试错误 key"也计数
   （当前鉴权失败不计入限流，见第 1 项已知取舍）。
 - 若届时已做多实例水平扩容，改用 Redis 等共享存储做分布式限流（当前单实例
@@ -853,13 +864,16 @@ ECR、Secrets、迁移编排）与模型选型完全无关，不需要等待。�
 > `get_remote_address` 失去区分度，全体用户会挤在一份 `10/minute` 里。需要 BFF 传
 > `X-User-Id`，限流 key 改成读它。**不需要验证该 header 真伪** —— 只有持 API key 的
 > BFF 能进门，是标准的 trusted proxy 做法。
+>
+> ✅ **2026-08-25：CSSA-DA 侧已就绪（CSS-11）。** 限流 key 已改读 `X-User-Id`、
+> 缺失时回退到 IP，因此第 16 项不再阻塞 BFF 上线；BFF 按契约传该 header 即可。
 
 #### 19.4 不管选哪条都要做（v1 必做）
 
 - [ ] **OpenAI 后台设硬性支出上限** —— 兜底。不管前面漏成什么样，当月最多花这么多。
       操作步骤见 [docs/openai-spend-cap.md](../openai-spend-cap.md)，需账号管理员在
       控制台手动完成后勾掉本项
-- [x] **加全局限流** —— 现在只有 per-IP，再加一层「全站每天 N 次」。换 IP 绕不过全局计数。
+- [x] **加全局限流** —— 当时只有单调用方那一层，再加一层「全站每天 N 次」。换 IP 绕不过全局计数。
       ✅ 已实现：`/chat` 上叠加常量 key 的第二层 slowapi 限流，`CHAT_GLOBAL_RATE_LIMIT`
       默认 `500/day`（CSS-10，实现细节与不变量见
       [docs/design/implemented/global-rate-limit.md](../design/implemented/global-rate-limit.md)）
@@ -947,8 +961,8 @@ git 历史里 —— 删掉文件也没用。
    - 错误响应原样透传（401 / 429 / 503 / 504 都有安全格式的 body）
 2. **[第 16 项](#16-精细化限流按用户维度)从「延后」升级为 v1 必做** —— BFF 之后所有
    请求都来自同一个 IP，`get_remote_address` 失去区分度。
-   ⚠️ 实现时 `X-User-Id` 缺失要**回退到 IP**，否则在 BFF 上线之前所有请求会挤进同
-   一个桶，比现状更糟。
+   ✅ 2026-08-25 已实现（CSS-11）：限流 key 读 `X-User-Id`，缺失时回退到 IP，
+   因此在 BFF 上线之前行为与改动前完全一致。
 3. **`chat_interactions` 加 `user_id` 列** —— 见
    [ROADMAP_rag.md](ROADMAP_rag.md) Phase 4.5。内测期最有价值的是能追到具体的人去问
    「这个回答哪里不好」。

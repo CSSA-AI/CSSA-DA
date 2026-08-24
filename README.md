@@ -171,7 +171,7 @@ Copy `.env.example` to `.env` and fill in:
 | `MODEL_DIR` | optional | Local model directory (set to `/models` in the images) |
 | `LOG_LEVEL` | optional | `INFO` by default |
 | `ALLOWED_ORIGINS` | optional | Comma-separated CORS origins |
-| `CHAT_RATE_LIMIT` | optional | Per-IP `/v1/chat` limit, `10/minute` by default |
+| `CHAT_RATE_LIMIT` | optional | Per-caller `/v1/chat` limit, keyed on `X-User-Id` and falling back to the client IP, `10/minute` by default |
 | `CHAT_GLOBAL_RATE_LIMIT` | optional | Site-wide `/v1/chat` limit shared by all clients, `500/day` by default |
 
 Check runtime configuration without printing secret values:

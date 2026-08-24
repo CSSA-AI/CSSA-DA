@@ -701,6 +701,9 @@ app.add_middleware(
   看来是同一个 IP,因此按 IP 限流会**多人共享一份额度**,可能误伤正常用户。精细化
   (按登录用户维度)延后,见 [ROADMAP_platform.md](../../roadmap/ROADMAP_platform.md) 第 16 项 /
   [issue #67](https://github.com/CSSA-AI/CSSA-DA/issues/67)。
+  ✅ **2026-08-25 更新**：该局限已由 CSS-11 消除 —— 限流维度改为 `X-User-Id`
+  （缺失时回退到客户端 IP），共用出口 IP 的用户不再共享一份额度。本节其余
+  内容保留当时的实现记录，不作改写。
 - **额度:`CHAT_RATE_LIMIT` 默认 `10/minute`**,存成字符串,部署时用环境变量按
   实际用量调,无需改代码。
 - **存储:内存态,不接 Redis**。本项目由社团部署但**不需要多 ECS 水平扩容**,
