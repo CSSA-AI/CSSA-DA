@@ -721,10 +721,14 @@ LangChain/LangSmith tracing、metadata 和隐私策略继续延后到核心系�
 
 ### 16. 精细化限流（按用户维度）
 
-> ⏰ **2026-08-09：本项的到期条件已满足。** 原文写的是「等**前端和用户体系确定后**
-> 再做」—— 前端团队已存在、登录系统已有。**若[第 19 项](#19-前端接入的安全边界2026-08-09-新增v1-阻塞项)
-> 决定走 BFF，本项从「中优先级/延后」升级为 v1 必做**：所有请求都从 BFF 的同一个
-> IP 发出，`get_remote_address` 会失去区分度，全体用户挤在一份 `10/minute` 里。
+> ⏰ **2026-08-10：本项已升级为 v1 必做。** 原文写的是「等**前端和用户体系确定后**
+> 再做」—— 前端已确认是 Django + 已有登录，且[第 19.7 项](#197--已确认走-bff2026-08-10)
+> 已选定走 BFF。BFF 之后所有请求都从同一个 IP 发出，`get_remote_address` 失去区分度，
+> 全体用户会挤在一份 `10/minute` 里。
+>
+> **实现要点**：`key_func` 改读 `X-User-Id`；**该 header 缺失时回退到 IP**，否则在
+> BFF 上线之前所有请求会挤进同一个桶，比现状更糟。不需要验证 header 真伪 —— 只有
+> 持 `CHAT_API_KEY` 的 BFF 能进门，这是标准的 trusted proxy 做法。
 
 第 1 项已经上了**按 IP、`10/minute` 的止血型限流**（方向 C）。它够挡住脚本
 狂刷，但按 IP 计数在校园 WiFi / 宿舍 NAT 下会**多人共享一份额度**，可能误伤
@@ -774,13 +778,13 @@ ECR、Secrets、迁移编排）与模型选型完全无关，不需要等待。�
 
 | # | 耦合点 | 平台侧要做什么 | 必须在何时收敛 |
 |---|---|---|---|
-| 1 | **`doc_id` 链路修复** | `pg_retriever` 补 `SELECT id` 并传到 `SearchResult`。这**改变 `/chat` 响应体**——当前每次响应都在吐一个随机 UUID（`Article.id` 是 `default_factory=uuid4`），是公开契约变更 | ⏰ **上线、前端接入之前**。趁没有真实客户端，改起来零成本 |
+| 1 | **`doc_id` 链路修复** | ✅ **已完成**（CSS-7 / PR #74）。`sources[].article.id` 现在是从 `link` 派生的稳定 id（微信为 `wx_<slug>`），不再是每次响应都变的随机 UUID。这是公开契约变更，已赶在前端接入前落地 | ✅ 已收敛 |
 | 2 | **向量维度** | `VECTOR(384)` 写死。若选型结论是 1024 维模型，需 ALTER + 全库重嵌入重导 | ⏰ **建 RDS 前**。现在 DB 是一次性容器，迁移=删了重来；上生产后要变成停机窗口+回滚方案，成本差一个数量级 |
 | 3 | **模型文件大小** | 模型烤入镜像。若换成 bge-m3 + bge-reranker-v2-m3（约各 2.2GB），镜像从 3.35GB 冲到 ~7GB，**Phase 1 的验收基线（冷启动 7.5s / idle 944MiB）全部要重测**，并可能推翻第 4.1 项的「烤入镜像」方案 | ⏰ **写 ECS task definition 前** |
 | 4 | **`top_k`** | 现 retriever `top_k=5`、reranker `top_k=3`，评估要求 deep pool（50）。5→50 让每请求 CPU 差 10 倍 | ⏰ **第 13/14 项（worker/扩容策略、资源基线）定稿前** |
 | 5 | **PII 脱敏 stage** | 小助手 1:1 问答是求助场景的私密对话，含真名/微信号/学号/手机号。**脱敏 + 个人化内容筛选必须是 pipeline 的一个 stage，在入库之前执行** —— 放到下游就等于原始 PII 已经进了 Postgres 和 S3 | Phase 3 生产 Pipeline 设计时 |
 | 6 | **`held_out_for_eval` 排除** | eval 划走的对话不能回流进语料。标记落在源头，**由 ingest 阶段强制排除** —— 否则下次重跑管线会静默污染 eval set，且**没有任何报错** | 同上 |
-| 7 | **query 结构化日志 + 保留期** | `orchestrator.py` 目前把 query 拼进日志 message，改为 `extra={"query": ...}`，便于 CloudWatch Insights 提取；并设定 log group 保留期限（当前无限期）。**已确认可用于分析，将在隐私声明中告知** | 与第 15 项一并做 |
+| 7 | **query 不进日志 + log group 保留期** | 改口径（2026-08-10）：`orchestrator.py` 那句 `"Starting RAG pipeline for query: %s"` **去掉 query**；日志只记 `request_id` + `doc_id` + `score` + `rank`，query / answer 落 [ROADMAP_rag.md](ROADMAP_rag.md) Phase 4.5 的 `chat_interactions`，`request_id` 作 join key。原方案「改成 `extra={"query": ...}` 给 CloudWatch Insights 挖」在 4.5 落地后已被取代 —— Postgres 能 SQL 查、能 join `knowledge_base`、带 `config` 指纹、反馈可回填，而两边都写会让同一份用户内容有两套保留期、两个访问控制面。仍需设定 log group 保留期限（当前无限期）。**已确认可用于分析，将在隐私声明中告知** | 与第 15 项一并做 |
 
 > **一个可选的降级方案**：若不希望本线受任何阻塞，可先只做 **reranker 的替换** ——
 > 它不动 schema、不动向量维度、不需要重嵌入，只是换镜像里的模型文件。而当前
@@ -827,7 +831,7 @@ ECR、Secrets、迁移编排）与模型选型完全无关，不需要等待。�
 > 诚实评估：有登录 + 纯内测 + 用户是熟人，**实际泄漏概率确实低**。对内测阶段这个
 > 风险水平可能已经可以接受 —— 前提是损失封顶（19.4）且前端仓库不公开。
 
-#### 19.3 两条路径
+#### 19.3 两条路径（✅ 已选定 BFF，见 19.7）
 
 | 方案 | 成本 | 风险 |
 |---|---|---|
@@ -852,8 +856,13 @@ ECR、Secrets、迁移编排）与模型选型完全无关，不需要等待。�
 
 #### 19.4 不管选哪条都要做（v1 必做）
 
-- [ ] **OpenAI 后台设硬性支出上限** —— 兜底。不管前面漏成什么样，当月最多花这么多
-- [ ] **加全局限流** —— 现在只有 per-IP，再加一层「全站每天 N 次」。换 IP 绕不过全局计数
+- [ ] **OpenAI 后台设硬性支出上限** —— 兜底。不管前面漏成什么样，当月最多花这么多。
+      操作步骤见 [docs/openai-spend-cap.md](../openai-spend-cap.md)，需账号管理员在
+      控制台手动完成后勾掉本项
+- [x] **加全局限流** —— 现在只有 per-IP，再加一层「全站每天 N 次」。换 IP 绕不过全局计数。
+      ✅ 已实现：`/chat` 上叠加常量 key 的第二层 slowapi 限流，`CHAT_GLOBAL_RATE_LIMIT`
+      默认 `500/day`（CSS-10，实现细节与不变量见
+      [docs/design/implemented/global-rate-limit.md](../design/implemented/global-rate-limit.md)）
 - [ ] **限制 `/chat` 输入体积** —— 见 19.5
 - [ ] **确认前端仓库不公开，或 key 不进仓库**
 
@@ -892,13 +901,62 @@ key，和 `ops/smoke_test_api.py` / CI 用的分开。
 它**不解决「会不会泄漏」，只解决「泄漏之后能不能止损」** —— 但成本极低：吊销网页那把
 不影响内部工具，日志里也能区分流量来源。
 
-#### 19.7 待确认（去问前端团队）
+#### 19.7 ✅ 已确认：走 BFF（2026-08-10）
 
-- **登录是怎么做的？有没有服务端？是不是 Next.js？** ← 这个答案直接决定 19.3 选哪条
-- 前端仓库是否公开
+查了前端仓库 [CSSAInformationDepartment/myCSSA](https://github.com/CSSAInformationDepartment/myCSSA)，
+三个问题全部有答案：
 
-> 有服务端 / 是 Next.js → BFF 就是加个文件，没理由不做
-> 纯静态托管 + 第三方认证（Firebase/Auth0 那类）→ 才需要认真权衡是否为此新起一个服务
+| 问题 | 答案 |
+|---|---|
+| 登录有没有服务端？ | ✅ **有** —— Django + `django-rest-framework`，Python 500KB。Django 的 auth 本来就在服务端 |
+| 是不是 Next.js？ | ❌ 不是，是 **Django** —— 但这更好，它本身就是服务端框架 |
+| 仓库是否公开？ | ⚠️ **PUBLIC** |
+
+**结论：走 BFF，而且几乎没有成本。** Django 已经是服务端，BFF 不是「新建一个服务」，
+就是加一个 view：
+
+```python
+@login_required
+def chat_proxy(request):
+    # 内测阶段：再加一个 allowlist 检查
+    resp = requests.post(
+        f"{CSSA_DA_URL}/v1/chat",
+        json=json.loads(request.body),
+        headers={
+            "X-API-Key": settings.CSSA_DA_API_KEY,   # 只存在于服务器
+            "X-User-Id": str(request.user.id),        # 给限流和记录用
+        },
+        timeout=35,
+    )
+    return JsonResponse(resp.json(), status=resp.status_code)
+```
+
+`@login_required` 顺带解决内测资格（再加一个 allowlist 即可，CSSA-DA 侧零改动）。
+团队有 DRF 经验，这套写法熟悉。
+
+**仓库 public 让这个选择更没有悬念**：key 一旦进前端代码，就会永久留在公开仓库的
+git 历史里 —— 删掉文件也没用。
+
+##### 由此确定的三件事
+
+1. **接口契约**（由 CSSA-DA 定，前端照做）：
+   - 调 `POST /v1/chat`（含版本前缀）
+   - 带 `X-API-Key`，值从 Django settings / 环境变量读，**绝不进前端模板或 JS**
+   - 带 `X-User-Id`，用作限流维度与 `chat_interactions` 的记录维度
+   - `X-Request-ID` 响应头**透传回浏览器**并保存（反馈与排障要靠它）
+   - 错误响应原样透传（401 / 429 / 503 / 504 都有安全格式的 body）
+2. **[第 16 项](#16-精细化限流按用户维度)从「延后」升级为 v1 必做** —— BFF 之后所有
+   请求都来自同一个 IP，`get_remote_address` 失去区分度。
+   ⚠️ 实现时 `X-User-Id` 缺失要**回退到 IP**，否则在 BFF 上线之前所有请求会挤进同
+   一个桶，比现状更糟。
+3. **`chat_interactions` 加 `user_id` 列** —— 见
+   [ROADMAP_rag.md](ROADMAP_rag.md) Phase 4.5。内测期最有价值的是能追到具体的人去问
+   「这个回答哪里不好」。
+
+##### CORS 可以收了
+
+走 BFF 之后浏览器只调自己的服务器（同源），`ALLOWED_ORIGINS` 只需保留本地开发用的
+`localhost` 条目。
 
 ---
 

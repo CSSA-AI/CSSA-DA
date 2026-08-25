@@ -73,7 +73,10 @@ class RAGOrchestrator:
         rerank_top_k: Optional[int] = None,
         chat_history: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[str, List[SearchResult]]:
-        logger.info("Starting RAG pipeline for query: %s", query)
+        # No query text here -- request_id (already in the response header
+        # and the chat_interactions primary key) is the join key back to
+        # the query/answer. Keeps user content out of CloudWatch entirely.
+        logger.info("Starting RAG pipeline")
 
         state = self.invoke(
             {

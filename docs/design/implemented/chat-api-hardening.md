@@ -443,7 +443,11 @@ RetrievalUnavailableError → RAGServiceError → RuntimeError → Exception →
 继承 `logging.Formatter`,把一条 `LogRecord` 转成 JSON 字符串,字段包括
 `timestamp` / `level` / `logger` / `message`,以及 `request_id` 和一个结构化字段
 白名单(`STRUCTURED_FIELDS`:`method`、`path`、`status_code`、`duration_ms`、
-`error_code`),有异常时再加 `exception`。
+`error_code`、`stage`、`results`),有异常时再加 `exception`。
+
+> `stage` / `results` 是 RAG 检索日志用的,见
+> [retrieval-logging.md](retrieval-logging.md)。**往白名单外记 `extra` 会被静默
+> 丢弃**,加字段时两边要一起改。
 
 `request_id` 的取值逻辑是"优先取手动传的,否则读 ContextVar":手动传指
 `logger.info(..., extra={"request_id": "xxx"})`(见[基础 5](#5-logrecordrecord是什么));

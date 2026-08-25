@@ -55,7 +55,7 @@ CSSA-DA/
 │   │   │   └── rag-config.yaml               # Pinned models, top_k, prompts, pgvector table
 │   │   ├── logging.py                        # Structured JSON logging
 │   │   ├── middleware.py                     # Request ID/context + security headers
-│   │   └── rate_limit.py                     # slowapi limiter for /chat
+│   │   └── rate_limit.py                     # slowapi limiter for /v1/chat
 │   ├── schemas/
 │   │   ├── article.py                        # Article Pydantic schema
 │   │   └── search_result.py                  # RAG output schema (article + score + rank)
@@ -88,7 +88,7 @@ CSSA-DA/
 │   ├── db_status.py                          # Inspect knowledge_base rows / embeddings
 │   ├── download_models.py                    # Pre-download pinned models
 │   ├── rehearse_local_stack.py               # End-to-end local rehearsal
-│   └── smoke_test_api.py                     # Hit /health, /ready, /chat
+│   └── smoke_test_api.py                     # Hit /health, /ready, /v1/chat
 │
 ├── migrations/                               # Alembic migrations (knowledge_base, pipeline_runs)
 ├── tests/
@@ -111,6 +111,7 @@ CSSA-DA/
     ├── local-development.md                  # Local Docker workflows and command reference
     ├── roadmap/                              # What to build and when
     │   ├── ROADMAP_versions.md               #   Milestone boundaries v1–v4 — start here
+    │   ├── BACKLOG.md                        #   Flattened issue list for Linear import
     │   ├── ROADMAP_platform.md               #   Containers, AWS, CI/CD, observability
     │   ├── ROADMAP_data.md                   #   Corpus, ground truth dataset, data sources
     │   └── ROADMAP_rag.md                    #   Query path, eval tooling, architecture experiments
@@ -163,14 +164,15 @@ Copy `.env.example` to `.env` and fill in:
 | Variable | Required for | Description |
 |----------|--------------|-------------|
 | `OPENAI_API_KEY` | API | OpenAI key used by the generator |
-| `CHAT_API_KEY` | API | Internal key callers must send as `X-API-Key` on `/chat` and `/status` |
+| `CHAT_API_KEY` | API | Internal key callers must send as `X-API-Key` on `/v1/chat` and `/status` |
 | `DATABASE_URL` | API, pipeline | PostgreSQL connection string |
 | `WECHAT_API_KEY` | harvester | WeChat article source |
 | `ENV` | optional | `dev` by default |
 | `MODEL_DIR` | optional | Local model directory (set to `/models` in the images) |
 | `LOG_LEVEL` | optional | `INFO` by default |
 | `ALLOWED_ORIGINS` | optional | Comma-separated CORS origins |
-| `CHAT_RATE_LIMIT` | optional | `10/minute` by default |
+| `CHAT_RATE_LIMIT` | optional | Per-IP `/v1/chat` limit, `10/minute` by default |
+| `CHAT_GLOBAL_RATE_LIMIT` | optional | Site-wide `/v1/chat` limit shared by all clients, `500/day` by default |
 
 Check runtime configuration without printing secret values:
 
@@ -187,7 +189,7 @@ docker compose --profile cpu up --build
 This starts PostgreSQL, applies Alembic migrations through the `migrate-cpu` service,
 and then starts the FastAPI service. Open `http://localhost:8000/docs`. The pinned
 embedding and reranker models are baked into the image and preloaded at startup, so no
-download happens on the first `/chat` request. Available profiles: `cpu` (API),
+download happens on the first `/v1/chat` request. Available profiles: `cpu` (API),
 `pipeline` (pipeline tasks + migrations), `test` (throwaway Postgres). See
 [docs/local-development.md](docs/local-development.md) for detailed Docker usage.
 
@@ -228,15 +230,17 @@ The API is available at `http://localhost:8000`, with interactive documentation 
 | `GET /health` | — | Liveness of the API process |
 | `GET /ready` | — | Database + RAG data/model readiness (503 when not ready) |
 | `GET /status` | `X-API-Key` | Readiness plus latest pipeline run metadata |
-| `POST /chat` | `X-API-Key` | Submit a message to the RAG pipeline |
+| `POST /v1/chat` | `X-API-Key` | Submit a message to the RAG pipeline |
 
-`/chat` is rate limited (`CHAT_RATE_LIMIT`, default `10/minute`). Failures return a
-stable error shape — `{"error": {"code": ..., "message": ...}}` — with internal details
-kept in the logs only: `503` when retrieval or generation is unavailable, `504` on
-generation timeout, `429` when rate limited.
+`/v1/chat` is rate limited on two layers: per client IP (`CHAT_RATE_LIMIT`, default
+`10/minute`) and site-wide across all clients (`CHAT_GLOBAL_RATE_LIMIT`, default
+`500/day`) — rotating IPs cannot get past the shared counter, which caps total OpenAI
+spend. Failures return a stable error shape — `{"error": {"code": ..., "message": ...}}`
+— with internal details kept in the logs only: `503` when retrieval or generation is
+unavailable, `504` on generation timeout, `429` when rate limited.
 
 ```bash
-curl -X POST http://localhost:8000/chat \
+curl -X POST http://localhost:8000/v1/chat \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $CHAT_API_KEY" \
   -d '{"message": "墨尔本 校招"}'
@@ -311,11 +315,11 @@ LCEL runnables and returns shared pipeline state containing the answer and sourc
 ## Data Schema
 
 **Article** ([app/schemas/article.py](app/schemas/article.py)) — the record shape used by the
-pipeline and returned as a `/chat` source:
+pipeline and returned as a `/v1/chat` source:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | str (UUID) | Unique identifier |
+| `id` | str | Stable, source-prefixed document id derived from `link` (e.g. `wx_<slug>`), not a random UUID — see [app/services/rag/doc_id.py](app/services/rag/doc_id.py) |
 | `text` | str | Article body |
 | `questions` | List[str] | GPT-generated questions (used for retrieval) |
 | `source` | str | Origin website |
@@ -337,6 +341,7 @@ that produced it. Rows are unique on `(link, question_text)`.
 | Document | Contents |
 |----------|----------|
 | [docs/roadmap/ROADMAP_versions.md](docs/roadmap/ROADMAP_versions.md) | **版本边界 v1–v4：谁能用、承诺什么、什么时候做（先看这个）** |
+| [docs/roadmap/BACKLOG.md](docs/roadmap/BACKLOG.md) | 摊平的 issue 清单（Linear 首次导入用；之后以 Linear 为准） |
 | [docs/roadmap/ROADMAP_platform.md](docs/roadmap/ROADMAP_platform.md) | 平台线：容器、AWS 基础设施、CI/CD、可观测性、安全 (中文) |
 | [docs/roadmap/ROADMAP_data.md](docs/roadmap/ROADMAP_data.md) | 数据线：语料建设、ground truth dataset、数据源接入 (中文) |
 | [docs/roadmap/ROADMAP_rag.md](docs/roadmap/ROADMAP_rag.md) | RAG 线：查询链路、评估工具、架构实验 (中文) |

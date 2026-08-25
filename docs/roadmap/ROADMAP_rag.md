@@ -78,7 +78,14 @@ Phase 6  上线与持续调优
 
 **目标**:把现在就知道是错的东西改掉。全部不需要任何数据支撑。
 
-### 0.1 doc_id 链路是断的 🔴
+### 0.1 doc_id 链路是断的 ✅
+
+> **已修复**(CSS-7 / [PR #74](https://github.com/CSSA-AI/CSSA-DA/pull/74))。
+> 实现与下面的原计划有一处偏离:`knowledge_base` 表里**没有**稳定 id 列可 `SELECT`,
+> 所以改为由 [doc_id.py](../../app/services/rag/doc_id.py) 从 `link` **派生**
+> —— 微信文章取 `wx_<slug>`,无法识别的链接形状走确定性 hash 兜底并记 warning。
+> 效果与验收标准一致:同一 query 两次请求返回同样的 id。
+> 下面是当初的问题描述,保留备查。
 
 [pg_retriever.py](../../app/services/rag/retriever/pg_retriever.py) 的 SQL 没有
 `SELECT id`,构造 `Article` 时也没传 id;而 [article.py](../../app/schemas/article.py) 的
@@ -137,14 +144,36 @@ Recall@k 曲线(Phase 5),但现在就该调大到一个合理量级。
 ### 0.4 reranker 的任务类型是错的
 
 `cross-encoder/ms-marco-MiniLM-L12-v2` 不只是英文模型的问题 —— **ms-marco 训练的是
-「query → 长文档段落」,而本系统主任务是「问题 ↔ 问题」匹配**。就算换成中文版,
-任务类型仍然错。要找 **STS / 句对分类型**的 cross-encoder。
+「query → 长文档段落」,是单一任务类型的模型**。就算换成中文版,单一任务类型这件事
+本身就不够。
 
 原理上明确、风险可控,**可以先换,标记为「待 Phase 5 验证」**,不用等尺子。
 
 - ✅ **已决定进 v1**(2026-08-09)—— 理由:平台线是长杆,不做完也上不了线,所以换
   模型的时间成本是免费的
 - ⚠️ 别当成已验证的结论 —— 换了之后仍需在 Phase 5 补一个正式对比
+
+#### 选型判据已修订(2026-08-11)
+
+> **原判据**:「本系统主任务是问题 ↔ 问题匹配,要找 **STS / 句对分类型**的
+> cross-encoder。」
+>
+> **这条判据在语料变异构之后不再成立。** 见
+> [ROADMAP_data](ROADMAP_data.md#一个必须先说清楚的前提):问答类和文档类会长期
+> 并存。而在 [Phase 2.2](#22-三种方案的接口) 的 C 结构下,**cross-encoder 是唯一
+> 让两种模态可比的部件** —— 选一个纯 STS 模型等于优化了正在离开的那个世界,并且
+> 会亲手把合池重排那个点做坏。
+
+**新判据:在句对和段落两种任务上都不塌。**
+
+- 候选要同时看 `(问题, 问题)` 和 `(问题, 段落)` 两种输入下的表现,**不能只看一种**
+- 验证时**两种模态各测一组**,分别记录,不要合成一个平均分 —— 平均分会把「一种
+  很好、一种崩了」和「两种都中等」显示成同一个数
+- 多语言仍是硬要求(用户提问是中文)
+- 体积仍是硬约束:模型进镜像,`/models` 现在 605MB,large 级会冲到 GB 量级,
+  Phase 1 的验收基线全部要重测
+
+**换掉 ms-marco 这个动作没有变**,变的是拿什么标准挑替代品。
 
 ### 0.5 训练数据用的是随机负例
 
@@ -279,10 +308,49 @@ token 数),且可以靠伪造对话历史引导模型。
 |---|---|---|---|
 | **A** 都当文档 | 全文 | 原始 query + instruction | 单 |
 | **B** doc2query | 生成的问题 | 原始 query,无 instruction | 单 |
-| **C** 双索引 | 分别按 A/B | 同上 | 双,cross-encoder 合并 |
+| **C** 双索引 | 分别按 A/B | 同上 | 双,**合池后联合重排**(见 2.2.1) |
 
 - **交付**:`RetrievalStrategy` 抽象 + 三个实现 + 由 `eval-matrix.yaml` 选择
-- **验收**:新增一种方案不需要改 orchestrator,只加一个类 + 一段配置
+- **验收 1**:新增一种**方案**不需要改 orchestrator,只加一个类 + 一段配置
+- **验收 2**(2026-08-11 新增):新增一个**数据源**不需要改任何代码 —— 只是多一批
+  行、多一个 `source` 值、指标表里多一行。见 [2.2.2](#222-源会越来越多索引不能跟着源走)
+
+#### 2.2.1 C 的「合并」必须写死:合池 + 联合重排
+
+原先这一格只写了「cross-encoder 合并」,太含糊 —— 它有两种读法,一种致命:
+
+```
+❌  两个索引各出 top-k → 按 bi-encoder 分数排序合并 → 再重排
+✅  两个索引各出 top-k → 合成一个候选池 → cross-encoder 对全池联合打分
+```
+
+**第一种是坏的,因为分数在两个空间里根本不可比。** 对称模型给 question↔question
+打的分**系统性**高于 question→passage,哪怕后者才是更好的答案。按分数合并,QA 行
+会稳定压过文档行 —— 而这不是质量差异,是**模态偏置**。它不会报错,只会让文档源
+看起来「效果不好」。
+
+第二种绕开了整个问题:cross-encoder 看的是**真实文本对**,输出的是同一个空间里的
+分数。**这是全链路里唯一不需要标定就能跨模态比较的地方。**
+
+> ⚠️ **由此产生的硬要求**:C 结构下 cross-encoder 是唯一让两种模态可比的部件,
+> 它必须同时吃得下 `(问题, 问题)` 和 `(问题, 段落)`。选一个纯 STS 模型会亲手把
+> 这个合并点做坏 —— 见 [0.4](#04-reranker-的任务类型是错的) 的选型判据。
+
+#### 2.2.2 源会越来越多,索引不能跟着源走
+
+**索引按模态建,不按源建。** 模态只有两个且固定,源会持续增长:
+
+```
+模态（2 个，固定）        源（N 个，持续增长）
+  qa   ←  小助手问答 / 论坛帖子 / CSSA FAQ / …
+  doc  ←  handbook / 墨大官网 / Home Affairs / ATO / …
+```
+
+于是加第 N+1 个源的成本是:判断模态 → 写进 corpus(doc 多一步切块)→ 指标表多
+一行。**不新建索引、不重嵌入、不重调 `top_k`、不改 orchestrator。**
+
+如果让索引跟着源走,每加一个源都要重新决定它和别的源怎么合并 —— 那是一个随源数
+平方增长的问题。
 - 🔒 **实验期间不要改 `rag-config.yaml`** 里钉住的模型与 revision —— 平台线的镜像
   构建和 `ops/download_models.py` 依赖它稳定。候选写进独立的 `eval-matrix.yaml`
 
@@ -308,8 +376,30 @@ instruction 开关**;索引层不共用(harness 用 numpy,生产用 pgvector),�
 `rag-config.yaml` 的 system prompt 明确要求「如果资料中没有答案,请说明资料不足,
 不要编造」。**这条行为现在一个测试都没有,而它是 RAG 最容易出事的地方。**
 
-- **做法**:给一批**不含答案**的上下文,看它编不编
+- **做法**:给一批**不含答案**的上下文,看它编不编。上下文手工构造、直接喂给
+  generator,**不经过检索** —— 测的是生成器的行为契约,不受当前检索质量影响
 - **验收**:20 条负样本上,零编造
+
+#### 它是发布关卡,不是 CI 测试(2026-08-10 定)
+
+真跑要调 OpenAI。**钱不是问题** —— 20 条 × gpt-4o-mini 一次全跑是一美分量级。
+真正的代价是**非确定性**:flaky test 最终都会被人加 `skip`。所以要限定跑的时机。
+
+它守的不是「模型今天会不会幻觉」,而是**一类具体的改动**:改 system prompt(比如
+手滑删掉「不要编造」,或加了 [3.3](#33-一个必须避开的陷阱-) 那句「可以推测」)、
+换 generator 模型或版本、改 `context.max_items` / `max_chars_per_item`、换 reranker
+导致喂进去的上下文形状变了。这类破坏**不微妙** —— 20 条里会挂一片而不是挂一条,
+所以 20 条这个样本量够用。
+
+- 独立 marker,`pytest tests/unit` 与每次 push 的 CI **都不跑**
+- 碰 prompt / generator 模型 / context 配置的 PR **必须跑**,结果贴 PR
+- 打 tag 发布前跑一次
+- 用生产的 `temperature: 0.3`,不为了稳定改成 0 —— 测的就是线上行为
+- **判据两条都要**:出现拒答表述 **且** 未出现上下文里不存在的具体事实。只判前
+  半句是纸糊的,模型可以先说「资料不足」再编一段
+
+诚实的边界:跑过一次 20/20 **不等于证明幻觉率为 0**,只证明这一版没有明显破坏这条
+行为。别拿它当质量指标用。
 
 ### 3.2 其他契约
 
@@ -344,14 +434,28 @@ instruction 开关**;索引层不共用(harness 用 numpy,生产用 pgvector),�
   均值 2584ms,主要由 OpenAI 生成耗时主导,但需要分解到段才能优化
 - **token 计数与成本** —— 直接从 OpenAI 响应的 `response.usage` 取,三行代码,
   **不需要任何框架**
-- **检索结果** —— 现在日志里只有 `Starting RAG pipeline for query: ...` 一行,
-  **检索回了什么完全没记**。加上 `doc_id` + 分数 + rerank 前后顺序,生产环境的排障
-  能力就上来一大半,而且只记 id 不记正文,零隐私成本
+- **检索结果** —— ✅ **已实现**(CSS-15):retrieve / rerank 各记一条结构化日志,
+  含 `doc_id` + 分数 + `rank`。两条形状相同,所以 rerank 前后的顺序变化能直接对照。
+  只记 id 不记正文,零隐私成本。字段契约与查询方式见
+  [retrieval-logging.md](../design/implemented/retrieval-logging.md)
 - **reranker 的候选数敏感度** —— cross-encoder 给 50 个候选打分的延迟是硬上线约束,
   直接决定 `top_k` 上限
-- **query 结构化字段** —— [orchestrator.py](../../app/services/rag/orchestrator.py) 目前把
-  query 拼进日志 message,改为 `extra={"query": ...}`,便于日后用 CloudWatch Insights
-  提取真实 query,做 [ROADMAP_data](ROADMAP_data.md) Phase 6 的挖掘
+- **query 不进日志**(2026-08-10 修订,✅ 已实现于 CSS-15)——
+  [orchestrator.py](../../app/services/rag/orchestrator.py) 的
+  `"Starting RAG pipeline for query: %s"` 已去掉 query(而不是改成
+  `extra={"query": ...}`)。当初的决策理由保留在下面备查。
+
+  原先的写法是为了用 CloudWatch Insights 挖真实 query。但 [Phase 4.5](#phase-45交互记录)
+  的 `chat_interactions` 落地之后,**Postgres 才是更好的挖掘面**:能 SQL 查、能 join
+  `knowledge_base`、带 `config` 指纹、反馈到了能 UPDATE 回同一行、保留期由我们自己定。
+  日志则要按扫描量计费,且没有前四项。
+
+  两边都写 query = 同一份用户内容落在两个地方、两套保留期、两个访问控制面 —— 而本节
+  「只记 id 不记正文,零隐私成本」这句话只有在日志里真的没有正文时才成立。
+
+  **分工**:日志记 `request_id` + `doc_id` + `score` + `rank`,负责排障;
+  `chat_interactions` 记 query / answer,负责分析。`request_id` 是两边的 join key,
+  它已经在响应头里,也已经是 `chat_interactions` 的主键。
 
 ### 4.2 关于 LangChain / LangSmith
 
@@ -439,7 +543,10 @@ CREATE TABLE chat_interactions (
 ```
 
 - 用 FastAPI 的 **`BackgroundTasks` 写入**,响应发出后再写,不给 `/chat` 加延迟。
-  写失败只记日志,绝不抛出去影响用户
+  写失败只记日志,绝不抛出去影响用户。
+  ⚠️ **失败那条日志要带完整 payload(含 query)** —— 这是 query 唯一被允许进日志的
+  地方。正常路径下 query 只进 Postgres(见 [4.1](#41-要采什么)),但 DB 抖动的那几
+  分钟如果连日志也不记,这批 query 就是真的找不回来了
 - 存 **Postgres 而不是只靠日志**:反馈是后到的、要 UPDATE 回同一行;要和
   `knowledge_base` join;量很小(社团级每天几百条);`pipeline_runs` 表已是同样性质
   的先例
@@ -465,8 +572,8 @@ CREATE TABLE chat_interactions (
 
 ### 依赖
 
-⚠️ **`retrieved` 这一列的价值依赖 [0.1](#01-doc_id-链路是断的-) 修好** —— 否则记下
-来的是一堆随机 UUID。两件事绑在一起做。
+✅ **`retrieved` 这一列依赖的 [0.1](#01-doc_id-链路是断的-) 已经修好**(CSS-7 / PR #74),
+记下来的是稳定的 `wx_<slug>`,不再是随机 UUID。这个前置条件不再是阻塞项。
 
 ### 后续扩展(全部是 nullable 加列,零风险)
 
@@ -578,7 +685,7 @@ RAG       ←  Data(仅 Phase 5 起)
 
 | Phase | 依赖 ground truth | 状态 |
 |---|---|---|
-| **0.1** doc_id 链路 + `/v1/chat` | ❌ | 🔴 未开始,**有上线截止** |
+| **0.1** doc_id 链路 + `/v1/chat` | ❌ | ✅ 已完成 —— doc_id (CSS-7 #74)、`/v1/chat` (#73) |
 | **0.2** 合并 evaluator | ❌ | 🔴 未开始 |
 | **0.3** `top_k` 结构性 | ❌ | 🔴 未开始 |
 | **0.4** 换 reranker | ❌ | 🔴 未开始 —— **✅ 已定进 v1**(待 Phase 5 验证) |
@@ -589,7 +696,7 @@ RAG       ←  Data(仅 Phase 5 起)
 | **Phase 1** 评估工具 | ❌ | ⬜ 未开始 |
 | **Phase 2** 可插拔方案 | ❌ | ⬜ 未开始 —— **价值最高** |
 | **Phase 3** 生成器行为 | ❌ | ⬜ 未开始 |
-| **Phase 4** 可观测性 | ❌ | ⬜ 未开始 |
+| **Phase 4** 可观测性 | ❌ | 🟡 部分完成 —— 检索日志已落(CSS-15);分阶段延迟、token / 成本未做 |
 | **Phase 4.5** 交互记录 | ❌ | ⬜ 未开始 —— **上线即开始产生真实 query** |
 | **Phase 5** 跑实验 | ✅ | ⛔ 卡数据线 Phase 2 |
 | **Phase 6** 上线调优 | ✅ | ⬜ 未开始 |

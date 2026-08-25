@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
     CHAT_RATE_LIMIT: str = "10/minute"
+    # Site-wide /chat budget shared by ALL clients (one counter, not per-IP):
+    # rotating IPs cannot bypass it (ROADMAP 19.4). Sized to stay under the
+    # $20/month OpenAI project hard cap (docs/openai-spend-cap.md). "day"
+    # means 24h from the window's first request, not a calendar day, and the
+    # counter resets on process restart.
+    CHAT_GLOBAL_RATE_LIMIT: str = "500/day"
 
     @property
     def allowed_origins_list(self) -> list[str]:

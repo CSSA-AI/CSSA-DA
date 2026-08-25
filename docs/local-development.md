@@ -1,7 +1,7 @@
 # Docker development guide
 
 The Docker services start the FastAPI application automatically. Copy
-`.env.example` to `.env` and set `OPENAI_API_KEY` before using `/chat`.
+`.env.example` to `.env` and set `OPENAI_API_KEY` before using `/v1/chat`.
 
 ## Start the API
 
@@ -20,13 +20,13 @@ Open:
 - Interactive API docs: <http://localhost:8000/docs>
 
 The `cpu` profile runs the `migrate-cpu` service before starting the API, so
-Alembic migrations are applied to PostgreSQL automatically. `/chat` expects
+Alembic migrations are applied to PostgreSQL automatically. `/v1/chat` expects
 `knowledge_base` rows to already exist; rebuild them with the pipeline commands
 below when the database is empty or the processed data changes.
 
 The pinned embedding and reranker models are baked into the image at build time
 and preloaded on startup (`local_files_only`), so no model download happens on
-the first `/chat` request. Because preload blocks startup, once `/health`
+the first `/v1/chat` request. Because preload blocks startup, once `/health`
 responds the models are already loaded.
 
 ## Check configuration
@@ -91,7 +91,7 @@ python ops/rehearse_local_stack.py
 By default this applies migrations, transforms local WeChat data, imports one
 knowledge-base row, starts the API, then checks `/health` and `/ready`. Use
 `--full-import` to import all rows, and `--include-chat` when you also want to
-call `/chat`.
+call `/v1/chat`.
 
 The default rehearsal intentionally does not harvest from WeChat. It rebuilds
 from existing raw data under `data/`, which makes the flow repeatable after the
