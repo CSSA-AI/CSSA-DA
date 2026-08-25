@@ -54,9 +54,13 @@ async def lifespan(_: FastAPI):
     validate_rate_limit_config()
     try:
         await asyncio.to_thread(model_registry.preload_models)
+    except Exception:
+        logger.exception("RAG model preload failed")
+
+    try:
         await asyncio.to_thread(_build_rag_orchestrator)
     except Exception:
-        logger.exception("RAG pipeline preload failed")
+        logger.exception("RAG orchestrator preload failed")
     yield
     close_rag_orchestrator()
 

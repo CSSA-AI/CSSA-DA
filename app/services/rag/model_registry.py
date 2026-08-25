@@ -82,14 +82,22 @@ class ModelRegistry:
 
     def preload_models(self) -> None:
         errors = []
-        for get_model in (
-            self.get_embedding_model,
-            self.get_reranker_model,
-        ):
-            try:
-                get_model()
-            except Exception as error:
-                errors.append(error)
+        try:
+            embedding_model = self.get_embedding_model()
+            if hasattr(embedding_model, "encode"):
+                embedding_model.encode(
+                    ["warmup"],
+                    normalize_embeddings=True,
+                )
+        except Exception as error:
+            errors.append(error)
+
+        try:
+            reranker_model = self.get_reranker_model()
+            if hasattr(reranker_model, "predict"):
+                reranker_model.predict([("warmup", "warmup")])
+        except Exception as error:
+            errors.append(error)
 
         if errors:
             raise ModelPreloadError(
