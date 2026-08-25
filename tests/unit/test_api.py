@@ -13,7 +13,11 @@ from app.services.rag.errors import (
     GenerationUnavailableError,
     RetrievalUnavailableError,
 )
-from app.services.rag.model_registry import ModelRegistryStatus, model_registry
+from app.services.rag.model_registry import (
+    ModelRegistry,
+    ModelRegistryStatus,
+    model_registry,
+)
 from app.services.system_status import (
     PipelineMetadataStatus,
     SystemStatus,
@@ -120,7 +124,7 @@ def test_lifespan_preloads_models_and_orchestrator(monkeypatch):
 
         response = test_client.get("/health")
 
-
+    assert response.status_code == 200
 
 
 def test_model_preload_failure_does_not_break_health(monkeypatch):
@@ -134,6 +138,42 @@ def test_model_preload_failure_does_not_break_health(monkeypatch):
         response = test_client.get("/health")
 
     assert response.status_code == 200
+
+
+def test_orchestrator_preload_failure_does_not_break_health(monkeypatch):
+    monkeypatch.setattr(
+        "app.main._build_rag_orchestrator",
+        MagicMock(side_effect=RuntimeError("orchestrator failed")),
+    )
+
+    with TestClient(app) as test_client:
+        response = test_client.get("/health")
+
+    assert response.status_code == 200
+
+
+def test_model_preload_warms_embedding_and_reranker(monkeypatch):
+    registry = ModelRegistry()
+    embedding_model = MagicMock()
+    reranker_model = MagicMock()
+    monkeypatch.setattr(
+        registry,
+        "get_embedding_model",
+        MagicMock(return_value=embedding_model),
+    )
+    monkeypatch.setattr(
+        registry,
+        "get_reranker_model",
+        MagicMock(return_value=reranker_model),
+    )
+
+    registry.preload_models()
+
+    embedding_model.encode.assert_called_once_with(
+        ["warmup"],
+        normalize_embeddings=True,
+    )
+    reranker_model.predict.assert_called_once_with([("warmup", "warmup")])
 
 
 def test_ready_returns_503_when_database_or_data_are_not_ready(monkeypatch):
