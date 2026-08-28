@@ -16,6 +16,16 @@ different retention policy and a different access-control list, which is
 exactly what retrieval-logging.md rules out. Queries answered while the
 database is unreachable are lost; that is the accepted price of keeping one
 copy of user content, in one place.
+
+Known trade-off — one connection per write, no pool. The retriever keeps a
+ThreadedConnectionPool because it is on the request path; this is not, so it
+pays a TCP handshake and an auth round trip per answered request instead of
+holding connections open. At v1 volume (hundreds of rows a day, capped by the
+site-wide rate limit) that is the cheaper side of the trade: a pool sized for
+a workload this sparse would keep connections idle against a database whose
+connection budget is already being counted for ECS sizing
+(ROADMAP_platform.md). Revisit if /chat volume grows by an order of
+magnitude, or if the threadpool slot each write occupies starts to matter.
 """
 
 from dataclasses import dataclass
