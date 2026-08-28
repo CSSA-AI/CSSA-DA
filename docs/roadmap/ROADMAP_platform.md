@@ -1023,7 +1023,7 @@ git 历史里 —— 删掉文件也没用。
 uvicorn 关闭日志四步完整（`Shutting down` → `Waiting for application shutdown` →
 `Application shutdown complete` → `Finished server process`）。
 
-**first-request 冷惩罚（待修）**：首个 `/chat` 比稳态慢约 **2.1 秒**。原因有两个：
+**first-request 冷惩罚（已修复，CSS-14 / PR #76）**：首个 `/chat` 比稳态慢约 **2.1 秒**。原因有两个：
 （1）`app/api/deps.py` 的 `_build_rag_orchestrator` 用 `lru_cache` 懒构建——第一个请求
 才创建 PG 连接池和三个组件；（2）**模型加载了但从未推理过**——lifespan 的
 `preload_models()` 只构造模型对象，不跑前向传播，惰性初始化仍由第一个真实请求承担。
@@ -1044,9 +1044,10 @@ uvicorn 关闭日志四步完整（`Shutting down` → `Waiting for application 
 > 阈值而线上照样翻车；预热后是稳定的 ~36ms。上表在 macOS 上测得，绝对值不迁移到
 > Linux 容器，只有「预热前后」的对比可迁移。
 
-建议修法：lifespan 里同步构建一次 orchestrator，**并在 `preload_models()` 里对两个
-模型各跑一次真实前向传播**，把这两段成本都移到启动期。这样 `/ready` 的语义才真正等于
-「能以全速服务」。
+修法（已落地）：lifespan 里同步构建一次 orchestrator，**并在 `preload_models()` 里对
+两个模型各跑一次真实前向传播**，把这两段成本都移到启动期。这样 `/ready` 的语义才真正
+等于「能以全速服务」。设计细节见
+[startup-and-readiness.md](../design/implemented/startup-and-readiness.md)。
 
 ⚠️ 预热失败必须把模型状态标成 `failed`——模型可能加载成功却跑不了推理（不兼容的 LoRA
 adapter 只在 `predict` 时暴露），此时 `/ready` 若仍报 200，会把流量导给一个必然失败的
