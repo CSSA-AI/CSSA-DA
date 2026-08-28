@@ -56,6 +56,15 @@ def _build_rag_orchestrator() -> RAGOrchestrator:
     )
 
 
+def preload_rag_orchestrator() -> None:
+    """Build the pipeline during startup so no request has to pay for it.
+
+    The public entry point for the app lifespan: callers outside this module
+    should not reach for the cached builder by its private name.
+    """
+    _build_rag_orchestrator()
+
+
 def get_rag_orchestrator() -> RAGOrchestrator:
     """FastAPI dependency that exposes startup failures as a useful 503."""
     try:

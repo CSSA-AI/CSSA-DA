@@ -10,9 +10,9 @@ from pydantic import BaseModel, Field
 from slowapi.errors import RateLimitExceeded
 
 from app.api.deps import (
-    _build_rag_orchestrator,
     close_rag_orchestrator,
     get_rag_orchestrator,
+    preload_rag_orchestrator,
     require_internal_api_key,
 )
 from app.core.config import settings
@@ -58,7 +58,7 @@ async def lifespan(_: FastAPI):
         logger.exception("RAG model preload failed")
 
     try:
-        await asyncio.to_thread(_build_rag_orchestrator)
+        await asyncio.to_thread(preload_rag_orchestrator)
     except Exception:
         logger.exception("RAG orchestrator preload failed")
     yield
