@@ -289,14 +289,17 @@ LCEL runnables and returns shared pipeline state containing the answer and sourc
 
 ### Model registry ([app/services/rag/model_registry.py](app/services/rag/model_registry.py))
 - Single shared instance of each model, so retriever and reranker do not load duplicates
-- Preloaded during app startup (`lifespan`) instead of on the first request
-- Exposes per-model load state (`not_loaded` / `loading` / `ready` / `failed`) to `/ready`
+- Preloaded during app startup (`lifespan`) instead of on the first request, and warmed
+  up with one real forward pass so the first request does not pay for lazy initialisation
+- Exposes per-model load state (`not_loaded` / `loading` / `ready` / `failed`) to `/ready`.
+  A model that loads but fails its warm-up is marked `failed`: it can serve nothing, so
+  `/ready` must not report it healthy
 
 ### Configuration ([app/core/config/rag-config.yaml](app/core/config/rag-config.yaml))
 - Embedding and reranker models pinned by name **and** revision, so imports and retrieval
   use identical model files
-- Retrieval/rerank `top_k`, pgvector table and pool sizes, generator model, timeouts and
-  the system prompt
+- Retrieval/rerank `top_k`, pgvector table, pool sizes and connect timeout, generator
+  model, timeouts and the system prompt
 
 ### Data pipelines ([pipelines/](pipelines/))
 - One CLI: `python -m pipelines <command>` — `harvest-wechat`, `transform-wechat`,
