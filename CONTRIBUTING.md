@@ -15,6 +15,7 @@ commit, open pull requests, and cut releases.
 ## Table of contents
 
 - [Getting started](#getting-started)
+- [Language](#language)
 - [Branching model](#branching-model)
 - [Commit messages](#commit-messages)
 - [Pull requests](#pull-requests)
@@ -36,6 +37,28 @@ uv run pytest tests/unit -q
 Full setup instructions are in the [README](README.md#setup). For running the
 stack in Docker (Postgres + migrations + API), see
 [docs/local-development.md](docs/local-development.md).
+
+---
+
+## Language
+
+**Everything on GitHub is written in English**: issue titles and bodies, pull
+request titles and descriptions, and review and comment threads. Commit messages
+are English too — see [Commit messages](#commit-messages).
+
+The reason is who reads them. This repository already receives pull requests from
+contributors outside the club who do not read Chinese. An issue they cannot read
+is an issue they cannot pick up, and a review thread they cannot follow is one
+they cannot answer. Keeping GitHub in one language is what makes the work
+open to them at all.
+
+Documents under `docs/` — roadmaps and design write-ups — stay in Chinese. They
+are long-form, written for the team, and lose more in translation than they gain.
+Changing that would be a separate and deliberate decision, not a side effect of
+this rule.
+
+This applies to new issues and pull requests. Existing Chinese ones are not being
+rewritten.
 
 ---
 
