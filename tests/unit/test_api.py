@@ -133,6 +133,12 @@ def test_model_preload_failure_does_not_break_health(monkeypatch):
         "preload_models",
         MagicMock(side_effect=RuntimeError("model failed")),
     )
+    # The lifespan also builds the orchestrator; leaving it real would open a
+    # psycopg2 pool from a unit test.
+    monkeypatch.setattr(
+        "app.main._build_rag_orchestrator",
+        MagicMock(),
+    )
 
     with TestClient(app) as test_client:
         response = test_client.get("/health")
@@ -144,6 +150,14 @@ def test_orchestrator_preload_failure_does_not_break_health(monkeypatch):
     monkeypatch.setattr(
         "app.main._build_rag_orchestrator",
         MagicMock(side_effect=RuntimeError("orchestrator failed")),
+    )
+    # Without this the lifespan really loads both models -- ~600MB from the
+    # Hub on CI, where MODEL_DIR is unset -- and leaves the module-level
+    # registry singleton in "ready" state for every later test.
+    monkeypatch.setattr(
+        model_registry,
+        "preload_models",
+        MagicMock(),
     )
 
     with TestClient(app) as test_client:
