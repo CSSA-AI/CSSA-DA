@@ -129,7 +129,7 @@ v1,**应该现在就派人去做**。但它已经不是 v2 的唯一入口 —�
 - [ ] 0.8 `/chat` 输入体积上限(两行)
 - [ ] 3.1 拒答测试
 - [ ] 4.1 检索结果落结构化日志
-- [ ] 4.5 `chat_interactions` 六列 + `BackgroundTasks` 写入
+- [x] 4.5 `chat_interactions` 六列 + `BackgroundTasks` 写入
 
 ### 退出标准
 
