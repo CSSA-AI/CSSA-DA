@@ -127,23 +127,25 @@ def test_lifespan_preloads_models_and_orchestrator(monkeypatch):
     assert response.status_code == 200
 
 
-def test_model_preload_failure_does_not_break_health(monkeypatch):
+def test_model_preload_failure_skips_orchestrator_but_keeps_health(monkeypatch):
     monkeypatch.setattr(
         model_registry,
         "preload_models",
         MagicMock(side_effect=RuntimeError("model failed")),
     )
-    # The lifespan also builds the orchestrator; leaving it real would open a
-    # psycopg2 pool from a unit test.
+    # Also a stub because leaving it real would open a psycopg2 pool from a
+    # unit test -- but the point of this test is that it is never called.
+    preload_rag_orchestrator = MagicMock()
     monkeypatch.setattr(
         "app.main.preload_rag_orchestrator",
-        MagicMock(),
+        preload_rag_orchestrator,
     )
 
     with TestClient(app) as test_client:
         response = test_client.get("/health")
 
     assert response.status_code == 200
+    preload_rag_orchestrator.assert_not_called()
 
 
 def test_orchestrator_preload_failure_does_not_break_health(monkeypatch):

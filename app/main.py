@@ -55,12 +55,18 @@ async def lifespan(_: FastAPI):
     try:
         await asyncio.to_thread(model_registry.preload_models)
     except Exception:
-        logger.exception("RAG model preload failed")
-
-    try:
-        await asyncio.to_thread(preload_rag_orchestrator)
-    except Exception:
-        logger.exception("RAG orchestrator preload failed")
+        # Both the retriever and the reranker pull their model from the
+        # registry, so building the orchestrator now would retry the same
+        # failing load a second time and still not yield a usable pipeline.
+        # Nothing diagnostic is lost: /ready reports the database side.
+        logger.exception(
+            "RAG model preload failed; skipping RAG orchestrator preload"
+        )
+    else:
+        try:
+            await asyncio.to_thread(preload_rag_orchestrator)
+        except Exception:
+            logger.exception("RAG orchestrator preload failed")
     yield
     close_rag_orchestrator()
 
