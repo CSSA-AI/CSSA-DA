@@ -172,11 +172,17 @@ def test_record_uses_the_bound_request_id():
 # --- writing ----------------------------------------------------------------
 
 
-def test_write_failure_never_raises_and_logs_the_full_query(
+def test_write_failure_never_raises_and_keeps_user_content_out_of_the_log(
     monkeypatch,
     caplog,
 ):
-    """A dead database must cost the user nothing and lose no query."""
+    """A dead database costs the user nothing and leaks nothing.
+
+    The query is lost when the write fails -- that is the accepted price of
+    keeping one copy of user content, in Postgres only. What must never
+    happen is the payload reaching the logs as a fallback, where it would
+    live under a different retention policy and a different ACL.
+    """
 
     def explode(*args, **kwargs):
         raise RuntimeError("database is down")
@@ -185,8 +191,8 @@ def test_write_failure_never_raises_and_logs_the_full_query(
 
     record = ChatInteractionRecord(
         request_id="req-1",
-        query="a query that must survive the outage",
-        answer="an answer",
+        query="a query that must not reach the logs",
+        answer="an answer that must not reach the logs",
         retrieved=[{"doc_id": "doc-a", "score": 0.9, "rank": 1}],
         config={"git_sha": "abc123"},
     )
@@ -194,11 +200,11 @@ def test_write_failure_never_raises_and_logs_the_full_query(
     with caplog.at_level(logging.ERROR):
         record_chat_interaction(record, database_url="postgresql://example")
 
-    payload = caplog.records[-1].chat_interaction
-    assert payload["query"] == "a query that must survive the outage"
-    assert payload["answer"] == "an answer"
-    assert payload["request_id"] == "req-1"
-    assert payload["config"] == {"git_sha": "abc123"}
+    assert "Failed to record chat interaction" in caplog.text
+    assert caplog.records[-1].request_id == "req-1"
+    assert "a query that must not reach the logs" not in caplog.text
+    assert "an answer that must not reach the logs" not in caplog.text
+    assert not hasattr(caplog.records[-1], "chat_interaction")
 
 
 def test_missing_database_url_is_logged_not_raised(caplog):
@@ -208,7 +214,8 @@ def test_missing_database_url_is_logged_not_raised(caplog):
         record_chat_interaction(record, database_url="")
 
     assert "Failed to record chat interaction" in caplog.text
-    assert caplog.records[-1].chat_interaction["query"] == "a query"
+    assert caplog.records[-1].request_id == "req-1"
+    assert "a query" not in caplog.text
 
 
 def test_duplicate_request_id_warns_instead_of_dropping_silently(
@@ -259,7 +266,8 @@ def test_duplicate_request_id_warns_instead_of_dropping_silently(
         record_chat_interaction(record, database_url="postgresql://example")
 
     assert "Duplicate chat interaction request_id" in caplog.text
-    assert caplog.records[-1].chat_interaction["query"] == "a query"
+    assert caplog.records[-1].request_id == "reused"
+    assert "a query" not in caplog.text
     # Runs once per answered request, so the connection must not be left for
     # the garbage collector to reclaim.
     assert FakeConnection.closed_explicitly is True

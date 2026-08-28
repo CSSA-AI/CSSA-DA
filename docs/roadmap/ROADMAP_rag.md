@@ -556,9 +556,14 @@ CREATE TABLE chat_interactions (
 
 - 用 FastAPI 的 **`BackgroundTasks` 写入**,响应发出后再写,不给 `/chat` 加延迟。
   写失败只记日志,绝不抛出去影响用户。
-  ⚠️ **失败那条日志要带完整 payload(含 query)** —— 这是 query 唯一被允许进日志的
-  地方。正常路径下 query 只进 Postgres(见 [4.1](#41-要采什么)),但 DB 抖动的那几
-  分钟如果连日志也不记,这批 query 就是真的找不回来了
+  ⚠️ **失败那条日志只带 `request_id`,不带 payload**(2026-08-29 改口径)。本节早先
+  要求把完整 payload 含 query 写进失败日志,理由是「DB 抖动那几分钟如果连日志也不
+  记,这批 query 就找不回来了」。**该要求已撤销** —— 它和
+  [retrieval-logging](../design/implemented/retrieval-logging.md) 的保证正面冲突:
+  那份设计的立论不是「日志不安全」,而是同一份用户内容不该落在两个保留期不同、
+  访问控制不同的地方,而小助手接的是签证被拒 / 挂科 / 经济困难这类求助,多一个可
+  搜索的副本就多一个暴露面。**取舍已定:宁可丢掉故障窗口内的 query,也只保留一份
+  用户内容。** 代价要写进设计文档,不能装作没有
 - 存 **Postgres 而不是只靠日志**:反馈是后到的、要 UPDATE 回同一行;要和
   `knowledge_base` join;量很小(社团级每天几百条);`pipeline_runs` 表已是同样性质
   的先例

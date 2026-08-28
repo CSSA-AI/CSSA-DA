@@ -7,7 +7,15 @@ problem in the whole data roadmap is "where do real queries come from", and
 The asymmetry that drives every decision in this module: feedback, dashboards
 and implicit signals are all additive — they can be built whenever. **A query
 that was never written down cannot be recovered.** So recording must never be
-allowed to fail silently, and must never be allowed to break /chat either.
+allowed to break /chat, and must never be allowed to fail quietly either — a
+failed write is logged loudly, by request_id.
+
+What it deliberately does NOT do is log the payload. Writing the query to the
+logs as a fallback would put the same user content in a second store with a
+different retention policy and a different access-control list, which is
+exactly what retrieval-logging.md rules out. Queries answered while the
+database is unreachable are lost; that is the accepted price of keeping one
+copy of user content, in one place.
 """
 
 from dataclasses import dataclass
@@ -38,23 +46,6 @@ class ChatInteractionRecord:
     answer: str | None = None
     retrieved: list[dict[str, Any]] | None = None
     config: dict[str, Any] | None = None
-
-    def to_log_payload(self) -> dict[str, Any]:
-        """The record as it goes into the write-failure log line.
-
-        Carries the query **in full**. This is the one place a query is
-        allowed into the logs (ROADMAP_rag.md 4.1 keeps it out of every other
-        line): if Postgres is down for a few minutes and we did not log the
-        payload either, those queries are gone for good. Truncating here
-        would defeat the only reason the line exists.
-        """
-        return {
-            "request_id": self.request_id,
-            "query": self.query,
-            "answer": self.answer,
-            "retrieved": self.retrieved,
-            "config": self.config,
-        }
 
 
 @lru_cache(maxsize=1)
@@ -120,11 +111,9 @@ def build_retrieved(
 ) -> list[dict[str, Any]]:
     """The documents behind an answer, in post-rerank order.
 
-    ⚠️ `doc_id` is only meaningful once the doc_id chain is fixed (CSS-7 /
-    ROADMAP_rag.md 0.1). pg_retriever currently builds Article without an
-    `id`, so the default factory mints a fresh UUID on every retrieval and
-    these values cannot be joined back to knowledge_base. Written anyway so
-    this becomes correct the day CSS-7 lands, with no change here.
+    `doc_id` is the stable, source-prefixed id derived from the article link
+    (`wx_<slug>` for WeChat) since CSS-7 / PR #74, so these values join back
+    to knowledge_base and line up with the ids in the retrieval logs.
     """
     return [
         {
@@ -144,15 +133,25 @@ def record_chat_interaction(
     """Insert one row. Never raises — a failed write must not reach the user.
 
     Runs in a BackgroundTask, i.e. after the response has been sent, so a slow
-    or unavailable database costs /chat nothing. Failures go to the log with
-    the full payload attached (see `to_log_payload`).
+    or unavailable database costs /chat nothing. Failures are logged by
+    request_id only -- never with the payload, see the module docstring.
     """
     database_url = database_url or settings.DATABASE_URL
     try:
         if not database_url:
             raise RuntimeError("DATABASE_URL is not configured")
 
-        connection = psycopg2.connect(database_url)
+        # Bounded like every other connection this service opens: without it
+        # libpq waits for the OS TCP timeout (~127s on Linux) on a database
+        # host that drops packets. This path runs on every answered request
+        # and each stuck write holds an anyio threadpool slot, so an
+        # unbounded connect here is worse than on a probe.
+        connection = psycopg2.connect(
+            database_url,
+            connect_timeout=rag_config["pgvector"].get(
+                "connect_timeout_seconds", 5
+            ),
+        )
         # psycopg2's `with conn:` ends the transaction but does NOT close the
         # connection. pipeline_runs can lean on GC for that; this path runs on
         # every answered request, so it closes explicitly rather than betting
@@ -188,9 +187,15 @@ def record_chat_interaction(
         finally:
             connection.close()
     except Exception:
+        # request_id only. The payload carries the user's query, and no user
+        # content goes to the logs -- that guarantee is what makes "id only,
+        # zero privacy cost" true (docs/design/implemented/retrieval-logging.md).
+        # The cost is accepted deliberately: queries answered while the
+        # database is unreachable are lost rather than duplicated into a
+        # second store with its own retention and access control.
         logger.exception(
             "Failed to record chat interaction",
-            extra={"chat_interaction": record.to_log_payload()},
+            extra={"request_id": record.request_id},
         )
         return
 
@@ -201,7 +206,7 @@ def record_chat_interaction(
         # not vanish — it goes to the log like any other unwritten payload.
         logger.warning(
             "Duplicate chat interaction request_id, row not written",
-            extra={"chat_interaction": record.to_log_payload()},
+            extra={"request_id": record.request_id},
         )
 
 
@@ -260,7 +265,4 @@ def schedule_chat_interaction(
         )
         background_tasks.add_task(record_chat_interaction, record)
     except Exception:
-        logger.exception(
-            "Failed to schedule chat interaction recording",
-            extra={"chat_interaction": {"query": query, "answer": answer}},
-        )
+        logger.exception("Failed to schedule chat interaction recording")

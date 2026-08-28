@@ -129,6 +129,14 @@ Insights 挖真实 query 分布。
 **取舍**:放弃了「用日志挖 query 分布」这个能力。可接受,因为 `chat_interactions`
 会把这个能力以更好的形式还回来。代价是在它落地之前(CSS-17),query 分布暂时无处可查。
 
+**这条保证在 CSS-17 落地时被复核过,并且守住了。** `chat_interactions` 的写入失败时
+本来有一个很有说服力的理由破例:把完整 payload 记进日志,否则 DB 抖动那几分钟的
+query 就永久丢失了(ROADMAP_rag 4.5 原本明确要求这么做)。**结论是不破例** —— 一份
+用户内容落两个地方,正是本节整段论证要避免的事,而故障窗口内的 query 值不上再开一个
+可搜索副本。写入失败只记 `request_id`,那批 query 就是丢了。这个代价是明知的,不是
+疏漏;回归哨兵是
+`test_write_failure_never_raises_and_keeps_user_content_out_of_the_log`。
+
 ### 二、join key:把两个存储面缝起来
 
 **这个 cluster 回答:内容和链路分开存了,怎么再拼回去。**

@@ -352,13 +352,15 @@ response has been sent:
 
 This is the analysis surface for real traffic, and **not a corpus source** — never write
 generated answers back into `knowledge_base`. Recording is best-effort: a failed write is
-logged with the full payload and never reaches the user. Set `GIT_SHA` and `CORPUS_SHA256`
-in production, or those fingerprint coordinates are recorded as null. See
+logged by `request_id` and never reaches the user. The payload is deliberately not logged —
+user content lives in Postgres only, see
+[retrieval-logging.md](docs/design/implemented/retrieval-logging.md). Set `GIT_SHA` and
+`CORPUS_SHA256` in production, or those fingerprint coordinates are recorded as null. See
 [ROADMAP_rag.md](docs/roadmap/ROADMAP_rag.md) Phase 4.5.
 
-> ⚠️ `retrieved.doc_id` is only meaningful once the doc_id chain is fixed
-> ([ROADMAP_rag.md](docs/roadmap/ROADMAP_rag.md) 0.1) — until then the retriever mints a
-> fresh UUID per search, so those ids cannot be joined back to `knowledge_base`.
+`retrieved.doc_id` is the stable, source-prefixed id derived from the article link
+(`wx_<slug>` for WeChat) since CSS-7, so these rows join back to `knowledge_base` and match
+the ids in the retrieval logs.
 
 ---
 

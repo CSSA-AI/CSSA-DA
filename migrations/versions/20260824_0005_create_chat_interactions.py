@@ -10,11 +10,9 @@ refused — is a nullable ADD COLUMN later, which satisfies the hard rule in
 ROADMAP_platform.md 11.1: after this migration runs, the previous version of
 the code must still work. Adding a table always does.
 
-Note on `retrieved`: it stores `article.id`, which is only useful once the
-doc_id chain is fixed (CSS-7 / ROADMAP_rag.md 0.1). Until then pg_retriever
-mints a fresh random UUID per retrieval, so rows written before CSS-7 lands
-have unstable doc_ids and cannot be joined back to knowledge_base. The other
-five columns are unaffected.
+Note on `retrieved`: it stores `article.id`, which is the stable
+link-derived doc_id since CSS-7 (`wx_<slug>` for WeChat), so these rows join
+back to knowledge_base.
 """
 
 import sqlalchemy as sa
