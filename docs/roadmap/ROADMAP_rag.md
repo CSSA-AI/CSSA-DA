@@ -78,7 +78,14 @@ Phase 6  上线与持续调优
 
 **目标**:把现在就知道是错的东西改掉。全部不需要任何数据支撑。
 
-### 0.1 doc_id 链路是断的 🔴
+### 0.1 doc_id 链路是断的 ✅
+
+> **已修复**(CSS-7 / [PR #74](https://github.com/CSSA-AI/CSSA-DA/pull/74))。
+> 实现与下面的原计划有一处偏离:`knowledge_base` 表里**没有**稳定 id 列可 `SELECT`,
+> 所以改为由 [doc_id.py](../../app/services/rag/doc_id.py) 从 `link` **派生**
+> —— 微信文章取 `wx_<slug>`,无法识别的链接形状走确定性 hash 兜底并记 warning。
+> 效果与验收标准一致:同一 query 两次请求返回同样的 id。
+> 下面是当初的问题描述,保留备查。
 
 [pg_retriever.py](../../app/services/rag/retriever/pg_retriever.py) 的 SQL 没有
 `SELECT id`,构造 `Article` 时也没传 id;而 [article.py](../../app/schemas/article.py) 的
@@ -180,16 +187,28 @@ Recall@k 曲线(Phase 5),但现在就该调大到一个合理量级。
 
 ### 0.6 first-request 冷惩罚
 
-首个 `/chat` 比稳态慢约 **2.1 秒**。原因不是模型加载(已在 lifespan 预加载),而是
-[deps.py](../../app/api/deps.py) 的 `_build_rag_orchestrator` 用 `lru_cache` 懒构建 ——
-第一个请求才创建 PG 连接池和三个组件。
+首个 `/chat` 比稳态慢约 **2.1 秒**。原因有两个,不是一个:
+
+1. **orchestrator 懒构建** —— [deps.py](../../app/api/deps.py) 的
+   `_build_rag_orchestrator` 用 `lru_cache`,第一个请求才创建 PG 连接池和三个组件。
+2. **模型加载了,但从未推理过**(主项)—— lifespan 的 `preload_models()` 只**构造**
+   模型对象,不跑前向传播。所有惰性初始化(kernel setup、内存 arena、首次 tokenizer
+   调用)仍然由第一个真实请求承担。
+
+> 本节早先只写了原因 1,并明确把模型侧排除掉("原因不是模型加载")。实测推翻了这个
+> 判断:原因 2 才是大头,量级比原因 1 高一档。
 
 在 ECS 上这意味着:新 task 通过 `/ready` 后 ALB 立即导流,**第一个真实用户承担这
 2.1 秒**,而 `/ready` 此时已宣称 ready。
 
-- **修法**:在 lifespan 的模型预加载之后同步构建一次 orchestrator
-- **验收**:首请求与稳态延迟差 < 200ms;冷启动仍远低于 healthcheck 的 60s
-  `start-period`
+- **修法**:① lifespan 里同步构建一次 orchestrator;② 在 `preload_models()` 里对两个
+  模型各跑一次真实前向传播(`encode` / `predict`),把惰性初始化移到启动期
+- **验收**:**检索 + 重排**的首请求与稳态延迟差 < 200ms;冷启动仍远低于 healthcheck
+  的 60s `start-period`。**生成段不计入** —— 剩余差值由首次 OpenAI 连接建立主导,
+  不是我们能优化的部分,单独作为观测项、不设阈值
+- ⚠️ **预热失败必须把模型状态标成 `failed`**。模型可能加载成功却跑不了推理(不兼容的
+  LoRA adapter 只在 `predict` 时才暴露),此时 `/ready` 若仍报 200,就会把流量导给一个
+  每个请求都注定失败的实例
 - 📌 平台线 Phase 2 开工前建议先修,否则会干扰负载测试基线
 
 ### 0.7 `stream()` 绕过了链,且另建了一条
@@ -427,14 +446,16 @@ instruction 开关**;索引层不共用(harness 用 numpy,生产用 pgvector),�
   均值 2584ms,主要由 OpenAI 生成耗时主导,但需要分解到段才能优化
 - **token 计数与成本** —— 直接从 OpenAI 响应的 `response.usage` 取,三行代码,
   **不需要任何框架**
-- **检索结果** —— 现在日志里只有 `Starting RAG pipeline for query: ...` 一行,
-  **检索回了什么完全没记**。加上 `doc_id` + 分数 + rerank 前后顺序,生产环境的排障
-  能力就上来一大半,而且只记 id 不记正文,零隐私成本
+- **检索结果** —— ✅ **已实现**(CSS-15):retrieve / rerank 各记一条结构化日志,
+  含 `doc_id` + 分数 + `rank`。两条形状相同,所以 rerank 前后的顺序变化能直接对照。
+  只记 id 不记正文,零隐私成本。字段契约与查询方式见
+  [retrieval-logging.md](../design/implemented/retrieval-logging.md)
 - **reranker 的候选数敏感度** —— cross-encoder 给 50 个候选打分的延迟是硬上线约束,
   直接决定 `top_k` 上限
-- **query 不进日志**(2026-08-10 修订)—— [orchestrator.py](../../app/services/rag/orchestrator.py)
-  目前把 query 拼进日志 message(`"Starting RAG pipeline for query: %s"`),**这一句要去掉
-  query,而不是改成 `extra={"query": ...}`**。
+- **query 不进日志**(2026-08-10 修订,✅ 已实现于 CSS-15)——
+  [orchestrator.py](../../app/services/rag/orchestrator.py) 的
+  `"Starting RAG pipeline for query: %s"` 已去掉 query(而不是改成
+  `extra={"query": ...}`)。当初的决策理由保留在下面备查。
 
   原先的写法是为了用 CloudWatch Insights 挖真实 query。但 [Phase 4.5](#phase-45交互记录)
   的 `chat_interactions` 落地之后,**Postgres 才是更好的挖掘面**:能 SQL 查、能 join
@@ -563,8 +584,8 @@ CREATE TABLE chat_interactions (
 
 ### 依赖
 
-⚠️ **`retrieved` 这一列的价值依赖 [0.1](#01-doc_id-链路是断的-) 修好** —— 否则记下
-来的是一堆随机 UUID。两件事绑在一起做。
+✅ **`retrieved` 这一列依赖的 [0.1](#01-doc_id-链路是断的-) 已经修好**(CSS-7 / PR #74),
+记下来的是稳定的 `wx_<slug>`,不再是随机 UUID。这个前置条件不再是阻塞项。
 
 ### 后续扩展(全部是 nullable 加列,零风险)
 
@@ -676,18 +697,18 @@ RAG       ←  Data(仅 Phase 5 起)
 
 | Phase | 依赖 ground truth | 状态 |
 |---|---|---|
-| **0.1** doc_id 链路 + `/v1/chat` | ❌ | 🔴 未开始,**有上线截止** |
+| **0.1** doc_id 链路 + `/v1/chat` | ❌ | ✅ 已完成 —— doc_id (CSS-7 #74)、`/v1/chat` (#73) |
 | **0.2** 合并 evaluator | ❌ | 🔴 未开始 |
 | **0.3** `top_k` 结构性 | ❌ | 🔴 未开始 |
 | **0.4** 换 reranker | ❌ | 🔴 未开始 —— **✅ 已定进 v1**(待 Phase 5 验证) |
 | **0.5** 随机负例 | ❌ | 🟡 训练脚本暂不要跑 |
-| **0.6** 冷惩罚 | ❌ | 🔴 未开始 |
+| **0.6** 冷惩罚 | ❌ | ✅ 已完成 —— CSS-14 / PR #76 |
 | **0.7** `stream()` 双路径 | ❌ | 🔴 未开始 |
 | **0.8** 输入体积无上限 | ❌ | 🔴 未开始 —— **v1 必做**,两行 |
 | **Phase 1** 评估工具 | ❌ | ⬜ 未开始 |
 | **Phase 2** 可插拔方案 | ❌ | ⬜ 未开始 —— **价值最高** |
 | **Phase 3** 生成器行为 | ❌ | ⬜ 未开始 |
-| **Phase 4** 可观测性 | ❌ | ⬜ 未开始 |
+| **Phase 4** 可观测性 | ❌ | 🟡 部分完成 —— 检索日志已落(CSS-15);分阶段延迟、token / 成本未做 |
 | **Phase 4.5** 交互记录 | ❌ | ⬜ 未开始 —— **上线即开始产生真实 query** |
 | **Phase 5** 跑实验 | ✅ | ⛔ 卡数据线 Phase 2 |
 | **Phase 6** 上线调优 | ✅ | ⬜ 未开始 |

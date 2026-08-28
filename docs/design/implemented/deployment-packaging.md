@@ -241,8 +241,13 @@ root。解法是建一个专用普通用户 `appuser`,用 `USER appuser` 运行,
 
 **模型预先烤入(item 2)。** 把固定 revision 的模型在 build 阶段就下载进
 `/models`(`MODEL_DIR`),运行时 `local_files_only` 从本地加载。好处:**第一个用户
-请求不必干等模型下载**。代价:镜像更大(模型是硬成本)。因为加载在 FastAPI
-lifespan 里、**阻塞启动**,所以「`/health` 能应答」就意味着"模型已就绪、可服务"。
+请求不必干等模型下载**。代价:镜像更大(模型是硬成本)。加载发生在 FastAPI lifespan
+里、阻塞启动,所以 `/health` 能应答时模型加载已经跑完了。
+
+但**不能**由此推出「`/health` 能应答 = 模型已就绪、可服务」:lifespan 里的 preload
+失败只记日志、不中断启动(见 `app/main.py`),`/health` 照样返回 200。模型是否可用由
+`/ready` 表达 —— 这正是 liveness 与 readiness 分开的意义:模型挂了不该重启容器,该把
+实例从流量里摘掉。
 
 ### 四、torch 为什么特殊(粘合:依赖 × 镜像大小)
 

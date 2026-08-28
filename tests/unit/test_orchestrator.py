@@ -110,6 +110,19 @@ class TestRAGOrchestrator(unittest.TestCase):
 
         self.retriever.close.assert_called_once_with()
 
+    def test_start_log_does_not_contain_the_query_text(self):
+        # CSS-15: query text must never reach the logs -- request_id is the
+        # join key back to the query, stored in chat_interactions instead.
+        secret_query = "secret student query text"
+        with self.assertLogs(
+            "app.services.rag.orchestrator", level="INFO"
+        ) as captured:
+            self.orchestrator.run(secret_query)
+
+        assert not any(
+            secret_query in message for message in captured.output
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

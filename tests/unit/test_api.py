@@ -13,7 +13,10 @@ from app.services.rag.errors import (
     GenerationUnavailableError,
     RetrievalUnavailableError,
 )
-from app.services.rag.model_registry import ModelRegistryStatus, model_registry
+from app.services.rag.model_registry import (
+    ModelRegistryStatus,
+    model_registry,
+)
 from app.services.system_status import (
     PipelineMetadataStatus,
     SystemStatus,
@@ -100,26 +103,62 @@ def test_ready_returns_200_when_database_and_data_are_ready(monkeypatch):
     }
 
 
-def test_lifespan_preloads_models(monkeypatch):
+def test_lifespan_preloads_models_and_orchestrator(monkeypatch):
     preload_models = MagicMock()
+    preload_rag_orchestrator = MagicMock()
+
     monkeypatch.setattr(
         model_registry,
         "preload_models",
         preload_models,
+    )
+    monkeypatch.setattr(
+        "app.main.preload_rag_orchestrator",
+        preload_rag_orchestrator,
+    )
+
+    with TestClient(app) as test_client:
+        preload_models.assert_called_once_with()
+        preload_rag_orchestrator.assert_called_once_with()
+
+        response = test_client.get("/health")
+
+    assert response.status_code == 200
+
+
+def test_model_preload_failure_skips_orchestrator_but_keeps_health(monkeypatch):
+    monkeypatch.setattr(
+        model_registry,
+        "preload_models",
+        MagicMock(side_effect=RuntimeError("model failed")),
+    )
+    # Also a stub because leaving it real would open a psycopg2 pool from a
+    # unit test -- but the point of this test is that it is never called.
+    preload_rag_orchestrator = MagicMock()
+    monkeypatch.setattr(
+        "app.main.preload_rag_orchestrator",
+        preload_rag_orchestrator,
     )
 
     with TestClient(app) as test_client:
         response = test_client.get("/health")
 
     assert response.status_code == 200
-    preload_models.assert_called_once_with()
+    preload_rag_orchestrator.assert_not_called()
 
 
-def test_model_preload_failure_does_not_break_health(monkeypatch):
+def test_orchestrator_preload_failure_does_not_break_health(monkeypatch):
+    monkeypatch.setattr(
+        "app.main.preload_rag_orchestrator",
+        MagicMock(side_effect=RuntimeError("orchestrator failed")),
+    )
+    # Without this the lifespan really loads both models -- ~600MB from the
+    # Hub on CI, where MODEL_DIR is unset -- and leaves the module-level
+    # registry singleton in "ready" state for every later test.
     monkeypatch.setattr(
         model_registry,
         "preload_models",
-        MagicMock(side_effect=RuntimeError("model failed")),
+        MagicMock(),
     )
 
     with TestClient(app) as test_client:

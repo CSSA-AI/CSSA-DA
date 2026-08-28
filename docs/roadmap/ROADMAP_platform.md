@@ -778,7 +778,7 @@ ECR、Secrets、迁移编排）与模型选型完全无关，不需要等待。�
 
 | # | 耦合点 | 平台侧要做什么 | 必须在何时收敛 |
 |---|---|---|---|
-| 1 | **`doc_id` 链路修复** | `pg_retriever` 补 `SELECT id` 并传到 `SearchResult`。这**改变 `/chat` 响应体**——当前每次响应都在吐一个随机 UUID（`Article.id` 是 `default_factory=uuid4`），是公开契约变更 | ⏰ **上线、前端接入之前**。趁没有真实客户端，改起来零成本 |
+| 1 | **`doc_id` 链路修复** | ✅ **已完成**（CSS-7 / PR #74）。`sources[].article.id` 现在是从 `link` 派生的稳定 id（微信为 `wx_<slug>`），不再是每次响应都变的随机 UUID。这是公开契约变更，已赶在前端接入前落地 | ✅ 已收敛 |
 | 2 | **向量维度** | `VECTOR(384)` 写死。若选型结论是 1024 维模型，需 ALTER + 全库重嵌入重导 | ⏰ **建 RDS 前**。现在 DB 是一次性容器，迁移=删了重来；上生产后要变成停机窗口+回滚方案，成本差一个数量级 |
 | 3 | **模型文件大小** | 模型烤入镜像。若换成 bge-m3 + bge-reranker-v2-m3（约各 2.2GB），镜像从 3.35GB 冲到 ~7GB，**Phase 1 的验收基线（冷启动 7.5s / idle 944MiB）全部要重测**，并可能推翻第 4.1 项的「烤入镜像」方案 | ⏰ **写 ECS task definition 前** |
 | 4 | **`top_k`** | 现 retriever `top_k=5`、reranker `top_k=3`，评估要求 deep pool（50）。5→50 让每请求 CPU 差 10 倍 | ⏰ **第 13/14 项（worker/扩容策略、资源基线）定稿前** |
@@ -1023,15 +1023,39 @@ git 历史里 —— 删掉文件也没用。
 uvicorn 关闭日志四步完整（`Shutting down` → `Waiting for application shutdown` →
 `Application shutdown complete` → `Finished server process`）。
 
-**first-request 冷惩罚（待修）**：首个 `/chat` 比稳态慢约 **2.1 秒**。原因不是模型
-加载（模型已在 lifespan 预加载），而是 `app/api/deps.py` 的
-`_build_rag_orchestrator` 用 `lru_cache` 懒构建——第一个请求才创建 PG 连接池和三个
-组件。在 ECS 上这意味着：新 task 通过 `/ready` 后 ALB 立即导流，**第一个真实用户
-承担这 2.1 秒**，而 `/ready` 此时已宣称 ready。
+**first-request 冷惩罚（已修复，CSS-14 / PR #76）**：首个 `/chat` 比稳态慢约 **2.1 秒**。原因有两个：
+（1）`app/api/deps.py` 的 `_build_rag_orchestrator` 用 `lru_cache` 懒构建——第一个请求
+才创建 PG 连接池和三个组件；（2）**模型加载了但从未推理过**——lifespan 的
+`preload_models()` 只构造模型对象，不跑前向传播，惰性初始化仍由第一个真实请求承担。
+在 ECS 上这意味着：新 task 通过 `/ready` 后 ALB 立即导流，**第一个真实用户承担这
+2.1 秒**，而 `/ready` 此时已宣称 ready。
 
-建议修法：在 lifespan 的模型预加载之后同步构建一次 orchestrator，把这段成本移到启动
-期（冷启动约 7.5s → 9.6s，仍远低于 `Dockerfile.api` 中 healthcheck 的 60s
-`start-period`）。这样 `/ready` 的语义才真正等于「能以全速服务」。
+> 本节早先写的是「原因不是模型加载」，只列了 (1)。实测推翻了这个判断：(2) 才是主项。
+> 隔离测量（同一进程内，预热前 vs 预热后，embedding `encode` + reranker `predict`
+> 的首次调用惩罚）：
+
+| | 未预热 | 已预热 |
+|---|---|---|
+| run 1 | 570.4ms | 36.9ms |
+| run 2 | 511.8ms | 34.9ms |
+| run 3 | 116.4ms | 35.9ms |
+
+> 跨度同样重要：未预热时惩罚在 116–570ms 之间摆动（5 倍），单次幸运的测量可能通过
+> 阈值而线上照样翻车；预热后是稳定的 ~36ms。上表在 macOS 上测得，绝对值不迁移到
+> Linux 容器，只有「预热前后」的对比可迁移。
+
+修法（已落地）：lifespan 里同步构建一次 orchestrator，**并在 `preload_models()` 里对
+两个模型各跑一次真实前向传播**，把这两段成本都移到启动期。这样 `/ready` 的语义才真正
+等于「能以全速服务」。设计细节见
+[startup-and-readiness.md](../design/implemented/startup-and-readiness.md)。
+
+⚠️ 预热失败必须把模型状态标成 `failed`——模型可能加载成功却跑不了推理（不兼容的 LoRA
+adapter 只在 `predict` 时暴露），此时 `/ready` 若仍报 200，会把流量导给一个必然失败的
+实例。
+
+冷启动的代价：预热大约增加 2 秒。注意本节记录的 7.5s 基线与另一次容器内实测的
+**16.461s** 相差一倍以上，**两者的测量机器不同且未对齐**——写 ECS task 规格前需要在
+同一硬件上重测，不要直接引用其中任何一个数字。
 
 ### Phase 2：安全的 AWS API 基础设施
 
@@ -1312,8 +1336,9 @@ Phase 1 的「收尾验证记录」）：
 | First-request latency | ✅ 已测：首个 `/chat` 4662ms，稳态 2584ms |
 
 因此 Phase 2（AWS 基础设施）现在可以开工。进入 Phase 2 前建议先修掉 Phase 1 记录
-中的 **first-request 冷惩罚**（在 lifespan 预热 orchestrator），否则 `/ready` 通过
-后仍有约 2.1 秒的首请求代价，会干扰后续负载测试的基线。
+中的 **first-request 冷惩罚**（在 lifespan 预热 orchestrator，**并对两个模型各跑一次
+前向传播**），否则 `/ready` 通过后仍有约 2.1 秒的首请求代价，会干扰后续负载测试的
+基线。
 
 **与 Phase 2 并线的第二条线**：第 18 项（检索质量评估与模型选型）现在开工，它对
 Phase 2 的依赖已被设计为零（评估 harness 直接读语料快照，不连 DB）。但其中 4 个

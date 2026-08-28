@@ -6,6 +6,7 @@ from psycopg2.pool import PoolError
 
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
+from app.services.rag.doc_id import derive_doc_id
 from app.services.rag.errors import RetrievalUnavailableError
 from app.services.rag.model_registry import model_registry
 from app.services.rag.retriever.pg_retriever import PGVectorRetriever
@@ -77,9 +78,61 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
             minconn=1,
             maxconn=5,
             dsn="postgresql://test:test@localhost:5432/testdb",
+            connect_timeout=5,
         )
         self.assertIs(retriever.model, self.shared_embedding_model)
         self.mock_get_embedding_model.assert_called_once_with()
+
+    @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
+    @patch("app.services.rag.retriever.pg_retriever.ThreadedConnectionPool")
+    @patch("app.services.rag.retriever.pg_retriever.rag_config", {
+        "retriever": {
+            "embedding_model": "fake-embedding-model",
+            "top_k": 5,
+        },
+        "pgvector": {
+            "table_name": "knowledge_base",
+            "connect_timeout_seconds": 9,
+        },
+    })
+    def test_init_uses_configured_connect_timeout(
+        self,
+        mock_pool_class,
+        mock_st,
+    ):
+        mock_pool_class.return_value = MagicMock()
+
+        PGVectorRetriever(
+            database_url="postgresql://test:test@localhost:5432/testdb"
+        )
+
+        _, kwargs = mock_pool_class.call_args
+        self.assertEqual(kwargs["connect_timeout"], 9)
+
+    @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
+    @patch("app.services.rag.retriever.pg_retriever.ThreadedConnectionPool")
+    @patch("app.services.rag.retriever.pg_retriever.rag_config", {
+        "retriever": {
+            "embedding_model": "fake-embedding-model",
+            "top_k": 5,
+        },
+        "pgvector": {
+            "table_name": "knowledge_base",
+            "connect_timeout_seconds": 0,
+        },
+    })
+    def test_init_rejects_non_positive_connect_timeout(
+        self,
+        mock_pool_class,
+        mock_st,
+    ):
+        # 0 means "wait forever" to libpq -- exactly the hang this guards.
+        with self.assertRaises(ValueError):
+            PGVectorRetriever(
+                database_url="postgresql://test:test@localhost:5432/testdb"
+            )
+
+        mock_pool_class.assert_not_called()
 
     @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
     @patch("app.services.rag.retriever.pg_retriever.ThreadedConnectionPool")
@@ -220,10 +273,23 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
         self.assertEqual(results[0].article.questions, ["How to apply for a student visa?"])
         self.assertEqual(results[0].score, -0.12)
         self.assertEqual(results[0].rank, 1)
+        self.assertEqual(
+            results[0].article.id,
+            derive_doc_id(
+                link="https://example.com/student-visa",
+                text="Student visa application information.",
+            ),
+        )
 
         self.assertEqual(results[1].article.tags, [])
         self.assertEqual(results[1].score, -0.25)
         self.assertEqual(results[1].rank, 2)
+        # This row has no link -- id must still be present and deterministic,
+        # not the random uuid.uuid4() default (see CSS-7).
+        self.assertEqual(
+            results[1].article.id,
+            derive_doc_id(link=None, text="485 visa requirement details."),
+        )
 
         mock_cursor.execute.assert_called_once()
         _, params = mock_cursor.execute.call_args[0]
@@ -239,6 +305,14 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
         )
         mock_conn.rollback.assert_called_once_with()
         mock_pool.putconn.assert_called_once_with(mock_conn, close=False)
+
+        # Same query, second call: ids must be identical to the first call so
+        # eval metrics and logging can key off them (see CSS-7).
+        second_call_results = retriever.search("student visa")
+        self.assertEqual(
+            [r.article.id for r in results],
+            [r.article.id for r in second_call_results],
+        )
 
     @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
     @patch("app.services.rag.retriever.pg_retriever.ThreadedConnectionPool")

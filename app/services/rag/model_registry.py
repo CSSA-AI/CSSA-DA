@@ -82,14 +82,33 @@ class ModelRegistry:
 
     def preload_models(self) -> None:
         errors = []
-        for get_model in (
-            self.get_embedding_model,
-            self.get_reranker_model,
-        ):
-            try:
-                get_model()
-            except Exception as error:
-                errors.append(error)
+        # The warm-up forward pass is part of being ready, not an extra: a
+        # model can load and still be unable to infer (an incompatible LoRA
+        # adapter only fails at predict time). /ready gates on status(), so a
+        # warm-up failure has to mark the model failed -- otherwise the
+        # instance advertises itself as healthy and fails every request.
+        #
+        # The failure latches for the life of the process: the model object is
+        # already cached, so no later call re-runs the warm-up. Dropping the
+        # cache to allow a retry would be worse -- get_*_model() sets "ready"
+        # after loading and never warms up, so the light would flip back to
+        # green on a model that still cannot infer.
+        try:
+            self.get_embedding_model().encode(
+                ["warmup"],
+                normalize_embeddings=True,
+            )
+        except Exception as error:
+            with self._embedding_lock:
+                self._embedding_state = "failed"
+            errors.append(error)
+
+        try:
+            self.get_reranker_model().predict([("warmup", "warmup")])
+        except Exception as error:
+            with self._reranker_lock:
+                self._reranker_state = "failed"
+            errors.append(error)
 
         if errors:
             raise ModelPreloadError(
