@@ -187,16 +187,28 @@ Recall@k 曲线(Phase 5),但现在就该调大到一个合理量级。
 
 ### 0.6 first-request 冷惩罚
 
-首个 `/chat` 比稳态慢约 **2.1 秒**。原因不是模型加载(已在 lifespan 预加载),而是
-[deps.py](../../app/api/deps.py) 的 `_build_rag_orchestrator` 用 `lru_cache` 懒构建 ——
-第一个请求才创建 PG 连接池和三个组件。
+首个 `/chat` 比稳态慢约 **2.1 秒**。原因有两个,不是一个:
+
+1. **orchestrator 懒构建** —— [deps.py](../../app/api/deps.py) 的
+   `_build_rag_orchestrator` 用 `lru_cache`,第一个请求才创建 PG 连接池和三个组件。
+2. **模型加载了,但从未推理过**(主项)—— lifespan 的 `preload_models()` 只**构造**
+   模型对象,不跑前向传播。所有惰性初始化(kernel setup、内存 arena、首次 tokenizer
+   调用)仍然由第一个真实请求承担。
+
+> 本节早先只写了原因 1,并明确把模型侧排除掉("原因不是模型加载")。实测推翻了这个
+> 判断:原因 2 才是大头,量级比原因 1 高一档。
 
 在 ECS 上这意味着:新 task 通过 `/ready` 后 ALB 立即导流,**第一个真实用户承担这
 2.1 秒**,而 `/ready` 此时已宣称 ready。
 
-- **修法**:在 lifespan 的模型预加载之后同步构建一次 orchestrator
-- **验收**:首请求与稳态延迟差 < 200ms;冷启动仍远低于 healthcheck 的 60s
-  `start-period`
+- **修法**:① lifespan 里同步构建一次 orchestrator;② 在 `preload_models()` 里对两个
+  模型各跑一次真实前向传播(`encode` / `predict`),把惰性初始化移到启动期
+- **验收**:**检索 + 重排**的首请求与稳态延迟差 < 200ms;冷启动仍远低于 healthcheck
+  的 60s `start-period`。**生成段不计入** —— 剩余差值由首次 OpenAI 连接建立主导,
+  不是我们能优化的部分,单独作为观测项、不设阈值
+- ⚠️ **预热失败必须把模型状态标成 `failed`**。模型可能加载成功却跑不了推理(不兼容的
+  LoRA adapter 只在 `predict` 时才暴露),此时 `/ready` 若仍报 200,就会把流量导给一个
+  每个请求都注定失败的实例
 - 📌 平台线 Phase 2 开工前建议先修,否则会干扰负载测试基线
 
 ### 0.7 `stream()` 绕过了链,且另建了一条
