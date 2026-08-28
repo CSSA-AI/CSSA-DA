@@ -78,9 +78,61 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
             minconn=1,
             maxconn=5,
             dsn="postgresql://test:test@localhost:5432/testdb",
+            connect_timeout=5,
         )
         self.assertIs(retriever.model, self.shared_embedding_model)
         self.mock_get_embedding_model.assert_called_once_with()
+
+    @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
+    @patch("app.services.rag.retriever.pg_retriever.ThreadedConnectionPool")
+    @patch("app.services.rag.retriever.pg_retriever.rag_config", {
+        "retriever": {
+            "embedding_model": "fake-embedding-model",
+            "top_k": 5,
+        },
+        "pgvector": {
+            "table_name": "knowledge_base",
+            "connect_timeout_seconds": 9,
+        },
+    })
+    def test_init_uses_configured_connect_timeout(
+        self,
+        mock_pool_class,
+        mock_st,
+    ):
+        mock_pool_class.return_value = MagicMock()
+
+        PGVectorRetriever(
+            database_url="postgresql://test:test@localhost:5432/testdb"
+        )
+
+        _, kwargs = mock_pool_class.call_args
+        self.assertEqual(kwargs["connect_timeout"], 9)
+
+    @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
+    @patch("app.services.rag.retriever.pg_retriever.ThreadedConnectionPool")
+    @patch("app.services.rag.retriever.pg_retriever.rag_config", {
+        "retriever": {
+            "embedding_model": "fake-embedding-model",
+            "top_k": 5,
+        },
+        "pgvector": {
+            "table_name": "knowledge_base",
+            "connect_timeout_seconds": 0,
+        },
+    })
+    def test_init_rejects_non_positive_connect_timeout(
+        self,
+        mock_pool_class,
+        mock_st,
+    ):
+        # 0 means "wait forever" to libpq -- exactly the hang this guards.
+        with self.assertRaises(ValueError):
+            PGVectorRetriever(
+                database_url="postgresql://test:test@localhost:5432/testdb"
+            )
+
+        mock_pool_class.assert_not_called()
 
     @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
     @patch("app.services.rag.retriever.pg_retriever.ThreadedConnectionPool")

@@ -14,6 +14,10 @@ pgvector:
   table_name: knowledge_base
   pool_min_size: 1
   pool_max_size: 5
+  # Bounds a TCP connect to Postgres. Without it libpq waits for the OS TCP
+  # timeout (~127s on Linux), which a packet-dropping DB host would turn into
+  # a stalled lifespan startup and a container restart loop.
+  connect_timeout_seconds: 5
 
 generator:
   provider: openai
