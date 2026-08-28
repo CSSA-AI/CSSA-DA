@@ -68,6 +68,33 @@ def test_preload_models_loads_both_models(monkeypatch):
     get_reranker_model.assert_called_once_with()
 
 
+def test_preload_models_warms_embedding_and_reranker(monkeypatch):
+    registry = model_registry.ModelRegistry()
+    embedding_model = MagicMock()
+    reranker_model = MagicMock()
+    monkeypatch.setattr(
+        registry,
+        "get_embedding_model",
+        MagicMock(return_value=embedding_model),
+    )
+    monkeypatch.setattr(
+        registry,
+        "get_reranker_model",
+        MagicMock(return_value=reranker_model),
+    )
+
+    registry.preload_models()
+
+    # The warm-up has to match how the models are really called, or it warms
+    # up a code path the first request will not take: see _encode_query and
+    # CrossEncoderReranker.rerank.
+    embedding_model.encode.assert_called_once_with(
+        ["warmup"],
+        normalize_embeddings=True,
+    )
+    reranker_model.predict.assert_called_once_with([("warmup", "warmup")])
+
+
 def test_preload_models_records_failure_and_tries_both_models(monkeypatch):
     registry = model_registry.ModelRegistry()
     monkeypatch.setattr(
