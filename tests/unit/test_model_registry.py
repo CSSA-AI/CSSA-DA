@@ -47,8 +47,10 @@ def test_reranker_model_is_loaded_once(monkeypatch):
 
 def test_preload_models_loads_both_models(monkeypatch):
     registry = model_registry.ModelRegistry()
-    get_embedding_model = MagicMock(return_value=object())
-    get_reranker_model = MagicMock(return_value=object())
+    # MagicMock, not object(): preload_models runs a real warm-up call on
+    # whatever it gets back, so the double has to support encode/predict.
+    get_embedding_model = MagicMock(return_value=MagicMock())
+    get_reranker_model = MagicMock(return_value=MagicMock())
     monkeypatch.setattr(
         registry,
         "get_embedding_model",
@@ -73,7 +75,7 @@ def test_preload_models_records_failure_and_tries_both_models(monkeypatch):
         "_load_embedding_model",
         MagicMock(side_effect=RuntimeError("embedding failed")),
     )
-    reranker_model = object()
+    reranker_model = MagicMock()
     monkeypatch.setattr(
         registry,
         "_load_reranker_model",
@@ -92,6 +94,35 @@ def test_preload_models_records_failure_and_tries_both_models(monkeypatch):
     assert status.embedding == "failed"
     assert status.reranker == "ready"
     assert registry.get_reranker_model() is reranker_model
+
+
+def test_preload_models_marks_model_failed_when_warmup_fails(monkeypatch):
+    registry = model_registry.ModelRegistry()
+    reranker_model = MagicMock()
+    # Loads fine, cannot infer -- what an incompatible LoRA adapter looks like.
+    reranker_model.predict.side_effect = RuntimeError("adapter is incompatible")
+    monkeypatch.setattr(
+        registry,
+        "get_embedding_model",
+        MagicMock(return_value=MagicMock()),
+    )
+    monkeypatch.setattr(
+        registry,
+        "get_reranker_model",
+        MagicMock(return_value=reranker_model),
+    )
+
+    try:
+        registry.preload_models()
+    except model_registry.ModelPreloadError:
+        pass
+    else:
+        raise AssertionError("ModelPreloadError was not raised")
+
+    status = registry.status()
+    assert status.reranker == "failed"
+    assert status.state == "failed"
+    assert status.is_ready is False
 
 
 def test_load_embedding_model_uses_local_directory(tmp_path, monkeypatch):
