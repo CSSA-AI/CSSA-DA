@@ -607,30 +607,28 @@ Wait for healthy targets
 
 不满足这条，回滚就成了「代码退回去了但数据库回不去」，服务反而更坏。
 
-**安全的改动**（可以单次部署）：
+而且这不只关乎回滚。滚动部署期间一部分 task 已经换成新镜像、另一部分还是旧的，
+**每一次正常部署都必然有几分钟旧代码跑在新表结构上** —— 出不出事都一样。
 
-- 加表 —— 旧代码不认识它，无影响
-- 加**可空**列，或带默认值的列
-- 加索引
-
-**危险的改动**（必须拆成两次部署）：
-
-| 想做的事 | 部署 1 | 部署 2 |
-|---|---|---|
-| 删列 | 发一版代码，不再读写该列（列仍在） | 确认稳定后，migration 删列 |
-| 改列类型 | 加新列、双写、代码读新列 | 删旧列 |
-| 加非空列 | 先加可空列 + 回填 | 再加 NOT NULL 约束 |
-| 重命名列 | 等价于「加新列 + 删旧列」，同上 | |
-
-中间任何一步回滚，代码和数据库都对得上。
+这个模式叫 **expand/contract**（也叫 parallel change），它给的保证是 **N-1**：
+只承诺兼容上一版，退两版不保证。
 
 **这条约束比部署自动化本身更重要** —— 自动化只是让部署更快，而这条决定了出事时
 救不救得回来。
 
+> **操作细则写在 [CONTRIBUTING.md](../../CONTRIBUTING.md#database-migrations)** ——
+> 安全 / 危险两类改动的清单、两步走每一步做什么、`downgrade()` 为什么不能当退路。
+> 那里是要动手写 migration 的人真会看的地方；本节只保留「为什么」。
+>
+> 同一节还记了一条本节不覆盖的轴：**锁**。那份分类只看逻辑兼容性（旧代码认不
+> 认识这个列），而 migration 持锁期间后续查询会排队，能把服务拖死 —— 典型的是
+> `CREATE INDEX` 会阻塞写入。当前表规模（千行级）下不咬人，任何一张表到十万行
+> 量级时要重新评估。
+
 > 落到眼前的例子：`chat_interactions` 建表（[ROADMAP_rag.md](ROADMAP_rag.md)
 > Phase 4.5）是**加表**，安全，单次部署即可；后续那些 `feedback` / `user_id` /
-> `token_usage` 扩展列都是**可空加列**，同样安全。这是当初把它们设计成 nullable
-> 的另一个理由。
+> `session_id` / `token_usage` / `refused` 扩展列都是**可空加列**，同样安全。
+> 这是当初把它们设计成 nullable 的另一个理由。
 
 ### 12. 设计 outbound networking
 
@@ -721,10 +719,14 @@ LangChain/LangSmith tracing、metadata 和隐私策略继续延后到核心系�
 
 ### 16. 精细化限流（按用户维度）
 
-> ⏰ **2026-08-09：本项的到期条件已满足。** 原文写的是「等**前端和用户体系确定后**
-> 再做」—— 前端团队已存在、登录系统已有。**若[第 19 项](#19-前端接入的安全边界2026-08-09-新增v1-阻塞项)
-> 决定走 BFF，本项从「中优先级/延后」升级为 v1 必做**：所有请求都从 BFF 的同一个
-> IP 发出，`get_remote_address` 会失去区分度，全体用户挤在一份 `10/minute` 里。
+> ⏰ **2026-08-10：本项已升级为 v1 必做。** 原文写的是「等**前端和用户体系确定后**
+> 再做」—— 前端已确认是 Django + 已有登录，且[第 19.7 项](#197--已确认走-bff2026-08-10)
+> 已选定走 BFF。BFF 之后所有请求都从同一个 IP 发出，`get_remote_address` 失去区分度，
+> 全体用户会挤在一份 `10/minute` 里。
+>
+> **实现要点**：`key_func` 改读 `X-User-Id`；**该 header 缺失时回退到 IP**，否则在
+> BFF 上线之前所有请求会挤进同一个桶，比现状更糟。不需要验证 header 真伪 —— 只有
+> 持 `CHAT_API_KEY` 的 BFF 能进门，这是标准的 trusted proxy 做法。
 
 第 1 项已经上了**按 IP、`10/minute` 的止血型限流**（方向 C）。它够挡住脚本
 狂刷，但按 IP 计数在校园 WiFi / 宿舍 NAT 下会**多人共享一份额度**，可能误伤
@@ -774,13 +776,13 @@ ECR、Secrets、迁移编排）与模型选型完全无关，不需要等待。�
 
 | # | 耦合点 | 平台侧要做什么 | 必须在何时收敛 |
 |---|---|---|---|
-| 1 | **`doc_id` 链路修复** | `pg_retriever` 补 `SELECT id` 并传到 `SearchResult`。这**改变 `/chat` 响应体**——当前每次响应都在吐一个随机 UUID（`Article.id` 是 `default_factory=uuid4`），是公开契约变更 | ⏰ **上线、前端接入之前**。趁没有真实客户端，改起来零成本 |
+| 1 | **`doc_id` 链路修复** | ✅ **已完成**（CSS-7 / PR #74）。`sources[].article.id` 现在是从 `link` 派生的稳定 id（微信为 `wx_<slug>`），不再是每次响应都变的随机 UUID。这是公开契约变更，已赶在前端接入前落地 | ✅ 已收敛 |
 | 2 | **向量维度** | `VECTOR(384)` 写死。若选型结论是 1024 维模型，需 ALTER + 全库重嵌入重导 | ⏰ **建 RDS 前**。现在 DB 是一次性容器，迁移=删了重来；上生产后要变成停机窗口+回滚方案，成本差一个数量级 |
 | 3 | **模型文件大小** | 模型烤入镜像。若换成 bge-m3 + bge-reranker-v2-m3（约各 2.2GB），镜像从 3.35GB 冲到 ~7GB，**Phase 1 的验收基线（冷启动 7.5s / idle 944MiB）全部要重测**，并可能推翻第 4.1 项的「烤入镜像」方案 | ⏰ **写 ECS task definition 前** |
-| 4 | **`top_k`** | 现 retriever `top_k=5`、reranker `top_k=3`，评估要求 deep pool（50）。5→50 让每请求 CPU 差 10 倍 | ⏰ **第 13/14 项（worker/扩容策略、资源基线）定稿前** |
+| 4 | **`top_k`** | retriever `top_k=30`、reranker `top_k=5`（2026-08-25 由 5/3 调大，见 [ROADMAP_rag 0.3](ROADMAP_rag.md#03-top_k-的结构性问题)），评估要求 deep pool（50）。实测 rerank 单段耗时随候选数近似线性，且**核数越少越接近线性**：14 线程 5→30 为 4.9×，2 线程为 6.2×。⚠️ **2 线程下光 reranker 就 p50 5.8s / p95 8.4s**（不含 OpenAI 往返）—— **task 规格可能倒着卡住 `top_k`**，不是只有 `top_k` 影响规格 | ⏰ **第 13/14 项（worker/扩容策略、资源基线）定稿前** |
 | 5 | **PII 脱敏 stage** | 小助手 1:1 问答是求助场景的私密对话，含真名/微信号/学号/手机号。**脱敏 + 个人化内容筛选必须是 pipeline 的一个 stage，在入库之前执行** —— 放到下游就等于原始 PII 已经进了 Postgres 和 S3 | Phase 3 生产 Pipeline 设计时 |
 | 6 | **`held_out_for_eval` 排除** | eval 划走的对话不能回流进语料。标记落在源头，**由 ingest 阶段强制排除** —— 否则下次重跑管线会静默污染 eval set，且**没有任何报错** | 同上 |
-| 7 | **query 结构化日志 + 保留期** | `orchestrator.py` 目前把 query 拼进日志 message，改为 `extra={"query": ...}`，便于 CloudWatch Insights 提取；并设定 log group 保留期限（当前无限期）。**已确认可用于分析，将在隐私声明中告知** | 与第 15 项一并做 |
+| 7 | **query 不进日志 + log group 保留期** | 改口径（2026-08-10）：`orchestrator.py` 那句 `"Starting RAG pipeline for query: %s"` **去掉 query**；日志只记 `request_id` + `doc_id` + `score` + `rank`，query / answer 落 [ROADMAP_rag.md](ROADMAP_rag.md) Phase 4.5 的 `chat_interactions`，`request_id` 作 join key。原方案「改成 `extra={"query": ...}` 给 CloudWatch Insights 挖」在 4.5 落地后已被取代 —— Postgres 能 SQL 查、能 join `knowledge_base`、带 `config` 指纹、反馈可回填，而两边都写会让同一份用户内容有两套保留期、两个访问控制面。仍需设定 log group 保留期限（当前无限期）。**已确认可用于分析，将在隐私声明中告知** | 与第 15 项一并做 |
 
 > **一个可选的降级方案**：若不希望本线受任何阻塞，可先只做 **reranker 的替换** ——
 > 它不动 schema、不动向量维度、不需要重嵌入，只是换镜像里的模型文件。而当前
@@ -827,7 +829,7 @@ ECR、Secrets、迁移编排）与模型选型完全无关，不需要等待。�
 > 诚实评估：有登录 + 纯内测 + 用户是熟人，**实际泄漏概率确实低**。对内测阶段这个
 > 风险水平可能已经可以接受 —— 前提是损失封顶（19.4）且前端仓库不公开。
 
-#### 19.3 两条路径
+#### 19.3 两条路径（✅ 已选定 BFF，见 19.7）
 
 | 方案 | 成本 | 风险 |
 |---|---|---|
@@ -852,8 +854,13 @@ ECR、Secrets、迁移编排）与模型选型完全无关，不需要等待。�
 
 #### 19.4 不管选哪条都要做（v1 必做）
 
-- [ ] **OpenAI 后台设硬性支出上限** —— 兜底。不管前面漏成什么样，当月最多花这么多
-- [ ] **加全局限流** —— 现在只有 per-IP，再加一层「全站每天 N 次」。换 IP 绕不过全局计数
+- [ ] **OpenAI 后台设硬性支出上限** —— 兜底。不管前面漏成什么样，当月最多花这么多。
+      操作步骤见 [docs/openai-spend-cap.md](../openai-spend-cap.md)，需账号管理员在
+      控制台手动完成后勾掉本项
+- [x] **加全局限流** —— 现在只有 per-IP，再加一层「全站每天 N 次」。换 IP 绕不过全局计数。
+      ✅ 已实现：`/chat` 上叠加常量 key 的第二层 slowapi 限流，`CHAT_GLOBAL_RATE_LIMIT`
+      默认 `500/day`（CSS-10，实现细节与不变量见
+      [docs/design/implemented/global-rate-limit.md](../design/implemented/global-rate-limit.md)）
 - [ ] **限制 `/chat` 输入体积** —— 见 19.5
 - [ ] **确认前端仓库不公开，或 key 不进仓库**
 
@@ -892,13 +899,62 @@ key，和 `ops/smoke_test_api.py` / CI 用的分开。
 它**不解决「会不会泄漏」，只解决「泄漏之后能不能止损」** —— 但成本极低：吊销网页那把
 不影响内部工具，日志里也能区分流量来源。
 
-#### 19.7 待确认（去问前端团队）
+#### 19.7 ✅ 已确认：走 BFF（2026-08-10）
 
-- **登录是怎么做的？有没有服务端？是不是 Next.js？** ← 这个答案直接决定 19.3 选哪条
-- 前端仓库是否公开
+查了前端仓库 [CSSAInformationDepartment/myCSSA](https://github.com/CSSAInformationDepartment/myCSSA)，
+三个问题全部有答案：
 
-> 有服务端 / 是 Next.js → BFF 就是加个文件，没理由不做
-> 纯静态托管 + 第三方认证（Firebase/Auth0 那类）→ 才需要认真权衡是否为此新起一个服务
+| 问题 | 答案 |
+|---|---|
+| 登录有没有服务端？ | ✅ **有** —— Django + `django-rest-framework`，Python 500KB。Django 的 auth 本来就在服务端 |
+| 是不是 Next.js？ | ❌ 不是，是 **Django** —— 但这更好，它本身就是服务端框架 |
+| 仓库是否公开？ | ⚠️ **PUBLIC** |
+
+**结论：走 BFF，而且几乎没有成本。** Django 已经是服务端，BFF 不是「新建一个服务」，
+就是加一个 view：
+
+```python
+@login_required
+def chat_proxy(request):
+    # 内测阶段：再加一个 allowlist 检查
+    resp = requests.post(
+        f"{CSSA_DA_URL}/v1/chat",
+        json=json.loads(request.body),
+        headers={
+            "X-API-Key": settings.CSSA_DA_API_KEY,   # 只存在于服务器
+            "X-User-Id": str(request.user.id),        # 给限流和记录用
+        },
+        timeout=35,
+    )
+    return JsonResponse(resp.json(), status=resp.status_code)
+```
+
+`@login_required` 顺带解决内测资格（再加一个 allowlist 即可，CSSA-DA 侧零改动）。
+团队有 DRF 经验，这套写法熟悉。
+
+**仓库 public 让这个选择更没有悬念**：key 一旦进前端代码，就会永久留在公开仓库的
+git 历史里 —— 删掉文件也没用。
+
+##### 由此确定的三件事
+
+1. **接口契约**（由 CSSA-DA 定，前端照做）：
+   - 调 `POST /v1/chat`（含版本前缀）
+   - 带 `X-API-Key`，值从 Django settings / 环境变量读，**绝不进前端模板或 JS**
+   - 带 `X-User-Id`，用作限流维度与 `chat_interactions` 的记录维度
+   - `X-Request-ID` 响应头**透传回浏览器**并保存（反馈与排障要靠它）
+   - 错误响应原样透传（401 / 429 / 503 / 504 都有安全格式的 body）
+2. **[第 16 项](#16-精细化限流按用户维度)从「延后」升级为 v1 必做** —— BFF 之后所有
+   请求都来自同一个 IP，`get_remote_address` 失去区分度。
+   ⚠️ 实现时 `X-User-Id` 缺失要**回退到 IP**，否则在 BFF 上线之前所有请求会挤进同
+   一个桶，比现状更糟。
+3. **`chat_interactions` 加 `user_id` 列** —— 见
+   [ROADMAP_rag.md](ROADMAP_rag.md) Phase 4.5。内测期最有价值的是能追到具体的人去问
+   「这个回答哪里不好」。
+
+##### CORS 可以收了
+
+走 BFF 之后浏览器只调自己的服务器（同源），`ALLOWED_ORIGINS` 只需保留本地开发用的
+`localhost` 条目。
 
 ---
 
@@ -965,15 +1021,39 @@ key，和 `ops/smoke_test_api.py` / CI 用的分开。
 uvicorn 关闭日志四步完整（`Shutting down` → `Waiting for application shutdown` →
 `Application shutdown complete` → `Finished server process`）。
 
-**first-request 冷惩罚（待修）**：首个 `/chat` 比稳态慢约 **2.1 秒**。原因不是模型
-加载（模型已在 lifespan 预加载），而是 `app/api/deps.py` 的
-`_build_rag_orchestrator` 用 `lru_cache` 懒构建——第一个请求才创建 PG 连接池和三个
-组件。在 ECS 上这意味着：新 task 通过 `/ready` 后 ALB 立即导流，**第一个真实用户
-承担这 2.1 秒**，而 `/ready` 此时已宣称 ready。
+**first-request 冷惩罚（已修复，CSS-14 / PR #76）**：首个 `/chat` 比稳态慢约 **2.1 秒**。原因有两个：
+（1）`app/api/deps.py` 的 `_build_rag_orchestrator` 用 `lru_cache` 懒构建——第一个请求
+才创建 PG 连接池和三个组件；（2）**模型加载了但从未推理过**——lifespan 的
+`preload_models()` 只构造模型对象，不跑前向传播，惰性初始化仍由第一个真实请求承担。
+在 ECS 上这意味着：新 task 通过 `/ready` 后 ALB 立即导流，**第一个真实用户承担这
+2.1 秒**，而 `/ready` 此时已宣称 ready。
 
-建议修法：在 lifespan 的模型预加载之后同步构建一次 orchestrator，把这段成本移到启动
-期（冷启动约 7.5s → 9.6s，仍远低于 `Dockerfile.api` 中 healthcheck 的 60s
-`start-period`）。这样 `/ready` 的语义才真正等于「能以全速服务」。
+> 本节早先写的是「原因不是模型加载」，只列了 (1)。实测推翻了这个判断：(2) 才是主项。
+> 隔离测量（同一进程内，预热前 vs 预热后，embedding `encode` + reranker `predict`
+> 的首次调用惩罚）：
+
+| | 未预热 | 已预热 |
+|---|---|---|
+| run 1 | 570.4ms | 36.9ms |
+| run 2 | 511.8ms | 34.9ms |
+| run 3 | 116.4ms | 35.9ms |
+
+> 跨度同样重要：未预热时惩罚在 116–570ms 之间摆动（5 倍），单次幸运的测量可能通过
+> 阈值而线上照样翻车；预热后是稳定的 ~36ms。上表在 macOS 上测得，绝对值不迁移到
+> Linux 容器，只有「预热前后」的对比可迁移。
+
+修法（已落地）：lifespan 里同步构建一次 orchestrator，**并在 `preload_models()` 里对
+两个模型各跑一次真实前向传播**，把这两段成本都移到启动期。这样 `/ready` 的语义才真正
+等于「能以全速服务」。设计细节见
+[startup-and-readiness.md](../design/implemented/startup-and-readiness.md)。
+
+⚠️ 预热失败必须把模型状态标成 `failed`——模型可能加载成功却跑不了推理（不兼容的 LoRA
+adapter 只在 `predict` 时暴露），此时 `/ready` 若仍报 200，会把流量导给一个必然失败的
+实例。
+
+冷启动的代价：预热大约增加 2 秒。注意本节记录的 7.5s 基线与另一次容器内实测的
+**16.461s** 相差一倍以上，**两者的测量机器不同且未对齐**——写 ECS task 规格前需要在
+同一硬件上重测，不要直接引用其中任何一个数字。
 
 ### Phase 2：安全的 AWS API 基础设施
 
@@ -1254,8 +1334,9 @@ Phase 1 的「收尾验证记录」）：
 | First-request latency | ✅ 已测：首个 `/chat` 4662ms，稳态 2584ms |
 
 因此 Phase 2（AWS 基础设施）现在可以开工。进入 Phase 2 前建议先修掉 Phase 1 记录
-中的 **first-request 冷惩罚**（在 lifespan 预热 orchestrator），否则 `/ready` 通过
-后仍有约 2.1 秒的首请求代价，会干扰后续负载测试的基线。
+中的 **first-request 冷惩罚**（在 lifespan 预热 orchestrator，**并对两个模型各跑一次
+前向传播**），否则 `/ready` 通过后仍有约 2.1 秒的首请求代价，会干扰后续负载测试的
+基线。
 
 **与 Phase 2 并线的第二条线**：第 18 项（检索质量评估与模型选型）现在开工，它对
 Phase 2 的依赖已被设计为零（评估 harness 直接读语料快照，不连 DB）。但其中 4 个

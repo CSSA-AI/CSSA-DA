@@ -26,6 +26,21 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
     CHAT_RATE_LIMIT: str = "10/minute"
+    # Site-wide /chat budget shared by ALL clients (one counter, not per-IP):
+    # rotating IPs cannot bypass it (ROADMAP 19.4). Sized to stay under the
+    # $20/month OpenAI project hard cap (docs/openai-spend-cap.md). "day"
+    # means 24h from the window's first request, not a calendar day, and the
+    # counter resets on process restart.
+    CHAT_GLOBAL_RATE_LIMIT: str = "500/day"
+
+    # Deploy-time coordinates stamped onto every chat_interactions row's
+    # config fingerprint (ROADMAP_rag.md Phase 4.5). Optional: unset means the
+    # fingerprint records null, which is honest. GIT_SHA is the "which code"
+    # coordinate and equals the image tag (CONTRIBUTING.md "Four version
+    # coordinates"); CORPUS_SHA256 is what lets an online row and an offline
+    # eval report be compared on the same ruler.
+    GIT_SHA: str | None = None
+    CORPUS_SHA256: str | None = None
 
     @property
     def allowed_origins_list(self) -> list[str]:

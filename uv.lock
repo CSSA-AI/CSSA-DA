@@ -187,6 +187,7 @@ dependencies = [
 [package.dev-dependencies]
 api = [
     { name = "fastapi" },
+    { name = "limits" },
     { name = "slowapi" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -194,6 +195,7 @@ dev = [
     { name = "beautifulsoup4" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "limits" },
     { name = "mypy" },
     { name = "numpy" },
     { name = "playwright" },
@@ -227,6 +229,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 api = [
     { name = "fastapi" },
+    { name = "limits" },
     { name = "slowapi" },
     { name = "uvicorn", extras = ["standard"] },
 ]
@@ -234,6 +237,7 @@ dev = [
     { name = "beautifulsoup4" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "limits" },
     { name = "mypy" },
     { name = "numpy" },
     { name = "playwright", specifier = ">=1.62.0" },
