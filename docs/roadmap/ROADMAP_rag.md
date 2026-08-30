@@ -132,7 +132,7 @@ gain 写法还不一致(一个用 `rel`,一个用 `2^rel - 1`)。不同口径的
 
 ### 0.3 `top_k` 的结构性问题
 
-`rag-config.yaml` 现在是 retriever `top_k=5` → reranker `top_k=3`。
+`rag-config.yaml` 原本是 retriever `top_k=5` → reranker `top_k=3`。
 **reranker 在 5 个候选里排序基本没有意义** —— 它的价值在于从几十个候选里挑出对的。
 
 这不是「调参」,是结构性错配,不需要 ground truth 就能判断。具体设多少要等
@@ -140,6 +140,58 @@ Recall@k 曲线(Phase 5),但现在就该调大到一个合理量级。
 
 - ⚠️ 会显著改变每请求 CPU,与 [ROADMAP_platform](ROADMAP_platform.md) 第 13/14 项
   (worker/扩容策略、资源基线)耦合
+
+#### ✅ 已落地(2026-08-25):retriever `top_k` 5 → 30,reranker `top_k` 3 → 5
+
+两个数一起改:
+
+- **retriever 5 → 30** —— 召回是上限。答案不在这 30 条里,后面再准也捞不回来,而且
+  **日志上看不出来** —— 用户只会看到一个「资料不足」或一个错答案
+- **reranker 3 → 5** —— 与 `generator.context.max_items`(=5)对齐。原来只给 3 条,
+  generator 有两个上下文位置一直空着。这一步不额外花钱:cross-encoder 已经把整个候选
+  池打完分了,改的只是在哪里截断
+
+**为什么是 30 不是 50**:50 是 Phase 5 离线评估用的 deep pool,离线跑一次就行;线上是
+每个请求都要付 cross-encoder 给 50 条打分的延迟。30 是「让 reranker 真的有东西可排」
+和「延迟还能接受」之间的一个起点,终值等 [5.6](#phase-5跑实验出结论) 的 Recall@k 曲线。
+
+**实测:reranker 单段耗时**(本地 CPU,`ms-marco-MiniLM-L12-v2`,真实微信语料 2312 条,
+计时覆盖整个 `rerank()`):
+
+| 候选池 | 14 线程 p50 / p95 | 2 线程 p50 / p95 |
+|---|---|---|
+| 5(原) | 564 / 1109 ms | 949 / 1302 ms |
+| **30(现)** | **2770 / 3743 ms** | **5838 / 8424 ms** |
+| 50(eval deep pool) | 4495 / 5684 ms | 10450 / 12636 ms |
+
+**实测:`/v1/chat` 端到端**(同一个运行中的容器,靠显式传参切换配置,10 次/组,
+真实 OpenAI 调用,知识库 2312 行):
+
+| 配置 | p50 | p95 | 返回 `sources` |
+|---|---|---|---|
+| 改动前 `top_k=5, rerank=3` | 3254 ms | 6096 ms | 3 |
+| **改动后 `top_k=30, rerank=5`** | **4887 ms** | **10220 ms** | **5** |
+| 不传参(走 `rag-config.yaml` 默认) | 4625 ms | 8695 ms | 5 |
+
+- 第三行是拿来**验证配置默认值确实等于改动后**的:`sources=5`,p50 与第二行同量级
+- 端到端 **p50 +1.6s / p95 +4.1s**
+- ⚠️ **但这组数的方差主要来自 OpenAI 往返,不是来自 `top_k`** —— n=10 时 p95 基本就是
+  次大值,不是稳健统计量。要看 `top_k` 的净成本,以上面 reranker 单段那张表为准
+
+⚠️ **给平台线[第 18 项耦合点 #4](ROADMAP_platform.md#18-检索质量评估与模型选型--已拆分到另外两条线) 的输入**:
+
+1. **倍率随并行度趋近线性**。14 线程下 5→30 是 4.9×,2 线程下是 6.2× —— 后者已经很
+   接近理论上的 6×(30/5)。**核数越少越接近线性**,所以不能拿开发机的倍率去推小
+   task 的表现,要往坏里估
+2. ⚠️ **2 线程下光 reranker 一段就 p50 5.8s / p95 8.4s**,这还不含 generator 的 OpenAI
+   往返。**若 Fargate task 最终是 2 vCPU 级别,`top_k=30` 线上不可用** —— `top_k` 的
+   上限可能由 task 规格倒着定,而不是由 Recall@k 曲线定
+3. **绝对值只属于这个模型**。[0.4](#04-reranker-的任务类型是错的) 换掉 ms-marco 之后
+   必须重测,这组数只能当基线用
+
+另一个成本来源:微信语料是整篇文章入库(未截断 token 数 p50 ≈ 1380),而 cross-encoder
+在 512 处截断 —— **几乎每个候选都是一次满长度前向**。将来若做更细的分块,每候选成本会
+直接下降。
 
 ### 0.4 reranker 的任务类型是错的
 
@@ -575,7 +627,7 @@ CREATE TABLE chat_interactions (
   "embedding_model": "...", "embedding_revision": "...",
   "reranker_model": "...", "reranker_revision": "...",
   "generator_model": "gpt-4o-mini",
-  "top_k": 5, "rerank_top_k": 3,
+  "top_k": 30, "rerank_top_k": 5,
   "prompt_version": "...",
   "corpus_sha256": "...",
   "git_sha": "..."
@@ -704,7 +756,7 @@ RAG       ←  Data(仅 Phase 5 起)
 |---|---|---|
 | **0.1** doc_id 链路 + `/v1/chat` | ❌ | ✅ 已完成 —— doc_id (CSS-7 #74)、`/v1/chat` (#73) |
 | **0.2** 合并 evaluator | ❌ | 🔴 未开始 |
-| **0.3** `top_k` 结构性 | ❌ | 🔴 未开始 |
+| **0.3** `top_k` 结构性 | ❌ | 🟢 已落地(retriever 5→30、reranker 3→5)—— 终值待 [5.6](#phase-5跑实验出结论) |
 | **0.4** 换 reranker | ❌ | 🔴 未开始 —— **✅ 已定进 v1**(待 Phase 5 验证) |
 | **0.5** 随机负例 | ❌ | 🟡 训练脚本暂不要跑 |
 | **0.6** 冷惩罚 | ❌ | ✅ 已完成 —— CSS-14 / PR #76 |

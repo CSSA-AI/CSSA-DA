@@ -2,12 +2,26 @@ retriever:
   embedding_model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
   embedding_revision: e8f8c211226b894fcb81acc59f3b34ba3efd5f42
   embedding_dim: 384
-  top_k: 5
+  # Candidate pool handed to the reranker, NOT the number of sources the user
+  # sees. Recall is the ceiling: if the answer is not in this pool, no amount of
+  # reranking recovers it — and nothing in the logs says so, the user just gets
+  # "资料不足" or a wrong answer. At the old value of 5 the cross-encoder could
+  # only discard 2 of 5, paying full inference latency for almost no ranking.
+  # It is also the per-request CPU driver, since the cross-encoder scores
+  # *every* candidate, and measured rerank latency is linear in pool size
+  # (table in ROADMAP_rag.md 0.3). 30 rather than the eval deep pool of 50 —
+  # that one is an offline number and nobody pays its latency per request.
+  # The final value comes from the Recall@k curve in ROADMAP_rag.md Phase 5.6.
+  top_k: 30
 
 reranker:
   model_name: cross-encoder/ms-marco-MiniLM-L12-v2
   model_revision: 7b0235231ca2674cb8ca8f022859a6eba2b1c968
-  top_k: 3
+  # How many survive into the generator prompt. Kept equal to
+  # generator.context.max_items: at 3, the generator was handed 5 context slots
+  # and left 2 of them empty. Raising this costs nothing — the cross-encoder has
+  # already scored the whole pool; this only moves where the list is truncated.
+  top_k: 5
   adapter_path: null
 
 pgvector:
