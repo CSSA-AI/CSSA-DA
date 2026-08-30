@@ -239,16 +239,28 @@ Recall@k 曲线(Phase 5),但现在就该调大到一个合理量级。
 
 ### 0.6 first-request 冷惩罚
 
-首个 `/chat` 比稳态慢约 **2.1 秒**。原因不是模型加载(已在 lifespan 预加载),而是
-[deps.py](../../app/api/deps.py) 的 `_build_rag_orchestrator` 用 `lru_cache` 懒构建 ——
-第一个请求才创建 PG 连接池和三个组件。
+首个 `/chat` 比稳态慢约 **2.1 秒**。原因有两个,不是一个:
+
+1. **orchestrator 懒构建** —— [deps.py](../../app/api/deps.py) 的
+   `_build_rag_orchestrator` 用 `lru_cache`,第一个请求才创建 PG 连接池和三个组件。
+2. **模型加载了,但从未推理过**(主项)—— lifespan 的 `preload_models()` 只**构造**
+   模型对象,不跑前向传播。所有惰性初始化(kernel setup、内存 arena、首次 tokenizer
+   调用)仍然由第一个真实请求承担。
+
+> 本节早先只写了原因 1,并明确把模型侧排除掉("原因不是模型加载")。实测推翻了这个
+> 判断:原因 2 才是大头,量级比原因 1 高一档。
 
 在 ECS 上这意味着:新 task 通过 `/ready` 后 ALB 立即导流,**第一个真实用户承担这
 2.1 秒**,而 `/ready` 此时已宣称 ready。
 
-- **修法**:在 lifespan 的模型预加载之后同步构建一次 orchestrator
-- **验收**:首请求与稳态延迟差 < 200ms;冷启动仍远低于 healthcheck 的 60s
-  `start-period`
+- **修法**:① lifespan 里同步构建一次 orchestrator;② 在 `preload_models()` 里对两个
+  模型各跑一次真实前向传播(`encode` / `predict`),把惰性初始化移到启动期
+- **验收**:**检索 + 重排**的首请求与稳态延迟差 < 200ms;冷启动仍远低于 healthcheck
+  的 60s `start-period`。**生成段不计入** —— 剩余差值由首次 OpenAI 连接建立主导,
+  不是我们能优化的部分,单独作为观测项、不设阈值
+- ⚠️ **预热失败必须把模型状态标成 `failed`**。模型可能加载成功却跑不了推理(不兼容的
+  LoRA adapter 只在 `predict` 时才暴露),此时 `/ready` 若仍报 200,就会把流量导给一个
+  每个请求都注定失败的实例
 - 📌 平台线 Phase 2 开工前建议先修,否则会干扰负载测试基线
 
 ### 0.7 `stream()` 绕过了链,且另建了一条
@@ -596,9 +608,14 @@ CREATE TABLE chat_interactions (
 
 - 用 FastAPI 的 **`BackgroundTasks` 写入**,响应发出后再写,不给 `/chat` 加延迟。
   写失败只记日志,绝不抛出去影响用户。
-  ⚠️ **失败那条日志要带完整 payload(含 query)** —— 这是 query 唯一被允许进日志的
-  地方。正常路径下 query 只进 Postgres(见 [4.1](#41-要采什么)),但 DB 抖动的那几
-  分钟如果连日志也不记,这批 query 就是真的找不回来了
+  ⚠️ **失败那条日志只带 `request_id`,不带 payload**(2026-08-29 改口径)。本节早先
+  要求把完整 payload 含 query 写进失败日志,理由是「DB 抖动那几分钟如果连日志也不
+  记,这批 query 就找不回来了」。**该要求已撤销** —— 它和
+  [retrieval-logging](../design/implemented/retrieval-logging.md) 的保证正面冲突:
+  那份设计的立论不是「日志不安全」,而是同一份用户内容不该落在两个保留期不同、
+  访问控制不同的地方,而小助手接的是签证被拒 / 挂科 / 经济困难这类求助,多一个可
+  搜索的副本就多一个暴露面。**取舍已定:宁可丢掉故障窗口内的 query,也只保留一份
+  用户内容。** 代价要写进设计文档,不能装作没有
 - 存 **Postgres 而不是只靠日志**:反馈是后到的、要 UPDATE 回同一行;要和
   `knowledge_base` join;量很小(社团级每天几百条);`pipeline_runs` 表已是同样性质
   的先例
@@ -742,7 +759,7 @@ RAG       ←  Data(仅 Phase 5 起)
 | **0.3** `top_k` 结构性 | ❌ | 🟢 已落地(retriever 5→30、reranker 3→5)—— 终值待 [5.6](#phase-5跑实验出结论) |
 | **0.4** 换 reranker | ❌ | 🔴 未开始 —— **✅ 已定进 v1**(待 Phase 5 验证) |
 | **0.5** 随机负例 | ❌ | 🟡 训练脚本暂不要跑 |
-| **0.6** 冷惩罚 | ❌ | 🔴 未开始 |
+| **0.6** 冷惩罚 | ❌ | ✅ 已完成 —— CSS-14 / PR #76 |
 | **0.7** `stream()` 双路径 | ❌ | 🔴 未开始 |
 | **0.8** 输入体积无上限 | ❌ | 🔴 未开始 —— **v1 必做**,两行 |
 | **Phase 1** 评估工具 | ❌ | ⬜ 未开始 |

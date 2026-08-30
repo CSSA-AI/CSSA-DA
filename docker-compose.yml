@@ -57,6 +57,9 @@ services:
       # limits are tunable in production only if compose passes them in.
       CHAT_RATE_LIMIT: ${CHAT_RATE_LIMIT:-10/minute}
       CHAT_GLOBAL_RATE_LIMIT: ${CHAT_GLOBAL_RATE_LIMIT:-500/day}
+      # Version coordinates for the chat_interactions config fingerprint.
+      GIT_SHA: ${GIT_SHA:-}
+      CORPUS_SHA256: ${CORPUS_SHA256:-}
     volumes:
       - huggingface_cache:/root/.cache/huggingface
 

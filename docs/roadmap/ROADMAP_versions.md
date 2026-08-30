@@ -125,11 +125,11 @@ v1,**应该现在就派人去做**。但它已经不是 v2 的唯一入口 —�
 - [ ] `/chat` → `/v1/chat`(与 doc_id 同一窗口 —— 现在没有消费者,成本最低)
 - [x] 0.3 `top_k` 调大 —— **已落地(2026-08-25):retriever 5 → 30、reranker 3 → 5**。终值仍待 Phase 5.6 的 Recall@k 曲线
 - [ ] 0.4 换 reranker(✅ 已定)
-- [ ] 0.6 first-request 冷惩罚
+- [x] 0.6 first-request 冷惩罚
 - [ ] 0.8 `/chat` 输入体积上限(两行)
 - [ ] 3.1 拒答测试
 - [ ] 4.1 检索结果落结构化日志
-- [ ] 4.5 `chat_interactions` 六列 + `BackgroundTasks` 写入
+- [x] 4.5 `chat_interactions` 六列 + `BackgroundTasks` 写入
 
 ### 退出标准
 
@@ -137,7 +137,9 @@ v1,**应该现在就派人去做**。但它已经不是 v2 的唯一入口 —�
 2. 匿名/无效客户端调不动 `/chat`;超频返回 429
 3. 每次请求有结构化日志(request_id、query、检索到的 doc_id、各段耗时)
 4. 每次请求在 `chat_interactions` 落一行,**带 config 指纹**
-5. 新 task 通过 `/ready` 后,首请求与稳态延迟差 < 200ms
+5. 新 task 通过 `/ready` 后,**检索 + 重排**的首请求与稳态延迟差 < 200ms
+   (生成段不计入 —— 剩余差值由首次 OpenAI 连接建立主导,不是我们能优化的部分,
+   单独观测、不设阈值。见 [ROADMAP_rag 0.6](ROADMAP_rag.md#06-first-request-冷惩罚))
 6. 滚动发布不丢在途请求;migration 作为部署关卡执行
 7. 能从日志 + `chat_interactions` 复盘任意一次坏回答
 8. **打出第一个 git tag `v0.1.0`**;镜像 tag = git sha(immutable,禁止用 `latest` 部署)

@@ -3,7 +3,13 @@ from contextlib import asynccontextmanager
 import logging
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, Request, status as http_status
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    Request,
+    status as http_status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -12,6 +18,7 @@ from slowapi.errors import RateLimitExceeded
 from app.api.deps import (
     close_rag_orchestrator,
     get_rag_orchestrator,
+    preload_rag_orchestrator,
     require_internal_api_key,
 )
 from app.core.config import settings
@@ -28,6 +35,7 @@ from app.core.rate_limit import (
     validate_rate_limit_config,
 )
 from app.schemas.search_result import SearchResult
+from app.services.chat_interactions import schedule_chat_interaction
 from app.services.readiness import check_readiness
 from app.services.system_status import get_system_status
 from app.services.rag.orchestrator import RAGOrchestrator
@@ -54,7 +62,18 @@ async def lifespan(_: FastAPI):
     try:
         await asyncio.to_thread(model_registry.preload_models)
     except Exception:
-        logger.exception("RAG model preload failed")
+        # Both the retriever and the reranker pull their model from the
+        # registry, so building the orchestrator now would retry the same
+        # failing load a second time and still not yield a usable pipeline.
+        # Nothing diagnostic is lost: /ready reports the database side.
+        logger.exception(
+            "RAG model preload failed; skipping RAG orchestrator preload"
+        )
+    else:
+        try:
+            await asyncio.to_thread(preload_rag_orchestrator)
+        except Exception:
+            logger.exception("RAG orchestrator preload failed")
     yield
     close_rag_orchestrator()
 
@@ -238,6 +257,7 @@ def status(
 def chat(
     request: Request,  # required by slowapi (looked up by this exact name)
     payload: ChatRequest,
+    background_tasks: BackgroundTasks,
     _: Annotated[None, Depends(require_internal_api_key)],
     orchestrator: Annotated[RAGOrchestrator, Depends(get_rag_orchestrator)],
 ) -> ChatResponse:
@@ -246,5 +266,18 @@ def chat(
         top_k=payload.top_k,
         rerank_top_k=payload.rerank_top_k,
         chat_history=[message.model_dump() for message in payload.chat_history],
+    )
+    # Starlette runs background tasks after the response body has been sent,
+    # so this adds nothing to /chat's latency. Only successful exchanges are
+    # recorded — a 503/504 raises before reaching this line, so queries that
+    # failed generation are not yet captured (ROADMAP_rag.md Phase 4.5 scopes
+    # v1 to the success path).
+    schedule_chat_interaction(
+        background_tasks,
+        query=payload.message,
+        answer=answer,
+        sources=sources,
+        top_k=payload.top_k,
+        rerank_top_k=payload.rerank_top_k,
     )
     return ChatResponse(answer=answer, sources=sources)

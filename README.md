@@ -90,7 +90,7 @@ CSSA-DA/
 │   ├── rehearse_local_stack.py               # End-to-end local rehearsal
 │   └── smoke_test_api.py                     # Hit /health, /ready, /v1/chat
 │
-├── migrations/                               # Alembic migrations (knowledge_base, pipeline_runs)
+├── migrations/                               # Alembic migrations (knowledge_base, pipeline_runs, chat_interactions)
 ├── tests/
 │   ├── unit/                                 # Fast, no external services
 │   └── integration/                          # Require Postgres (RUN_INTEGRATION_TESTS=1)
@@ -289,14 +289,17 @@ LCEL runnables and returns shared pipeline state containing the answer and sourc
 
 ### Model registry ([app/services/rag/model_registry.py](app/services/rag/model_registry.py))
 - Single shared instance of each model, so retriever and reranker do not load duplicates
-- Preloaded during app startup (`lifespan`) instead of on the first request
-- Exposes per-model load state (`not_loaded` / `loading` / `ready` / `failed`) to `/ready`
+- Preloaded during app startup (`lifespan`) instead of on the first request, and warmed
+  up with one real forward pass so the first request does not pay for lazy initialisation
+- Exposes per-model load state (`not_loaded` / `loading` / `ready` / `failed`) to `/ready`.
+  A model that loads but fails its warm-up is marked `failed`: it can serve nothing, so
+  `/ready` must not report it healthy
 
 ### Configuration ([app/core/config/rag-config.yaml](app/core/config/rag-config.yaml))
 - Embedding and reranker models pinned by name **and** revision, so imports and retrieval
   use identical model files
-- Retrieval/rerank `top_k`, pgvector table and pool sizes, generator model, timeouts and
-  the system prompt
+- Retrieval/rerank `top_k`, pgvector table, pool sizes and connect timeout, generator
+  model, timeouts and the system prompt
 
 ### Data pipelines ([pipelines/](pipelines/))
 - One CLI: `python -m pipelines <command>` — `harvest-wechat`, `transform-wechat`,
@@ -333,6 +336,31 @@ pipeline and returned as a `/v1/chat` source:
 In PostgreSQL, one row of `knowledge_base` is one *(question, article)* pair: the article
 fields above plus `question_text`, a 384-dim `embedding`, and the embedding model/revision
 that produced it. Rows are unique on `(link, question_text)`.
+
+**chat_interactions** ([app/services/chat_interactions.py](app/services/chat_interactions.py)) —
+one row per answered `/v1/chat` request, written by a `BackgroundTasks` task after the
+response has been sent:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `request_id` | text (PK) | The `X-Request-ID` from the response header — the join key to that request's log lines |
+| `created_at` | timestamptz | Write time (`now()`) |
+| `query` | text | The user's message |
+| `answer` | text | The generated answer |
+| `retrieved` | jsonb | `[{doc_id, score, rank}]`, post-rerank order |
+| `config` | jsonb | Config fingerprint: embedding/reranker/generator model + revision, effective `top_k` / `rerank_top_k`, `prompt_version`, `corpus_sha256`, `git_sha` |
+
+This is the analysis surface for real traffic, and **not a corpus source** — never write
+generated answers back into `knowledge_base`. Recording is best-effort: a failed write is
+logged by `request_id` and never reaches the user. The payload is deliberately not logged —
+user content lives in Postgres only, see
+[retrieval-logging.md](docs/design/implemented/retrieval-logging.md). Set `GIT_SHA` and
+`CORPUS_SHA256` in production, or those fingerprint coordinates are recorded as null. See
+[ROADMAP_rag.md](docs/roadmap/ROADMAP_rag.md) Phase 4.5.
+
+`retrieved.doc_id` is the stable, source-prefixed id derived from the article link
+(`wx_<slug>` for WeChat) since CSS-7, so these rows join back to `knowledge_base` and match
+the ids in the retrieval logs.
 
 ---
 
