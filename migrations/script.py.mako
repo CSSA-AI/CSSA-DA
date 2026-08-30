@@ -3,6 +3,10 @@
 Revision ID: ${up_revision}
 Revises: ${down_revision | comma,n}
 Create Date: ${create_date}
+
+Backward compatibility (CONTRIBUTING.md, "Database migrations"): after this
+migration runs, the previous version of the code must still work. Say why it
+does — or which of the two deploys this one is.
 """
 from typing import Sequence, Union
 
