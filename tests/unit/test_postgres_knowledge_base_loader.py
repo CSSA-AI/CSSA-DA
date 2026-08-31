@@ -21,6 +21,7 @@ def _record(index=1):
         "content": f"Content {index}",
         "tags": ["test"],
         "link": f"https://example.com/{index}",
+        "modality": "doc",
     }
 
 
