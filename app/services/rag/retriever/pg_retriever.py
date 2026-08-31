@@ -8,6 +8,7 @@ from typing import List, Optional
 from app.core.config import settings, rag_config
 from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
+from app.services.rag.doc_id import derive_doc_id
 from app.services.rag.errors import RetrievalUnavailableError
 from app.services.rag.model_registry import model_registry
 from app.services.rag.retriever.base import BaseRetriever
@@ -22,6 +23,7 @@ class PGVectorRetriever(BaseRetriever):
         table_name: Optional[str] = None,
         pool_min_size: Optional[int] = None,
         pool_max_size: Optional[int] = None,
+        connect_timeout: Optional[int] = None,
     ):
         retriever_config = rag_config["retriever"]
         pgvector_config = rag_config["pgvector"]
@@ -42,6 +44,9 @@ class PGVectorRetriever(BaseRetriever):
         pool_max_size = pool_max_size or pgvector_config.get(
             "pool_max_size", 5
         )
+        connect_timeout = connect_timeout or pgvector_config.get(
+            "connect_timeout_seconds", 5
+        )
 
         if not database_url:
             raise ValueError("DATABASE_URL is required for PGVectorRetriever")
@@ -51,16 +56,22 @@ class PGVectorRetriever(BaseRetriever):
             raise ValueError(
                 "pool_max_size must be greater than or equal to pool_min_size"
             )
+        if connect_timeout <= 0:
+            raise ValueError("connect_timeout must be greater than zero")
         super().__init__(
             model_name=model_name,
             model_revision=model_revision,
         )
 
         self.table_name = table_name
+        # connect_timeout is forwarded to libpq for every connection this
+        # pool opens -- at startup AND when it grows under load -- so neither
+        # path can hang on a DB host that drops packets instead of refusing.
         self.pool = ThreadedConnectionPool(
             minconn=pool_min_size,
             maxconn=pool_max_size,
             dsn=database_url,
+            connect_timeout=connect_timeout,
         )
         if uses_configured_model:
             self.model = model_registry.get_embedding_model()
@@ -147,6 +158,7 @@ class PGVectorRetriever(BaseRetriever):
 
         for rank, row in enumerate(rows, start=1):
             article = Article(
+                id=derive_doc_id(link=row["link"], text=row["content"]),
                 text=row["content"],
                 questions=[row["question_text"]] if row["question_text"] else [],
                 source=row["source"],

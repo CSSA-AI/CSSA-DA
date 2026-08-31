@@ -13,7 +13,10 @@ from app.services.rag.errors import (
     GenerationUnavailableError,
     RetrievalUnavailableError,
 )
-from app.services.rag.model_registry import ModelRegistryStatus, model_registry
+from app.services.rag.model_registry import (
+    ModelRegistryStatus,
+    model_registry,
+)
 from app.services.system_status import (
     PipelineMetadataStatus,
     SystemStatus,
@@ -100,26 +103,62 @@ def test_ready_returns_200_when_database_and_data_are_ready(monkeypatch):
     }
 
 
-def test_lifespan_preloads_models(monkeypatch):
+def test_lifespan_preloads_models_and_orchestrator(monkeypatch):
     preload_models = MagicMock()
+    preload_rag_orchestrator = MagicMock()
+
     monkeypatch.setattr(
         model_registry,
         "preload_models",
         preload_models,
+    )
+    monkeypatch.setattr(
+        "app.main.preload_rag_orchestrator",
+        preload_rag_orchestrator,
+    )
+
+    with TestClient(app) as test_client:
+        preload_models.assert_called_once_with()
+        preload_rag_orchestrator.assert_called_once_with()
+
+        response = test_client.get("/health")
+
+    assert response.status_code == 200
+
+
+def test_model_preload_failure_skips_orchestrator_but_keeps_health(monkeypatch):
+    monkeypatch.setattr(
+        model_registry,
+        "preload_models",
+        MagicMock(side_effect=RuntimeError("model failed")),
+    )
+    # Also a stub because leaving it real would open a psycopg2 pool from a
+    # unit test -- but the point of this test is that it is never called.
+    preload_rag_orchestrator = MagicMock()
+    monkeypatch.setattr(
+        "app.main.preload_rag_orchestrator",
+        preload_rag_orchestrator,
     )
 
     with TestClient(app) as test_client:
         response = test_client.get("/health")
 
     assert response.status_code == 200
-    preload_models.assert_called_once_with()
+    preload_rag_orchestrator.assert_not_called()
 
 
-def test_model_preload_failure_does_not_break_health(monkeypatch):
+def test_orchestrator_preload_failure_does_not_break_health(monkeypatch):
+    monkeypatch.setattr(
+        "app.main.preload_rag_orchestrator",
+        MagicMock(side_effect=RuntimeError("orchestrator failed")),
+    )
+    # Without this the lifespan really loads both models -- ~600MB from the
+    # Hub on CI, where MODEL_DIR is unset -- and leaves the module-level
+    # registry singleton in "ready" state for every later test.
     monkeypatch.setattr(
         model_registry,
         "preload_models",
-        MagicMock(side_effect=RuntimeError("model failed")),
+        MagicMock(),
     )
 
     with TestClient(app) as test_client:
@@ -189,7 +228,7 @@ def test_status_reports_readiness_and_pipeline_metadata(monkeypatch):
 
 def test_chat_returns_answer_and_sources():
     response = client().post(
-        "/chat",
+        "/v1/chat",
         json={
             "message": "How do I enrol?",
             "chat_history": [{"role": "user", "content": "Hello"}],
@@ -205,10 +244,70 @@ def test_chat_returns_answer_and_sources():
     assert payload["sources"][0]["score"] == 0.95
 
 
+def test_unversioned_chat_path_is_gone():
+    # This change has two halves: /v1/chat exists AND /chat no longer does.
+    # Without this, nothing stops the unversioned route being re-added later.
+    response = client().post("/chat", json={"message": "How do I enrol?"})
+
+    assert response.status_code == 404
+
+
 def test_chat_rejects_an_empty_message():
-    response = client().post("/chat", json={"message": ""})
+    response = client().post("/v1/chat", json={"message": ""})
 
     assert response.status_code == 422
+
+
+def test_chat_rejects_a_chat_history_message_over_the_length_cap():
+    response = client().post(
+        "/v1/chat",
+        json={
+            "message": "How do I enrol?",
+            "chat_history": [{"role": "user", "content": "x" * 4_001}],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_chat_accepts_a_chat_history_message_at_the_length_cap():
+    response = client().post(
+        "/v1/chat",
+        json={
+            "message": "How do I enrol?",
+            "chat_history": [{"role": "user", "content": "x" * 4_000}],
+        },
+    )
+
+    assert response.status_code == 200
+
+
+def test_chat_rejects_chat_history_over_the_item_count_cap():
+    response = client().post(
+        "/v1/chat",
+        json={
+            "message": "How do I enrol?",
+            "chat_history": [
+                {"role": "user", "content": "hi"} for _ in range(21)
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_chat_accepts_chat_history_at_the_item_count_cap():
+    response = client().post(
+        "/v1/chat",
+        json={
+            "message": "How do I enrol?",
+            "chat_history": [
+                {"role": "user", "content": "hi"} for _ in range(20)
+            ],
+        },
+    )
+
+    assert response.status_code == 200
 
 
 @pytest.mark.parametrize("provided_api_key", [None, "wrong-key"])
@@ -225,7 +324,7 @@ def test_chat_rejects_invalid_or_missing_api_key(
     )
 
     response = TestClient(app).post(
-        "/chat",
+        "/v1/chat",
         headers=headers,
         json={"message": "How do I enrol?"},
     )
@@ -239,7 +338,7 @@ def test_chat_returns_503_when_api_key_is_not_configured(monkeypatch):
     app.dependency_overrides[get_rag_orchestrator] = lambda: StubOrchestrator()
 
     response = TestClient(app).post(
-        "/chat",
+        "/v1/chat",
         headers={"X-API-Key": "any-key"},
         json={"message": "How do I enrol?"},
     )
@@ -255,7 +354,7 @@ def test_chat_accepts_configured_api_key(monkeypatch):
     app.dependency_overrides[get_rag_orchestrator] = lambda: StubOrchestrator()
 
     response = TestClient(app).post(
-        "/chat",
+        "/v1/chat",
         headers={"X-API-Key": "expected-key"},
         json={"message": "How do I enrol?"},
     )
@@ -302,10 +401,84 @@ def test_chat_returns_safe_service_errors(
     app.dependency_overrides[require_internal_api_key] = lambda: None
 
     response = TestClient(app).post(
-        "/chat",
+        "/v1/chat",
         json={"message": "How do I enrol?"},
     )
 
     assert response.status_code == status_code
     assert response.json()["error"]["code"] == error_code
     assert str(error) not in response.text
+
+
+def test_chat_records_the_interaction_after_responding(monkeypatch):
+    """The row must be written by a BackgroundTask, not inline.
+
+    TestClient runs background tasks before returning, so seeing the record
+    here proves it was queued; `test_chat_survives_a_failed_recording_write`
+    covers the half that matters to the user.
+    """
+    written = []
+    monkeypatch.setattr(
+        "app.services.chat_interactions.record_chat_interaction",
+        lambda record, **kwargs: written.append(record),
+    )
+
+    response = client().post(
+        "/v1/chat",
+        json={"message": "How do I enrol?", "top_k": 5, "rerank_top_k": 3},
+    )
+
+    assert response.status_code == 200
+    assert len(written) == 1
+    record = written[0]
+    # The primary key is the id the client got back, so a user reporting a
+    # bad answer by request id can be traced to their row.
+    assert record.request_id == response.headers["X-Request-ID"]
+    assert record.query == "How do I enrol?"
+    assert record.answer == "Answer for: How do I enrol?"
+    assert record.retrieved[0]["rank"] == 1
+    assert record.retrieved[0]["score"] == 0.95
+    assert record.config["top_k"] == 5
+    assert record.config["rerank_top_k"] == 3
+
+
+def test_chat_survives_a_failed_recording_write(monkeypatch):
+    """Recording is best-effort: a dead database must not reach the user."""
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("database is down")
+
+    monkeypatch.setattr(
+        "app.services.chat_interactions.psycopg2.connect",
+        explode,
+    )
+    monkeypatch.setattr(
+        "app.core.config.settings.DATABASE_URL",
+        "postgresql://example",
+    )
+
+    response = client().post("/v1/chat", json={"message": "How do I enrol?"})
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "Answer for: How do I enrol?"
+
+
+def test_chat_does_not_record_when_the_pipeline_failed(monkeypatch):
+    """A 503 has no answer to record; the write must not be queued at all."""
+    written = []
+    monkeypatch.setattr(
+        "app.services.chat_interactions.record_chat_interaction",
+        lambda record, **kwargs: written.append(record),
+    )
+    app.dependency_overrides[get_rag_orchestrator] = lambda: (
+        FailingOrchestrator(RetrievalUnavailableError("boom"))
+    )
+    app.dependency_overrides[require_internal_api_key] = lambda: None
+
+    response = TestClient(app).post(
+        "/v1/chat",
+        json={"message": "How do I enrol?"},
+    )
+
+    assert response.status_code == 503
+    assert written == []

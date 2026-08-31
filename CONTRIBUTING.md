@@ -15,10 +15,12 @@ commit, open pull requests, and cut releases.
 ## Table of contents
 
 - [Getting started](#getting-started)
+- [Language](#language)
 - [Branching model](#branching-model)
 - [Commit messages](#commit-messages)
 - [Pull requests](#pull-requests)
 - [Testing](#testing)
+- [Database migrations](#database-migrations)
 - [Code style](#code-style)
 - [Versioning and releases](#versioning-and-releases)
 - [Documentation](#documentation)
@@ -36,6 +38,28 @@ uv run pytest tests/unit -q
 Full setup instructions are in the [README](README.md#setup). For running the
 stack in Docker (Postgres + migrations + API), see
 [docs/local-development.md](docs/local-development.md).
+
+---
+
+## Language
+
+**Everything on GitHub is written in English**: issue titles and bodies, pull
+request titles and descriptions, and review and comment threads. Commit messages
+are English too — see [Commit messages](#commit-messages).
+
+The reason is who reads them. This repository already receives pull requests from
+contributors outside the club who do not read Chinese. An issue they cannot read
+is an issue they cannot pick up, and a review thread they cannot follow is one
+they cannot answer. Keeping GitHub in one language is what makes the work
+open to them at all.
+
+Documents under `docs/` — roadmaps and design write-ups — stay in Chinese. They
+are long-form, written for the team, and lose more in translation than they gain.
+Changing that would be a separate and deliberate decision, not a side effect of
+this rule.
+
+This applies to new issues and pull requests. Existing Chinese ones are not being
+rewritten.
 
 ---
 
@@ -200,6 +224,100 @@ RUN_INTEGRATION_TESTS=1 \
 
 ---
 
+## Database migrations
+
+**The rule: after a migration runs, the previous version of the code must still
+work.**
+
+Rolling back a deploy swaps the container image. It does not touch the database
+— the migration that already ran stays applied. A rollback therefore leaves you
+with *old code on the new schema*, and if that combination does not work, the
+rollback made things worse rather than better.
+
+This is not only about rollbacks. During a rolling deploy some tasks run the new
+image while others still run the old one, so old code meets the new schema on
+every normal deploy, for a few minutes, whether or not anything went wrong.
+
+The pattern has a name — **expand/contract**, also called parallel change. The
+guarantee it gives is **N-1**: one version back, not two.
+
+### Safe in a single deploy
+
+- Adding a table — old code does not know it exists
+- Adding a **nullable** column, or one with a default
+- Adding an index — but see [Not covered here: locking](#not-covered-here-locking)
+
+### Needs two deploys
+
+| Goal | Deploy 1 | Deploy 2 |
+|---|---|---|
+| Drop a column | Ship code that no longer reads or writes it (the column stays) | Once stable, migrate to drop it |
+| Add a NOT NULL column | Add it nullable, ship code that fills it, then backfill | Add the NOT NULL constraint |
+| Change a column type | Add the new column, dual-write, read the new one | Drop the old column |
+| Rename a column | Same as "add a new column + drop the old one" | |
+
+**The order matters: the code learns to fill the column first, and the
+constraint follows.** A constraint ratifies a fact that already holds — it
+cannot create it. Do it the other way round and every writer that has not caught
+up breaks the moment the constraint lands.
+
+Roll back at any point in between and the code you return to still agrees with
+the schema as it stands.
+
+Two practical notes on the NOT NULL case:
+
+- **Backfill only after deploy 1 has fully rolled out.** Tasks still running the
+  old image keep inserting NULLs, so backfilling early accomplishes nothing.
+- `SELECT count(*) FROM <table> WHERE <col> IS NULL` must be 0 before deploy 2.
+  If it is not, deploy 2's migration fails — which is the right outcome. It
+  stops the deploy before it breaks writes.
+
+### Do not rely on `downgrade()`
+
+Alembic generates a `downgrade()` for every migration. It is not an escape
+hatch: `downgrade()` on a dropped column recreates the column, but the data that
+was in it is gone.
+
+**Roll forward, not back.** The database has one current state and only moves
+forward — "return to yesterday's schema" is not an operation that exists. When a
+migration turns out to be wrong, ship another one that corrects it.
+
+### Not covered here: locking
+
+The lists above classify changes by *logical* compatibility — whether old code
+can still run. There is a second axis, **how long a migration holds a lock**,
+which this section does not cover.
+
+The clearest example is the one listed as safe above: `CREATE INDEX` takes a
+lock that blocks writes to the table for as long as the build takes. Logically
+harmless, operationally a write outage. `CREATE INDEX CONCURRENTLY` avoids it
+but cannot run inside a transaction, and `migrations/env.py` wraps every
+migration in one.
+
+> At the current scale — thousands of rows — every operation here finishes in
+> milliseconds and none of this binds. **Revisit when any table reaches the
+> hundred-thousand-row range.** The tools then are `CONCURRENTLY`, validating a
+> `CHECK` constraint instead of a direct `SET NOT NULL`, and a `lock_timeout`
+> with retries.
+
+### Why a document and not a CI check
+
+For now this is a convention enforced at review. Verifying backward
+compatibility automatically — parsing the Alembic operations and diffing them
+against what the previous version reads and writes — is not worth building, and
+a false negative would give false confidence.
+
+That is not an argument against automation as such. The cheap version does not
+try to prove compatibility: it blocks a list of known-dangerous operations
+(`drop_column`, `alter_column`, `drop_table`, `drop_constraint`) unless the
+migration carries an explicit justification. That is a reasonable next step once
+there is a production database to protect.
+
+The reasoning behind the rule is recorded in
+[ROADMAP_platform.md](docs/roadmap/ROADMAP_platform.md) item 11.1.
+
+---
+
 ## Code style
 
 - Follow PEP 8 and the conventions of the surrounding code.
@@ -264,7 +382,7 @@ release, publish a new version — never move an existing tag.
 
 ### API versioning
 
-Once the frontend consumes `/chat`, any change to the response schema is
+Once the frontend consumes `/v1/chat`, any change to the response schema is
 breaking. Therefore:
 
 - Version the path: `/v1/chat`

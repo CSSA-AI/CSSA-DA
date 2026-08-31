@@ -3,7 +3,13 @@ from contextlib import asynccontextmanager
 import logging
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, Request, status as http_status
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    Request,
+    status as http_status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -12,6 +18,7 @@ from slowapi.errors import RateLimitExceeded
 from app.api.deps import (
     close_rag_orchestrator,
     get_rag_orchestrator,
+    preload_rag_orchestrator,
     require_internal_api_key,
 )
 from app.core.config import settings
@@ -20,8 +27,15 @@ from app.core.middleware import (
     RequestContextMiddleware,
     SecurityHeadersMiddleware,
 )
-from app.core.rate_limit import chat_rate_limit, limiter
+from app.core.rate_limit import (
+    chat_global_rate_limit,
+    chat_rate_limit,
+    global_rate_limit_key,
+    limiter,
+    validate_rate_limit_config,
+)
 from app.schemas.search_result import SearchResult
+from app.services.chat_interactions import schedule_chat_interaction
 from app.services.readiness import check_readiness
 from app.services.system_status import get_system_status
 from app.services.rag.orchestrator import RAGOrchestrator
@@ -41,10 +55,25 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # Must stay OUTSIDE the preload try/except below: a malformed limit
+    # string has to stop the container at startup, not be logged and
+    # tolerated (slowapi would otherwise skip the layer per-request).
+    validate_rate_limit_config()
     try:
         await asyncio.to_thread(model_registry.preload_models)
     except Exception:
-        logger.exception("RAG model preload failed")
+        # Both the retriever and the reranker pull their model from the
+        # registry, so building the orchestrator now would retry the same
+        # failing load a second time and still not yield a usable pipeline.
+        # Nothing diagnostic is lost: /ready reports the database side.
+        logger.exception(
+            "RAG model preload failed; skipping RAG orchestrator preload"
+        )
+    else:
+        try:
+            await asyncio.to_thread(preload_rag_orchestrator)
+        except Exception:
+            logger.exception("RAG orchestrator preload failed")
     yield
     close_rag_orchestrator()
 
@@ -99,9 +128,13 @@ def _service_error_response(
 @app.exception_handler(RateLimitExceeded)
 def handle_rate_limit_exceeded(
     _: Request,
-    __: RateLimitExceeded,
+    exc: RateLimitExceeded,
 ) -> JSONResponse:
     # Override slowapi's default body with our shared safe error shape.
+    # exc.detail is the limit string ("10 per 1 minute" vs "500 per 1 day"),
+    # which tells ops whether one IP is being throttled or the site-wide
+    # budget is exhausted — it goes to the logs only, never the response.
+    logger.warning("Rate limit exceeded: %s", exc.detail)
     return JSONResponse(
         status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
         content={
@@ -175,12 +208,12 @@ class HealthResponse(BaseModel):
 
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
-    content: str = Field(min_length=1)
+    content: str = Field(min_length=1, max_length=4_000)
 
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=10_000)
-    chat_history: list[ChatMessage] = Field(default_factory=list)
+    chat_history: list[ChatMessage] = Field(default_factory=list, max_length=20)
     top_k: int | None = Field(default=None, ge=1, le=50)
     rerank_top_k: int | None = Field(default=None, ge=1, le=50)
 
@@ -211,11 +244,20 @@ def status(
     return get_system_status().to_dict()
 
 
-@app.post("/chat", response_model=ChatResponse, tags=["chat"])
+@app.post("/v1/chat", response_model=ChatResponse, tags=["chat"])
+# Decorator order is load-bearing: slowapi evaluates callable limits in
+# bottom-up registration order and charges a counter before judging it, so
+# the per-IP limit must sit closest to the function — its 429 then breaks
+# before the site-wide counter is charged. Swapped, one spamming IP could
+# burn the whole site's daily budget with rejected requests (see
+# docs/design/implemented/global-rate-limit.md and
+# test_per_ip_429s_do_not_burn_the_global_budget).
+@limiter.limit(chat_global_rate_limit, key_func=global_rate_limit_key)
 @limiter.limit(chat_rate_limit)
 def chat(
     request: Request,  # required by slowapi (looked up by this exact name)
     payload: ChatRequest,
+    background_tasks: BackgroundTasks,
     _: Annotated[None, Depends(require_internal_api_key)],
     orchestrator: Annotated[RAGOrchestrator, Depends(get_rag_orchestrator)],
 ) -> ChatResponse:
@@ -224,5 +266,18 @@ def chat(
         top_k=payload.top_k,
         rerank_top_k=payload.rerank_top_k,
         chat_history=[message.model_dump() for message in payload.chat_history],
+    )
+    # Starlette runs background tasks after the response body has been sent,
+    # so this adds nothing to /chat's latency. Only successful exchanges are
+    # recorded — a 503/504 raises before reaching this line, so queries that
+    # failed generation are not yet captured (ROADMAP_rag.md Phase 4.5 scopes
+    # v1 to the success path).
+    schedule_chat_interaction(
+        background_tasks,
+        query=payload.message,
+        answer=answer,
+        sources=sources,
+        top_k=payload.top_k,
+        rerank_top_k=payload.rerank_top_k,
     )
     return ChatResponse(answer=answer, sources=sources)

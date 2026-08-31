@@ -42,7 +42,7 @@ def test_smoke_test_api_checks_health_and_chat(monkeypatch):
         ("GET", "http://localhost:8000/ready", None, None, 5),
         (
             "POST",
-            "http://localhost:8000/chat",
+            "http://localhost:8000/v1/chat",
             {
                 "message": "墨尔本 校招",
                 "top_k": 2,
