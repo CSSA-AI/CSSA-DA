@@ -15,7 +15,7 @@ from psycopg2.extras import Json
 from psycopg2.pool import ThreadedConnectionPool
 
 from app.api.deps import get_rag_orchestrator
-from app.core.config import settings
+from app.core.config import rag_config, settings
 from app.core.middleware import SECURITY_HEADERS
 from app.main import app
 from app.services.rag.orchestrator import RAGOrchestrator
@@ -109,7 +109,7 @@ def real_stack_client(test_database_url, monkeypatch):
 
 def test_chat_end_to_end_over_real_stack(real_stack_client):
     response = real_stack_client.post(
-        "/chat",
+        "/v1/chat",
         headers={"X-API-Key": API_KEY},
         json={"message": "How do I apply for special consideration?"},
     )
@@ -133,12 +133,12 @@ def test_rate_limit_429_still_carries_middleware_headers(
     monkeypatch.setattr(settings, "CHAT_RATE_LIMIT", "1/minute")
 
     first = real_stack_client.post(
-        "/chat",
+        "/v1/chat",
         headers={"X-API-Key": API_KEY},
         json={"message": "How do I apply for special consideration?"},
     )
     second = real_stack_client.post(
-        "/chat",
+        "/v1/chat",
         headers={"X-API-Key": API_KEY},
         json={"message": "How do I apply for special consideration?"},
     )
@@ -156,3 +156,120 @@ def test_rate_limit_429_still_carries_middleware_headers(
     assert second.headers["X-Request-ID"]
     for name, value in SECURITY_HEADERS:
         assert second.headers[name.decode()] == value.decode()
+
+
+def _fetch_interactions(database_url):
+    with psycopg2.connect(database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT request_id, created_at, query, answer, retrieved, config
+                FROM chat_interactions
+                ORDER BY created_at;
+                """
+            )
+            return cur.fetchall()
+
+
+def test_chat_writes_one_interaction_row_over_the_real_stack(
+    real_stack_client,
+    test_database_url,
+    monkeypatch,
+):
+    """The data line's feeding tube, end to end against a real database."""
+    monkeypatch.setattr(settings, "DATABASE_URL", test_database_url)
+    monkeypatch.setattr(settings, "GIT_SHA", "integration-sha")
+    monkeypatch.setattr(settings, "CORPUS_SHA256", "integration-corpus")
+
+    response = real_stack_client.post(
+        "/v1/chat",
+        headers={"X-API-Key": API_KEY},
+        json={
+            "message": "How do I apply for special consideration?",
+            "top_k": 5,
+            "rerank_top_k": 3,
+        },
+    )
+
+    assert response.status_code == 200
+
+    rows = _fetch_interactions(test_database_url)
+    assert len(rows) == 1
+    request_id, created_at, query, answer, retrieved, config = rows[0]
+
+    # The response header is the join key back to this row and to the
+    # request's log lines — if these ever diverge, a user reporting a bad
+    # answer becomes untraceable.
+    assert request_id == response.headers["X-Request-ID"]
+    assert created_at is not None
+    assert query == "How do I apply for special consideration?"
+    assert "fake answer" in answer
+
+    assert len(retrieved) == 1
+    assert set(retrieved[0]) == {"doc_id", "score", "rank"}
+    assert retrieved[0]["rank"] == 1
+
+    assert config["top_k"] == 5
+    assert config["rerank_top_k"] == 3
+    # The fingerprint records the deployed rag-config.yaml, not whatever
+    # object happens to be wired in — this fixture builds the retriever by
+    # hand with a fake model, which no production path does (deps.py always
+    # constructs it from the same config).
+    assert config["embedding_model"] == rag_config["retriever"]["embedding_model"]
+    assert config["reranker_model"] == rag_config["reranker"]["model_name"]
+    assert config["git_sha"] == "integration-sha"
+    assert config["corpus_sha256"] == "integration-corpus"
+    assert config["prompt_version"].startswith("sha256:")
+
+
+def test_chat_still_answers_when_the_interaction_write_fails(
+    real_stack_client,
+    test_database_url,
+    monkeypatch,
+):
+    """A recording outage is invisible to the user and loses no query."""
+    monkeypatch.setattr(
+        settings,
+        "DATABASE_URL",
+        "postgresql://invalid:invalid@127.0.0.1:1/nonexistent",
+    )
+
+    response = real_stack_client.post(
+        "/v1/chat",
+        headers={"X-API-Key": API_KEY},
+        json={"message": "How do I apply for special consideration?"},
+    )
+
+    assert response.status_code == 200
+    assert "fake answer" in response.json()["answer"]
+    assert _fetch_interactions(test_database_url) == []
+
+
+def test_a_reused_request_id_does_not_overwrite_the_first_row(
+    real_stack_client,
+    test_database_url,
+    monkeypatch,
+):
+    """The middleware honours a caller-supplied X-Request-ID, so collisions
+    are reachable from outside. The first row must win."""
+    monkeypatch.setattr(settings, "DATABASE_URL", test_database_url)
+    headers = {"X-API-Key": API_KEY, "X-Request-ID": "reused-id"}
+
+    first = real_stack_client.post(
+        "/v1/chat",
+        headers=headers,
+        json={"message": "How do I apply for special consideration?"},
+    )
+    second = real_stack_client.post(
+        "/v1/chat",
+        headers=headers,
+        json={"message": "A different question entirely?"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    rows = _fetch_interactions(test_database_url)
+    assert len(rows) == 1
+    assert rows[0][0] == "reused-id"
+    assert rows[0][2] == "How do I apply for special consideration?"

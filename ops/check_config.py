@@ -67,6 +67,11 @@ def check_config(profile: str = "all") -> ConfigStatus:
         "OPENAI_API_KEY",
         "CHAT_API_KEY",
         "WECHAT_API_KEY",
+        # Never required, but worth seeing on a deploy: unset here means
+        # every chat_interactions row written by this container carries a
+        # null version coordinate.
+        "GIT_SHA",
+        "CORPUS_SHA256",
     )
     variables = [
         EnvVarStatus(

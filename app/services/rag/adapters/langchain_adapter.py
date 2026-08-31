@@ -1,8 +1,35 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+import logging
+from typing import Any, Dict, Iterable
 
 from langchain_core.runnables import RunnableLambda
+
+from app.schemas.search_result import SearchResult
+
+logger = logging.getLogger(__name__)
+
+
+def _log_results(
+    message: str,
+    stage: str,
+    results: Iterable[SearchResult],
+) -> None:
+    """Log doc_id/score/rank for a retrieval stage -- never the query or
+    article text. `request_id` is attached automatically by the JSON
+    formatter, so this is enough to trace a stage's output back to a
+    request without ever writing user content to stdout/CloudWatch.
+    """
+    logger.info(
+        message,
+        extra={
+            "stage": stage,
+            "results": [
+                {"doc_id": r.article.id, "score": r.score, "rank": r.rank}
+                for r in results
+            ],
+        },
+    )
 
 
 class LangChainRAGAdapter:
@@ -14,6 +41,7 @@ class LangChainRAGAdapter:
             top_k = inputs.get("top_k")
             kwargs = {"top_k": top_k} if top_k is not None else {}
             results = retriever.search(query=inputs["query"], **kwargs)
+            _log_results("Retrieved candidates", "retrieve", results)
             return {**inputs, "search_results": results}
 
         return RunnableLambda(retrieve)
@@ -28,6 +56,7 @@ class LangChainRAGAdapter:
                 search_results=inputs["search_results"],
                 **kwargs,
             )
+            _log_results("Reranked candidates", "rerank", results)
             return {**inputs, "search_results": results}
 
         return RunnableLambda(rerank)
