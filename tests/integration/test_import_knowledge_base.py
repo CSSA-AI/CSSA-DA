@@ -50,6 +50,8 @@ def _record(index=1):
         "created_at": datetime(2026, 7, 4, tzinfo=timezone.utc),
         "tags": ["unimelb", "special consideration"],
         "link": f"https://example.com/import-pipeline/{index}",
+        "modality": "doc",
+
     }
 
 
