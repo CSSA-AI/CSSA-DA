@@ -124,10 +124,11 @@ def test_context_loader_reuses_one_connection_for_batches(mock_connect):
     mock_connect.assert_called_once_with(DATABASE_URL)
     assert cursor.executemany.call_count == 2
     first_row = cursor.executemany.call_args_list[0].args[1][0]
-    assert first_row[-3:] == (
+    assert first_row[-4:] == (
         EMBEDDING_MODEL,
         EMBEDDING_REVISION,
         [0.1, 0.2],
+        "doc",
     )
     assert connection.commit.call_count == 2
     connection.close.assert_called_once_with()
