@@ -174,10 +174,11 @@ def _build_insert_sql(table_name: str):
             link,
             embedding_model,
             embedding_revision,
-            embedding
+            embedding,
+            modality
         )
         VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s::vector
+            %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s::vector, %s
         )
         ON CONFLICT (link, question_text) DO UPDATE SET
             content = EXCLUDED.content,
@@ -189,7 +190,9 @@ def _build_insert_sql(table_name: str):
             tags = EXCLUDED.tags,
             embedding_model = EXCLUDED.embedding_model,
             embedding_revision = EXCLUDED.embedding_revision,
-            embedding = EXCLUDED.embedding
+            embedding = EXCLUDED.embedding,
+            modality = EXCLUDED.modality
+
         WHERE {table_name}.content IS DISTINCT FROM EXCLUDED.content
             OR {table_name}.source IS DISTINCT FROM EXCLUDED.source
             OR {table_name}.author IS DISTINCT FROM EXCLUDED.author
@@ -199,7 +202,24 @@ def _build_insert_sql(table_name: str):
             OR {table_name}.tags IS DISTINCT FROM EXCLUDED.tags
             OR {table_name}.embedding_model IS DISTINCT FROM EXCLUDED.embedding_model
             OR {table_name}.embedding_revision IS DISTINCT FROM EXCLUDED.embedding_revision
+            OR {table_name}.modality IS DISTINCT FROM EXCLUDED.modality
     """).format(table_name=sql.Identifier(table_name))
+
+
+_VALID_MODALITIES = {"qa", "doc"}
+
+
+def _require_modality(record: dict[str, Any]) -> str:
+    if "modality" not in record:
+        raise ValueError("record is missing 'modality'")
+
+    modality = record["modality"]
+    if modality not in _VALID_MODALITIES:
+        raise ValueError(
+            f"invalid modality {modality!r}; must be one of {sorted(_VALID_MODALITIES)}"
+        )
+
+    return modality
 
 
 def _build_rows(
@@ -223,6 +243,7 @@ def _build_rows(
             embedding_model,
             embedding_revision,
             embedding,
+            _require_modality(record),
         )
         for record, embedding in zip(records, embeddings)
     ]
