@@ -719,10 +719,13 @@ LangChain/LangSmith tracing、metadata 和隐私策略继续延后到核心系�
 
 ### 16. 精细化限流（按用户维度）
 
-> ⏰ **2026-08-10：本项已升级为 v1 必做。** 原文写的是「等**前端和用户体系确定后**
-> 再做」—— 前端已确认是 Django + 已有登录，且[第 19.7 项](#197--已确认走-bff2026-08-10)
-> 已选定走 BFF。BFF 之后所有请求都从同一个 IP 发出，`get_remote_address` 失去区分度，
-> 全体用户会挤在一份 `10/minute` 里。
+> ⏰ **2026-09-06：退回 v2。** 2026-08-10 曾因「已选定走 BFF」把本项升级为 v1 必做
+> （BFF 之后所有请求都从同一个 IP 发出，`get_remote_address` 失去区分度）。19.8 已推翻
+> 那个前提 —— **v1 不走 BFF，浏览器直连，per-IP 仍然有区分度**，所以本项退回 v2，与
+> 临时 token 同批做（那时身份才第一次可信）。
+>
+> **v1 唯一要做的准备**：把 `/chat` 的限流 key 抽成具名函数（见 19.9），让 v2 的改动
+> 收敛在一个地方。⚠️ **v1 不要读 `X-User-Id`** —— 没有 BFF 时它由浏览器自己塞，可伪造。
 >
 > **实现要点**：`key_func` 改读 `X-User-Id`；**该 header 缺失时回退到 IP**，否则在
 > BFF 上线之前所有请求会挤进同一个桶，比现状更糟。不需要验证 header 真伪 —— 只有
@@ -829,7 +832,7 @@ ECR、Secrets、迁移编排）与模型选型完全无关，不需要等待。�
 > 诚实评估：有登录 + 纯内测 + 用户是熟人，**实际泄漏概率确实低**。对内测阶段这个
 > 风险水平可能已经可以接受 —— 前提是损失封顶（19.4）且前端仓库不公开。
 
-#### 19.3 两条路径（✅ 已选定 BFF，见 19.7）
+#### 19.3 两条路径（2026-08-10 选定 BFF，2026-09-06 已推翻，见 19.8）
 
 | 方案 | 成本 | 风险 |
 |---|---|---|
@@ -861,8 +864,10 @@ ECR、Secrets、迁移编排）与模型选型完全无关，不需要等待。�
       ✅ 已实现：`/chat` 上叠加常量 key 的第二层 slowapi 限流，`CHAT_GLOBAL_RATE_LIMIT`
       默认 `500/day`（CSS-10，实现细节与不变量见
       [docs/design/implemented/global-rate-limit.md](../design/implemented/global-rate-limit.md)）
-- [ ] **限制 `/chat` 输入体积** —— 见 19.5
-- [ ] **确认前端仓库不公开，或 key 不进仓库**
+- [x] **限制 `/chat` 输入体积** —— 见 19.5。✅ 已落地：`ChatMessage.content` 上限
+      4000 字符、`chat_history` 上限 20 条（`app/main.py`），正是 19.5 开的方子
+- [ ] **key 不进仓库** —— 前端仓库是 **public**（见 19.7），所以「不公开」这条路不存在。
+      唯一可做的是让 key 只从 Django 服务端注入模板、永不进 commit，见 19.8
 
 #### 19.5 `/chat` 输入体积无上限 🔴
 
@@ -899,7 +904,12 @@ key，和 `ops/smoke_test_api.py` / CI 用的分开。
 它**不解决「会不会泄漏」，只解决「泄漏之后能不能止损」** —— 但成本极低：吊销网页那把
 不影响内部工具，日志里也能区分流量来源。
 
-#### 19.7 ✅ 已确认：走 BFF（2026-08-10）
+#### 19.7 走 BFF（2026-08-10 决定，2026-09-06 已推翻）
+
+> ⛔ **本节的结论已被 19.8 推翻，保留原始记录以备回顾。** 推翻的理由是它少考虑了一个
+> 更便宜的选项：**key 公开 ≠ key 进 public repo**。下面的调查事实（myCSSA 是 Django +
+> DRF、仓库 public）仍然成立，由它们推出的「必须走 BFF」不成立。
+
 
 查了前端仓库 [CSSAInformationDepartment/myCSSA](https://github.com/CSSAInformationDepartment/myCSSA)，
 三个问题全部有答案：
@@ -955,6 +965,214 @@ git 历史里 —— 删掉文件也没用。
 
 走 BFF 之后浏览器只调自己的服务器（同源），`ALLOWED_ORIGINS` 只需保留本地开发用的
 `localhost` 条目。
+
+> ⛔ **这一小节随 19.8 一并作废。** 不走 BFF，浏览器就要跨域直连 CSSA-DA，CORS 反而从
+> 摆设升级成承重墙 —— 见 19.8「CORS 从摆设升级成承重墙」。
+
+#### 19.8 v1 不走 BFF，v2 走临时 token（2026-09-06 改口径）
+
+> **本节推翻 19.7。** 19.7 把「仓库是 public」直接推成「key 必然进 git 历史」，中间漏掉
+> 了一档更便宜的选项：**key 公开 ≠ key 进 public repo**。
+
+##### 推翻的理由
+
+让 key 由 Django 服务端注入 `@login_required` 的模板（值从 settings / 环境变量读，
+不进任何 commit），19.2 列的三条泄漏路径就变成：
+
+| 路径 | 19.7 的假设 | 加上「服务端注入」之后 |
+|---|---|---|
+| 1. 仓库公开 → key 进 git 历史（19.2 说的「最现实」） | 必然发生 | ✅ **堵住** |
+| 2. 用户截 Network 面板发群里 | 存在 | ⚠️ 仍在，但前提是已登录的内测熟人 |
+| 3. 内测用户写脚本绕过网页 | 存在 | ⚠️ 同上 |
+
+最现实的那条被堵掉，剩下两条的前提都是「已登录的熟人」。配上 19.4 的账单封顶，
+**这个风险水平对几十人的 v1 内测可以接受** —— 这正是 19.2 自己写下的判断（「有登录 +
+纯内测 + 用户是熟人，实际泄漏概率确实低」），当时只是没被当成一条可选路径。
+
+而且不走 BFF 还躲开了一项 19.7 没算的成本：**BFF 会让每个 chat 请求占住一个 Django
+worker 5–10 秒**（rerank 在 2 线程下 p50 5.8s / p95 8.4s，见第 18 项耦合点 4，还不含
+OpenAI 往返）。myCSSA 的 worker 数是按登录这类毫秒级请求配的。
+
+##### v1 做什么（四件）
+
+- [ ] **OpenAI 后台设硬性支出上限** —— 见 19.4。**整个方案的地基**：不走 BFF 的全部
+      论证都架在「损失封顶」上，而它至今没勾
+- [ ] **key 从 Django 服务端注入模板，不进 commit** —— 要交代给前端团队的就这一句
+- [ ] **CSSA-DA 侧把鉴权的形状摆对** —— v1 唯一的代码活，**纯重构、行为零变化**，见 19.9
+- [ ] **`ALLOWED_ORIGINS` 配生产域名 + smoke test 加正反两条 CORS 断言** —— 部署那天做
+
+**明确不做**：BFF、`X-User-Id` header、`chat_interactions` 的 `user_id` 列。
+
+⚠️ **v1 不要加 `X-User-Id`。** 没有 BFF，这个 header 只能由浏览器自己塞，F12 就能改成
+任意值。**加了比不加更糟** —— 半年后没人记得它不可信，照样会拿去做分析。同理
+`user_id` 列先不加：宁可为空，也不要一列你会当真去用的假数据。
+
+##### CORS 从摆设升级成承重墙
+
+浏览器跨域直连 CSSA-DA 之后，手上的防线只剩三样：API key（内测熟人看得到）、限流
+（按 IP，宿舍 / 校园 WiFi 共享）、CORS。**三样里只有 CORS 能区分「我们自己的前端」和
+「别的网站」。**
+
+要注意的是 CORS 执行方是**浏览器**不是服务器：请求照样到达、照样花 OpenAI 的钱，只是
+浏览器拒绝把响应交给那段 JS。所以它挡得住「`evil.com` 借你已登录用户的浏览器调你的
+API」，**挡不住任何一个已经拿到 key 的人用 `curl` 直调**。这决定了它是必要的、但替代
+不了「key 不进仓库」那条。
+
+配置要点：
+
+- `ALLOWED_ORIGINS` 默认值是两个 localhost（`app/core/config/settings.py`），
+  **上线不改，前端 100% 被浏览器拦**
+- origin 是**字符串精确比较**：协议、端口、末尾斜杠差一个字符都不算。内测域名和正式
+  域名不同就两个都列
+- ⚠️ **绝不能写 `*`。** 当前 `allow_credentials=False`，所以 `*` 能正常工作、不报任何
+  错 —— **这个坑没有任何护栏**，只有 code review
+- 验收要跑**正反两条**：允许的 origin 拿到 `access-control-allow-origin`，不允许的拿
+  不到。只测通过的那一半等于没测
+
+> `X-API-Key` 是自定义头，会触发 preflight `OPTIONS`。这一点已经处理对了 —— CORS
+> middleware 在最外层（`app/main.py`），preflight 在进入鉴权和限流之前就被答掉，
+> **不会吃掉用户的 `10/minute` 配额**。
+
+##### 什么时候转 token
+
+**主触发器：v2 做 streaming（[ROADMAP_rag.md](ROADMAP_rag.md) 0.7）。** 排同一个窗口 ——
+走 token 的直连正是为了让 streaming 不别扭，分两次做等于同一片代码动两遍。
+
+次触发器（任意一个先到就提前）：
+
+- 内测扩到几百人，按 IP 限流开始误伤宿舍 / 校园 WiFi 的用户
+- v3 要用 `chat_interactions` 做 query 归因，需要可信的 `user_id`
+
+**不是触发器**：「key 可能泄漏」。那个风险已经被支出上限 + key 不进 git 封住了，别拿
+它当理由提前动手。
+
+**唯一的外部前置条件**：前端团队有人能改 myCSSA 的 Django 后端且有排期。这是整件事里
+唯一不由我们控制的部分，**在触发器到来之前就要先问一声**。
+
+##### 转的时候怎么做（五步，无 flag day）
+
+前提：**两套鉴权并存是终态，不是过渡。** `ops/smoke_test_api.py`、CI、手动调试永远走
+`X-API-Key`；只有浏览器走 token。想清楚这一点，整个切换就不需要任何「某天全体切过去」
+的时刻。
+
+1. **CSSA-DA 先接受 Bearer token** —— `require_caller`（19.9）加第二条路径。三件事必须
+   在这一步就做，事后补来不及：**签名密钥按列表读**（current + previous，否则轮换那天
+   全站 401）、**结构化日志加 `auth_path` 字段**（`api_key` / `token`，第 4 步全靠它）、
+   **验签留 60 秒时钟 leeway**。部署后零客户端使用，**线上无影响**
+2. **加 `chat_interactions.user_id`（可空）** —— 可空加列，按 11.1 是安全 migration，
+   单次部署即可。顺手在数据字典里写明：**NULL 表示 v1 期间的行**，不然半年后有人当
+   bug 查
+3. **Django 加 `/api/chat-token`，前端切过去** —— 15 分钟有效期，前端收到 401 时
+   **静默重取一次再重发**（这个重试不写，就会有查不出原因的偶发失败）。切完之后限流
+   维度**自动**从 IP 变成 user_id，不需要翻任何开关
+4. **看 `auth_path` 确认浏览器流量 100% 走 token** —— 除内部工具外不该再有浏览器 UA 走
+   `api_key`。这是第 5 步的前置，不能跳
+5. ⚠️ **轮换 `CHAT_API_KEY`** —— 那把 key 在 v1 期间**进过每一个内测用户的浏览器**。
+   不换掉，前面四步全白做：新门装好了，旧钥匙还在几十个人手里。换完之后新 key 只发给
+   smoke test 和 CI，**再也不进浏览器**。**这一步最容易忘，而且忘了没有任何报错** ——
+   把它写进第 5 步的验收条件
+
+##### token 方案下没有 `X-User-Id`
+
+user_id 从 JWT 的 `sub` 里来，**签名本身就是它的证明**，CSSA-DA 不读任何请求头。
+
+`X-User-Id` 从来不是一个「传值的方式」，它是一个**信任假设**（「只有 BFF 能发出这个
+请求，所以我信它说的话」）。token 把这个假设换成密码学保证 —— **两者是替代关系，不是
+叠加关系**。既接受 token 又接受 `X-API-Key` + `X-User-Id`，等于留了一条「不用签名也能
+声称自己是谁」的后门，前面所有工作作废。
+
+**规则：用户身份只有一个来源 —— 签过名的 token。** `internal` 那条路径永远
+`user_id = None`，没有办法指定任何用户。
+
+> ⚠️ **半年后最可能把这个洞捅回来的不是攻击者，是调试便利**：「我想用内部 key 复现某个
+> 用户的问题，加个 `X-User-Id` 就能扮演他，方便」。这一行加下去前面全作废 —— 持有内部
+> key 的地方（CI 配置、别人的 `.env`、某次 CI 日志）比你想的多。真需要时**用签名密钥
+> 自己签一个 token**，走的还是同一条验签路径，一个特例都不用开。
+
+##### 用 HS256 就够，不用非对称
+
+RS256 的好处是「验签方无法签发」，但这里验签方就是 CSSA-DA 自己 —— 它伪造自己的 token
+毫无意义。**两个服务都是我们自己的时候，对称密钥不是妥协。**
+
+#### 19.9 把鉴权的形状摆对（v1 唯一的代码活）
+
+**纯重构：不改任何行为，只把「这个请求是谁发的」从丢掉变成留下。**
+
+现在 `app/main.py` 的 `/v1/chat` 和 `/status` 两处写的是：
+
+```python
+_: Annotated[None, Depends(require_internal_api_key)],
+```
+
+那个 `_` 是问题所在 —— **鉴权跑完什么都没交出来**，它的类型标注就是 `None`。在「只有
+一把共享 key」的世界里这没问题；但 v2 有三处同时依赖「调用方是谁」：限流按谁计数、
+`chat_interactions.user_id` 填什么、日志里的 `auth_path`。**这三处现在都拿不到那个
+信息**，加 token 那天就会被迫在三个地方各自去翻 header 或解 token —— 那才是真的两套
+鉴权。
+
+改成让鉴权**产出一个主体**：
+
+```python
+@dataclass(frozen=True)
+class Principal:
+    kind: Literal["internal"]     # v2 加 "user"
+    user_id: str | None           # v1 永远 None
+    rate_limit_key: str           # v1 永远 f"ip:{...}"
+```
+
+限流、日志、`user_id` 三处**只认这个对象**，永远不去碰 header 或 token。分叉被关在
+`require_caller` 一个函数里 —— 只要没有第二个地方写 `if token... elif api_key...`，
+它就是「一套鉴权系统 + 两种凭证类型」，不是两套。
+
+> 两种凭证类型是**行业常态**，不是将就：AWS（长期 IAM key + STS 临时凭证）、
+> Stripe（secret / publishable / OAuth）、GitHub（PAT / OAuth / App token）都是这个形状，
+> 而且 AWS 自己的建议就是「能用临时凭证就用临时凭证，长期 key 留给少数不得不用的地方」。
+> 反过来说，**现在这个「内测用户浏览器和 CI 共用一把 key」才是需要解释的设计** ——
+> 19.6 早就吐槽过它。
+
+##### 限流器怎么拿到它
+
+slowapi 的 key_func 只收 `request`，收不到 FastAPI 解析出来的依赖，所以 `Principal` 要
+放在 `request.state` 上传过去：
+
+```python
+def chat_rate_limit_key(request: Request) -> str:
+    principal = getattr(request.state, "principal", None)
+    return principal.rate_limit_key if principal else f"ip:{get_remote_address(request)}"
+```
+
+**这个方案成立的前提是「鉴权一定先跑」，已确认**：slowapi 的 `sync_wrapper`
+（`slowapi/extension.py`）是被 FastAPI **带着已解析好的依赖参数**调用的，进去之后才做
+限流检查：
+
+```text
+FastAPI 解析依赖（含 require_caller）
+   └─► slowapi wrapper 做限流检查
+         └─► 端点函数体
+```
+
+> 顺带说明一件既有行为：因为鉴权在前，**401 的请求根本不会被计入限流** —— 这就是第 1
+> 项记的那个已知取舍（狂试错误 key 不计数）。**本次重构不改变它**，想改是第 16 项的事。
+
+##### 三个坑
+
+1. **`getattr` 兜底不能省。** 将来某条路由挂了限流却忘了挂鉴权，直接写
+   `request.state.principal` 会抛 `AttributeError`，而它发生在 slowapi 的 wrapper 里 ——
+   表现是 500，不是一条清楚的报错
+2. **`rate_limit_key` 必须带 `user:` / `ip:` 前缀。** 否则 v2 那天，一个 id 恰好长得像
+   IP 的用户会和那个 IP 共用一个桶。现在就写进去，虽然 v1 只有 `ip:` 一种
+3. **别动那两个限流装饰器的顺序**（`app/main.py` 上那段注释是有分量的）。只换
+   key_func；顺序的理由在 v2 换成 per-user 之后原样成立，顺手调整会踩到
+   `test_per_ip_429s_do_not_burn_the_global_budget`
+
+##### 验收
+
+**现有测试一条都不用改，全绿。** `kind` 只有一个值、`user_id` 恒为 `None`、
+`rate_limit_key` 恒等于原来的 `get_remote_address` 结果 —— 行为面上完全等价。要是发现
+哪个测试需要跟着改，那就是不小心改了行为，回头看。
+
+新增测试两条：`Principal` 确实被 `/v1/chat` 和 `/status` 拿到了；鉴权失败时
+`request.state.principal` 不存在而限流回退到 IP 没有炸。
 
 ---
 

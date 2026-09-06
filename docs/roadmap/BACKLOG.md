@@ -35,12 +35,12 @@
 
 | Title | Track | Size | 出处 |
 |---|---|---|---|
-| Add a BFF proxy endpoint in myCSSA (Django) | platform | 1d | Platform 19.7 —— 前端仓库是 Django + **public**，走 BFF 已定 |
+| Keep the chat API key out of any commit (inject it server-side in myCSSA) | platform | 0.5d | Platform 19.8 —— 取代原来的 BFF 那条 |
 | Fix doc_id chain and add `/v1/chat` prefix | rag | 1d | RAG 0.1 —— 契约变更,须赶在前端接入前 |
 | Cap `/chat` input size (`chat_history` length + item count) | rag | 1h | RAG 0.8 / Platform 19.5 —— 并进上一条 |
 | Set OpenAI hard spend cap + global rate limit | platform | 0.5d | Platform 19.4 —— 唯一兜住账单的东西 |
-| Switch rate-limit key from IP to `X-User-Id` (fall back to IP when absent) | platform | 0.5d | 第 16 项 —— BFF 的必然要求 |
-| Add `user_id` column to `chat_interactions` | rag | 0.5d | RAG 4.5 |
+| Reshape auth into a `Principal` (pure refactor, behaviour unchanged) | platform | 0.5d | Platform 19.9 —— v1 唯一的代码活,取代原来的 X-User-Id 那条 |
+| Configure production CORS + assert both directions in the smoke test | platform | 0.5d | Platform 19.8 —— 直连之后 CORS 是承重墙 |
 
 ## High(v1)
 
@@ -130,7 +130,12 @@ doc_id 链路           → blocks 1，且有硬截止
 ```
 
 > 「问前端那三个问题」原本 blocks 3 条，**2026-08-10 已解决** —— 查仓库即得答案：
-> myCSSA 是 Django + DRF 且仓库 public，因此走 BFF。那三条已从 Blocked 移入 Urgent/High。
+> myCSSA 是 Django + DRF 且仓库 public。那三条已从 Blocked 移入 Urgent/High。
+>
+> ⚠️ **2026-09-06 改口径**：由此得出的「走 BFF」结论**已被推翻**（见
+> [ROADMAP_platform 19.8](ROADMAP_platform.md)）。v1 改为浏览器直连 + key 不进 commit，
+> 临时 token 推到 v2。上面 Urgent 里的 BFF / `X-User-Id` / `user_id` 三条已相应替换 ——
+> `X-User-Id` 与 `chat_interactions.user_id` **整体推到 v2**，与 token 同批做。
 
 ---
 
