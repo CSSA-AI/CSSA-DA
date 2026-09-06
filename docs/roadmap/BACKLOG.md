@@ -1,11 +1,14 @@
-# 初始 Backlog —— Linear 导入清单
+# 初始 Backlog —— GitHub issues 导入清单
 
 本文是三条 roadmap 的一个**视图**:把所有条目按「是否被阻塞」和优先级摊平,方便一次性
-导入 Linear。
+导入 GitHub issues。
 
-> ⚠️ **本文只在首次导入时是事实源。** 一旦 issue 进了 Linear,**状态以 Linear 为准**,
+> ⚠️ **本文只在首次导入时是事实源。** 一旦 issue 建到了 GitHub,**状态以 GitHub 为准**,
 > 本文不再更新 —— 否则两边必然分叉。设计细节永远在
-> [roadmap](.) 和 [design](../design/) 里,Linear issue 只放链接,不复制内容。
+> [roadmap](.) 和 [design](../design/) 里,issue 只放链接,不复制内容。
+
+> **2026-09-06:本项目已停用 Linear,改用 GitHub issues。** 下面的优先级口径原样保留
+> (它讲的是怎么排序,与用什么工具无关);「结构建议」一节已按 GitHub 的标签体系重写。
 
 | 线 | 详细内容 |
 |---|---|
@@ -139,33 +142,47 @@ doc_id 链路           → blocks 1，且有硬截止
 
 ---
 
-## Linear 结构建议
+## GitHub 结构建议
 
-三个正交的轴，互不重叠：
+三个正交的轴，互不重叠。GitHub 没有 Linear 的 Project / 标签组，所以三根轴全部落在
+**标签**上，用前缀区分：
 
 | 维度 | 用什么 | 回答 |
 |---|---|---|
-| **Project** | v1 / v2 / v3 / v4 | 这件事**属于哪个版本** |
-| **Label（Stream）** | Platform / RAG / Data | 这件事**属于哪条线** |
-| **Status** | Todo / Blocked / … | 这件事**现在能不能干** |
+| **版本** | 标签 `v1` / `v2` / `v3` / `v4` | 这件事**属于哪个版本** |
+| **线** | 标签 `stream:platform` / `stream:rag` / `stream:data` | 这件事**属于哪条线** |
+| **可领性** | 标签 `blocked`（有 / 无） | 这件事**现在能不能干** |
 
 关键是后两个的区分：**「属于 v3」和「现在能不能做」是两回事** —— 例如闭卷编写 query
-交付的是 v3 的 gold set，但现在就该开工，所以 Project = v3、Status = Todo。
+交付的是 v3 的 gold set，但现在就该开工，所以打 `v3`、**不打** `blocked`。
 
 ```
-Project:  v1 — 能跑（内测）        ← Urgent + High
-          v2 — 能用（小助手进库）   ← 语料建设、S3、lint、评估工具（提前做）
+版本标签: v1 — 能跑（内测）        ← Urgent + High
+          v2 — 能用（知识库有内容） ← 语料建设、S3、lint、评估工具（提前做）
           v3 — 能信（选型完成）     ← 闭卷 query、标注 guideline、gold set、实验矩阵
           v4 — 能活（运营化）       ← 群聊、CI/CD、反馈闭环、PEFT
 
-Label:    Platform / RAG / Data（Stream 组，workspace 里已存在）
-Status:   Blocked / Todo / In Progress / In Review / Done
-Relation: 用 Linear 原生的 blocked-by，别写在描述里
-Cycle:    2 周
+线:       stream:platform / stream:rag / stream:data / stream:frontend / stream:uiux
+优先级:   priority:urgent / priority:high / priority:medium / priority:low
+阻塞:     blocked 标签 + 正文里写 "Blocked by #87"（GitHub 会自动双向交叉引用）
+状态:     open / closed —— 没有 In Progress 这一档，看 PR 的关联
 ```
 
+⚠️ **`blocked` 的一律打标签,并且默认视图要把它滤掉** —— 十二个人自助领任务,
+默认看到的必须等于「现在真能领的活」:
+
+```
+gh issue list --search "-label:blocked"
+```
+
+⚠️ **GitHub 没有原生的 blocked-by 关系**,所以阻塞源必须写进正文(`Blocked by #87`),
+不能只留在标题或口头。
+
 **每个 issue 的 DoD 直接引用 [ROADMAP_versions.md](ROADMAP_versions.md) 的退出标准**,
-不要在 Linear 里重写。
+不要在 issue 里重写。
+
+> 现有标签只有 `v1` 和 `beginner`。上面其余的标签**尚未创建** —— 首次导入前先建好,
+> 否则 `gh issue create --label` 会直接报错。
 
 ---
 
