@@ -998,7 +998,8 @@ OpenAI 往返）。myCSSA 的 worker 数是按登录这类毫秒级请求配的�
 - [x] **OpenAI 后台设硬性支出上限** —— 见 19.4。**整个方案的地基**：不走 BFF 的全部
       论证都架在「损失封顶」上。✅ **已完成（2026-09-06）**，本节的前提于此成立
 - [ ] **key 从 Django 服务端注入模板，不进 commit** —— 要交代给前端团队的就这一句
-- [ ] **CSSA-DA 侧把鉴权的形状摆对** —— v1 唯一的代码活，**纯重构、行为零变化**，见 19.9
+- [x] **CSSA-DA 侧把鉴权的形状摆对** —— **已落地（2026-09-13，#96/#99）**，纯重构、
+      行为零变化，见 19.9 与 [caller-identity.md](../design/implemented/caller-identity.md)
 - [ ] **`ALLOWED_ORIGINS` 配生产域名 + smoke test 加正反两条 CORS 断言** —— 部署那天做
 
 **明确不做**：BFF、`X-User-Id` header、`chat_interactions` 的 `user_id` 列。
