@@ -16,3 +16,8 @@ output "private_subnet_ids" {
 output "availability_zones" {
   value = local.azs
 }
+
+# The address `docker push` needs, and what the ECS task definition points at.
+output "ecr_repository_url" {
+  value = aws_ecr_repository.api.repository_url
+}
