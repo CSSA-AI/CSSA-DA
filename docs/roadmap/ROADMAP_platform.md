@@ -1177,6 +1177,79 @@ FastAPI 解析依赖（含 require_caller）
 
 ---
 
+### 20. 首次语料导入生产 RDS（2026-09-13 新增，v1 阻塞项）
+
+**Phase 2 部署的是一个没有数据的服务，而这个服务在没有数据时按设计拒绝服务。**
+这一项补的是 Phase 2 与 Phase 3 之间的那条缝。
+
+#### 门是怎么关上的
+
+`app/services/readiness.py` 的判定是有顺序的：`DATABASE_URL` → 连不连得上 →
+表在不在 → **当前模型的行数** → 模型 ready 没有。第四步不是「表里有没有行」：
+
+```sql
+SELECT COUNT(*) FROM knowledge_base
+WHERE embedding_model = %s
+  AND embedding_revision IS NOT DISTINCT FROM %s;
+```
+
+所以有两种「空」，给同一个 503：真空库；以及库里有行、但那是**别的 embedding
+model / revision** 嵌的（将来换嵌入模型时，旧行一行都不算数 —— 这是对的，维度不
+匹配的向量比没有更糟）。
+
+#### 在 ECS 上的表现
+
+```text
+ALB target group 打 /ready → 一直 503 → target 永远 unhealthy
+  → ALB 不导流 → ECS 判定健康检查未通过 → 回收重启 → 循环
+```
+
+看到的是 **task 反复起停**，与「SG 没放行」「subnet 路由不对」「RDS 连不上」的表象
+完全一致。**根因不在网络，而排查方向会先去网络** —— 写下这一项主要就是为了省掉
+那一天。
+
+#### 卡点：语料不在镜像里
+
+导入命令是现成的（`python -m pipelines import-knowledge-base`：读处理后的记录 →
+现场算 embedding → 分批写 Postgres），但 `.dockerignore` 里 `data/*` 是排除的（只留
+`demo_data.json`）。**pipeline 镜像有模型、有代码、没有数据** —— 语料只在开发者的机器上。
+
+#### 三条路
+
+| 路 | 需要什么 | 代价 |
+|---|---|---|
+| **A. 本地直连 RDS** | RDS 公网可达（公有子网 + SG 放行），或 bastion / SSM 端口转发 | 快；但为一次性导入放宽 RDS 的网络形状，「临时开了忘了关」是经典事故 |
+| **B. 一次性 ECS task，数据从 S3 拉** | 需要 `S3Storage` —— 那是 Phase 3 | 架构上最对，但把 Phase 3 提前，Phase 2 因此拖长 |
+| **C. 语料烤进 pipeline 镜像** | 改 `.dockerignore` | 最快；84MB 进镜像层，且每次更新语料都要重建镜像 |
+
+**选 A，且走 SSM 端口转发，不开公网 RDS。** RDS 留在私有子网、不给公网地址、SG 不加
+白名单，用 SSM Session Manager 转发到本地跑导入。代价是要带上 SSM 的 IAM 权限和一个
+跳板（或用 ECS exec 从已有 task 进）。
+
+若判断跳板太重，退到 **C 的一次性版本**：只为首次导入构建一个带语料的镜像，导完
+丢弃 —— 但必须在 PR 里写明它是一次性的。**不要让它变成常规路径**，否则半年后没人
+记得语料是怎么进去的。
+
+**不选 B**：为首次导入提前做 `S3Storage`，等于把 Phase 3 塞进 Phase 2。
+
+#### 两个连带的坑
+
+1. **`CREATE EXTENSION vector` 需要高权限。** migration 0001 里有
+   `CREATE EXTENSION IF NOT EXISTS vector`，RDS 上普通应用用户建不了扩展 —— 要么用
+   master user 跑 migration，要么先手工建好扩展。这直接决定第 11 项那个部署关卡**用
+   哪个凭据跑**：跑 migration 的身份和跑应用的身份本来就不该是同一个，这是顺手把它们
+   分开的时机。
+2. **`CORPUS_SHA256` 要在导入那一刻记下来。** 首次导入那份语料的 hash 就是之后所有
+   `chat_interactions` 行的「哪份语料」坐标。事后补算容易对不上（文件被动过、重跑过），
+   而这一列的价值恰恰在于半年后拿它做对照。
+
+#### 验收
+
+`/ready` 返回 200 且 `knowledge_base_rows` > 0，且这个数与本地导入报告的条数**对得上**。
+对不上说明导了一半 —— 导入有 checkpoint，`--reset-checkpoint` 可以重来。
+
+---
+
 ## 当前已经具备的部署基础
 
 以下部分已经适合继续向 AWS 推进：
@@ -1281,7 +1354,9 @@ adapter 只在 `predict` 时暴露），此时 `/ready` 若仍报 200，会把�
 2. 配置 ECS 和 ALB health check。
 3. 配置访问 OpenAI 所需的 outbound network。
 4. 将 migration 作为部署关卡。
-5. 部署 API 并运行 smoke test。
+5. **首次语料导入生产 RDS（第 20 项）** —— 必须在 smoke test 之前，否则 `/ready`
+   永远不会转绿，而表象看起来像网络配错了。
+6. 部署 API 并运行 smoke test。
 
 ### Phase 3：生产 Pipeline
 
