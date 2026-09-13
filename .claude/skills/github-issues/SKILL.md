@@ -233,8 +233,24 @@ See [CONTRIBUTING.md](../../../CONTRIBUTING.md).
 
 ## Language
 
-Descriptions in Chinese, titles in English. Match the surrounding repo: roadmaps
-and design docs are Chinese, code, commits and anything on GitHub are English.
+**Titles: English. Bodies: bilingual — English first, then the same content in
+Chinese**, separated by `---` and a `# 中文` heading.
+
+English leads because it is what decides whether the issue can be picked up at
+all: this repository already receives pull requests from contributors outside the
+club who do not read Chinese, and that is the whole reason
+[CONTRIBUTING.md](../../../CONTRIBUTING.md#language) puts GitHub in English. The
+Chinese half follows because these issues carry the design argument the team
+actually has, and that argument is sharper in the language the team thinks in.
+
+Write both halves as real prose. A machine-shaped restatement of the other half
+is worse than either one alone — the reader who needs it will notice, and stop
+reading the section they need.
+
+> This supersedes an earlier rule here that said "descriptions in Chinese", which
+> contradicted the second half of its own paragraph and left the choice
+> unresolved. Roadmaps and design documents under `docs/` stay Chinese-only;
+> commits, PR descriptions and review threads stay English-only.
 
 Pass long bodies to `gh issue create --body-file` (a heredoc or a temp file),
 never as an inline `--body` with escape sequences.
