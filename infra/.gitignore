@@ -1,0 +1,11 @@
+# State records what Terraform built, and can contain resource attributes that
+# should not be public. This repository is public, so it never goes in.
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars
+!example.tfvars
+
+# Crash logs can contain the same.
+crash.log
+crash.*.log
