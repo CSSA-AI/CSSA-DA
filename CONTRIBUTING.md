@@ -43,9 +43,16 @@ stack in Docker (Postgres + migrations + API), see
 
 ## Language
 
-**Everything on GitHub is written in English**: issue titles and bodies, pull
-request titles and descriptions, and review and comment threads. Commit messages
-are English too — see [Commit messages](#commit-messages).
+**Everything on GitHub is written in English**: issue titles, pull request titles
+and descriptions, and review and comment threads. Commit messages are English too
+— see [Commit messages](#commit-messages).
+
+**Issue bodies are the one exception: they are bilingual.** English first, then
+the same content in Chinese below a `---` and a `# 中文` heading. Issues are where
+someone decides whether to pick work up, so the English has to be there; they are
+also where this team argues about design, and that argument is sharper in the
+language the team thinks in. Both halves are written as prose — a mechanical
+restatement of the other half helps nobody.
 
 The reason is who reads them. This repository already receives pull requests from
 contributors outside the club who do not read Chinese. An issue they cannot read
