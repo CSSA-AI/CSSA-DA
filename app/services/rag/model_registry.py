@@ -143,16 +143,21 @@ class ModelRegistry:
 
     def _load_reranker_model(self) -> CrossEncoder:
         config = rag_config["reranker"]
+        # Truncation length is a latency and quality knob, not a model detail:
+        # left unset, it silently follows the tokenizer default, which is 512
+        # for MiniLM-style models but 8192 or more for long-context rerankers.
+        length_kwargs = {"max_length": config["max_length"]} if config.get("max_length") else {}
         local_path = settings.local_model_path("reranker")
         if local_path:
             model = CrossEncoder(
                 str(local_path),
                 local_files_only=True,
+                **length_kwargs,
             )
         else:
             revision = config.get("model_revision")
             model_kwargs = {"revision": revision} if revision else {}
-            model = CrossEncoder(config["model_name"], **model_kwargs)
+            model = CrossEncoder(config["model_name"], **model_kwargs, **length_kwargs)
 
         adapter_path = config.get("adapter_path")
         if adapter_path:

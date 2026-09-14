@@ -209,6 +209,59 @@ def test_load_reranker_model_uses_pinned_remote_model(monkeypatch):
     ]
 
 
+def test_load_reranker_model_passes_configured_max_length(monkeypatch):
+    registry = model_registry.ModelRegistry()
+    calls = []
+    monkeypatch.setattr(model_registry.settings, "MODEL_DIR", None)
+    monkeypatch.setattr(
+        model_registry,
+        "rag_config",
+        {
+            "reranker": {
+                "model_name": "example/reranker",
+                "model_revision": "revision-123",
+                "max_length": 512,
+                "adapter_path": None,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        model_registry,
+        "CrossEncoder",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or object(),
+    )
+
+    registry.get_reranker_model()
+
+    assert calls == [
+        (("example/reranker",), {"revision": "revision-123", "max_length": 512})
+    ]
+
+
+def test_load_reranker_model_passes_max_length_to_local_directory(tmp_path, monkeypatch):
+    reranker_dir = tmp_path / "reranker"
+    reranker_dir.mkdir()
+    registry = model_registry.ModelRegistry()
+    calls = []
+    monkeypatch.setattr(model_registry.settings, "MODEL_DIR", tmp_path)
+    monkeypatch.setattr(
+        model_registry,
+        "rag_config",
+        {"reranker": {"model_name": "example/reranker", "max_length": 512, "adapter_path": None}},
+    )
+    monkeypatch.setattr(
+        model_registry,
+        "CrossEncoder",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or object(),
+    )
+
+    registry.get_reranker_model()
+
+    assert calls == [
+        ((str(reranker_dir.resolve()),), {"local_files_only": True, "max_length": 512})
+    ]
+
+
 def test_load_reranker_model_applies_configured_adapter(monkeypatch):
     registry = model_registry.ModelRegistry()
     model = MagicMock()

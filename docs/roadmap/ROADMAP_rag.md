@@ -189,6 +189,18 @@ Recall@k 曲线(Phase 5),但现在就该调大到一个合理量级。
 3. **绝对值只属于这个模型**。[0.4](#04-reranker-的任务类型是错的) 换掉 ms-marco 之后
    必须重测,这组数只能当基线用
 
+> ✅ **2026-09-15 已重测**([issue #90](https://github.com/CSSA-AI/CSSA-DA/issues/90)):
+> 换成 `mmarco-mMiniLMv2-L12-H384-v1`、截断 256 后,同一台机器(x86 Ryzen 7 9800X3D,
+> 候选池 30)上 reranker 单段 p50 **3738 → 1647ms(2 线程)、2507 → 1133ms(4 线程)**。
+> 注意这台机器和上表不是同一台,只在同表内比较。复现:`python ops/benchmark_reranker.py --threads 2`。
+>
+> ⚠️ **同一次评估测出了比 reranker 更紧的约束:检索器召回。** 用本地 LLM 按文档生成的
+> 真实风格中文提问,正确文档进入 embedding top-30 的比例只有 **37%**(提问 → 中文文章)、
+> **50%**(提问 → 英文 handbook)。换了 reranker 之后,「检索器召回 × reranker 排进前 5」的
+> 端到端命中率在前者上是 32%,离 37% 的天花板只差 5 个点 —— **再往上换更大的 reranker
+> 几乎买不到东西,瓶颈在召回**。评估语料 6578 篇,比线上现有的 2312 行大,线上召回可能
+> 略高;方法和局限见 [reranker-selection.md](../design/implemented/reranker-selection.md)。
+
 另一个成本来源:微信语料是整篇文章入库(未截断 token 数 p50 ≈ 1380),而 cross-encoder
 在 512 处截断 —— **几乎每个候选都是一次满长度前向**。将来若做更细的分块,每候选成本会
 直接下降。
@@ -236,6 +248,22 @@ Recall@k 曲线(Phase 5),但现在就该调大到一个合理量级。
 
 **换掉 ms-marco 这个动作没有变**,变的是拿什么标准挑替代品。判据的这次修订
 必须先于任何候选评估的提交落地——这是完成标准的一部分,不是建议。
+
+> ✅ **2026-09-15 已落地**([issue #90](https://github.com/CSSA-AI/CSSA-DA/issues/90)):
+> `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`,`max_length: 256`。6 个候选、5 组分开记录的
+> 查询集、3 种截断长度、CPU 延迟网格,见
+> [reranker-selection.md](../design/implemented/reranker-selection.md)。要点:
+>
+> - ms-marco 在真实风格中文提问上 R@1 只有 **7.4%**(30 候选,随机猜是 3.3%),跨语言 0.4%;
+>   但把文章标题当查询时有 82.7% —— **它只会字面匹配**。新模型对应 47.9% / 44.8%
+> - **有候选因延迟被拒**:`bge-reranker-v2-m3` 各组质量最好,但 2 线程下单段 9.3–39.9s,
+>   是现状的 2.5–11 倍;`bge-reranker-base` 在 256/512 下 5.5 / 11.8s,在 128 下虽然
+>   不慢于现状,却比选中方案慢且更差
+> - 两个需要 `trust_remote_code` 的候选(gte、jina)在项目锁定的 `transformers 5.12.1` 下
+>   **根本跑不起来**,不是风险问题
+> - 仍未完成:**arm64 上的延迟数字**(本次在 x86 上测;选中模型与原模型是同一编码器形状、
+>   token 数减半,计算量严格更少,这个相对结论不会因指令集翻转,但 issue 要求的 arm64
+>   绝对值仍需在 Graviton 上跑一次 `ops/benchmark_reranker.py`);Phase 5 的人工标注评估
 
 ### 0.5 训练数据用的是随机负例
 

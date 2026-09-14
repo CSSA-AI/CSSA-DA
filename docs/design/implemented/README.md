@@ -17,3 +17,4 @@ code, it is worse than no document.
 | [caller-identity.md](caller-identity.md) | How authentication decides who the caller is once, and how rate limiting reads that decision instead of re-reading the request |
 | [deployment-packaging.md](deployment-packaging.md) | Dependency locking, slim multi-stage images |
 | [storage-abstraction.md](storage-abstraction.md) | Pipeline storage interface (`S3Storage` still pending — see [ROADMAP_platform](../../roadmap/ROADMAP_platform.md) Phase 3) |
+| [reranker-selection.md](reranker-selection.md) | Replacing the English-only reranker: six candidates on realistic Chinese and cross-lingual questions, why the larger BGE models were rejected on CPU latency, why truncation is pinned at 256 tokens, and why retriever recall is now the bottleneck |
