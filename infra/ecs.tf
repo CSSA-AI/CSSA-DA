@@ -170,6 +170,19 @@ resource "aws_ecs_service" "api" {
     assign_public_ip = false
   }
 
+  load_balancer {
+    target_group_arn = aws_lb_target_group.api.arn
+    container_name   = "api"
+    container_port   = 8000
+  }
+
+  # Cold start measured at 57 seconds: pulling the image, then loading two
+  # models and running one inference through each. Without this window the load
+  # balancer calls a starting container unhealthy, ECS replaces it, and the
+  # replacement is killed at the same point -- a crash loop whose logs say
+  # nothing about the container merely being slow to start.
+  health_check_grace_period_seconds = 180
+
   # A deployment that never reaches a healthy state is rolled back instead of
   # being retried forever. Without this a bad image quietly replaces a working
   # one and the service sits down.

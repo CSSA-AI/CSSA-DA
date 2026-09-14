@@ -42,3 +42,8 @@ output "ecs_cluster_name" {
 output "ecs_service_name" {
   value = aws_ecs_service.api.name
 }
+
+# The address the service answers on, until a real domain points at it.
+output "alb_url" {
+  value = "http://${aws_lb.main.dns_name}"
+}
