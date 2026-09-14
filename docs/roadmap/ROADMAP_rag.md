@@ -224,8 +224,18 @@ Recall@k 曲线(Phase 5),但现在就该调大到一个合理量级。
 - 多语言仍是硬要求(用户提问是中文)
 - 体积仍是硬约束:模型进镜像,`/models` 现在 605MB,large 级会冲到 GB 量级,
   Phase 1 的验收基线全部要重测
+- **延迟是硬判据**(2026-09-14 补,呼应
+  [issue #90](https://github.com/CSSA-AI/CSSA-DA/issues/90) 的 09-14 更新):
+  每个候选记录 p50 / p95 重排延迟,注明所用的 `top_k` 和显式 pin 的线程数。
+  运行目标已定为 arm64(Graviton)Fargate,纯 CPU,因此 benchmark **必须在
+  arm64 上跑**,并写明是哪种 arm64(本机 Apple Silicon,还是真实 Fargate
+  Graviton —— 两者也不等价,但至少同一指令集家族);在 x86 上测出的相对排名
+  可能在 arm64 上反过来。候选若需要 ONNX Runtime、optimum 或量化后端等非
+  PyTorch 推理路径,要先在 arm64 上验证能加载、跑得通,再进 benchmark ——
+  普通的 PyTorch-CPU cross-encoder 没有这个问题
 
-**换掉 ms-marco 这个动作没有变**,变的是拿什么标准挑替代品。
+**换掉 ms-marco 这个动作没有变**,变的是拿什么标准挑替代品。判据的这次修订
+必须先于任何候选评估的提交落地——这是完成标准的一部分,不是建议。
 
 ### 0.5 训练数据用的是随机负例
 
