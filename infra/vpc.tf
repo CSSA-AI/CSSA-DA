@@ -117,3 +117,48 @@ resource "aws_vpc_endpoint" "s3" {
 # --- not here yet -----------------------------------------------------------
 # NAT gateway: needed before the API can call OpenAI, and the first thing in
 # this stack that bills by the hour. Added when ECS is, not before.
+
+# --- outbound for the private subnets ---------------------------------------
+# The first resource here that bills by the hour, and the reason the private
+# side stops being sealed: the application calls OpenAI, which is not an AWS
+# service and so has no endpoint to reach it privately.
+#
+# A NAT gateway lends a private machine a public identity -- it rewrites the
+# source address on the way out and restores it on the way back. Connections
+# can therefore be made outwards, and cannot be made inwards, which is exactly
+# the shape a container that must call OpenAI but must never be reachable from
+# the internet needs.
+
+# Traffic leaving through the NAT gateway always appears to come from this one
+# address. Beyond being required, that is the property to remember if a third
+# party ever asks for an egress IP to allowlist.
+resource "aws_eip" "nat" {
+  domain = "vpc"
+  tags   = { Name = "${local.name}-nat" }
+}
+
+# One, not one per availability zone. Two would survive a zone losing its
+# gateway, at twice the monthly cost -- not a trade this project is ready to
+# make while it serves an internal beta. The consequence is worth stating
+# plainly: if this one fails, containers in *both* zones lose outbound access.
+resource "aws_nat_gateway" "main" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.public[0].id
+
+  tags = { Name = "${local.name}-nat" }
+
+  # The gateway has nowhere to send traffic until the internet gateway exists.
+  # Terraform cannot infer this one from a reference, so it is stated.
+  depends_on = [aws_internet_gateway.main]
+}
+
+# Both private route tables point at the single gateway. They were split per
+# zone from the start so that adding a second gateway later means editing one
+# table rather than splitting a shared one.
+resource "aws_route" "private_nat" {
+  count = var.az_count
+
+  route_table_id         = aws_route_table.private[count.index].id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.main.id
+}
