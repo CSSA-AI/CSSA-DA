@@ -31,3 +31,14 @@ output "db_endpoint" {
 output "db_secret_arn" {
   value = aws_db_instance.main.master_user_secret[0].secret_arn
 }
+
+# Needed to open a shell in the running container:
+#   aws ecs execute-command --cluster <cluster> --task <id> \
+#     --container api --interactive --command /bin/sh
+output "ecs_cluster_name" {
+  value = aws_ecs_cluster.main.name
+}
+
+output "ecs_service_name" {
+  value = aws_ecs_service.api.name
+}
