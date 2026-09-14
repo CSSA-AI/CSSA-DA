@@ -27,3 +27,9 @@ variable "az_count" {
   type        = number
   default     = 2
 }
+
+variable "image_tag" {
+  description = "Image to run, which is the Git SHA it was built from. Bumping this and applying is a deploy."
+  type        = string
+  default     = "42d00a10"
+}
