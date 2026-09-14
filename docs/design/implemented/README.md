@@ -15,6 +15,6 @@ code, it is worse than no document.
 | [startup-and-readiness.md](startup-and-readiness.md) | What the app does before it accepts traffic: preload, model warm-up, liveness vs readiness, connection timeouts |
 | [database-migrations.md](database-migrations.md) | Why a rollback cannot undo a migration, the two-deploy expand/contract sequences, and the locking axis this rule does not cover |
 | [caller-identity.md](caller-identity.md) | How authentication decides who the caller is once, and how rate limiting reads that decision instead of re-reading the request |
-| [aws-foundation.md](aws-foundation.md) | The AWS groundwork the service will run on: Terraform, the VPC and its routing, ECR and image architecture, the ECS execution role, and the three security groups — with the beginner-level networking and IAM background |
+| [aws-foundation.md](aws-foundation.md) | Everything standing on AWS, from `terraform init` to a public URL: the VPC and its routing, NAT, remote state, ECR and image architecture, RDS, how secrets and config reach a container, the Fargate service, and the load balancer — with the beginner-level networking, IAM and container-runtime background |
 | [deployment-packaging.md](deployment-packaging.md) | Dependency locking, slim multi-stage images |
 | [storage-abstraction.md](storage-abstraction.md) | Pipeline storage interface (`S3Storage` still pending — see [ROADMAP_platform](../../roadmap/ROADMAP_platform.md) Phase 3) |
