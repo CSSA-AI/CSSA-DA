@@ -21,3 +21,13 @@ output "availability_zones" {
 output "ecr_repository_url" {
   value = aws_ecr_repository.api.repository_url
 }
+
+# Host half of DATABASE_URL. The credentials come from Secrets Manager, not
+# from here.
+output "db_endpoint" {
+  value = aws_db_instance.main.endpoint
+}
+
+output "db_secret_arn" {
+  value = aws_db_instance.main.master_user_secret[0].secret_arn
+}
