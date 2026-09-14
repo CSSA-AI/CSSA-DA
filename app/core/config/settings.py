@@ -1,7 +1,9 @@
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import yaml
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +24,18 @@ class Settings(BaseSettings):
     CHAT_API_KEY: str | None = None
     WECHAT_API_KEY: str | None = None
     DATABASE_URL: str | None = None
+
+    # Assembled into DATABASE_URL when that is not set, which is how the
+    # deployed container is configured: RDS keeps the credentials in Secrets
+    # Manager as separate fields, and ECS can inject a field of a secret but
+    # cannot concatenate one. Locally DATABASE_URL is set directly and these
+    # stay empty.
+    DB_HOST: str | None = None
+    DB_PORT: int = 5432
+    DB_NAME: str | None = None
+    DB_USER: str | None = None
+    DB_PASSWORD: str | None = None
+
     MODEL_DIR: Path | None = None
     LOG_LEVEL: str = "INFO"
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
@@ -49,6 +63,34 @@ class Settings(BaseSettings):
     # eval report be compared on the same ruler.
     GIT_SHA: str | None = None
     CORPUS_SHA256: str | None = None
+
+    @model_validator(mode="after")
+    def _assemble_database_url(self) -> "Settings":
+        """Fill DATABASE_URL in from its parts when it was not given directly.
+
+        An explicit DATABASE_URL always wins, so nothing about local or test
+        configuration changes. Everything downstream keeps reading
+        `settings.DATABASE_URL` and never learns where it came from.
+
+        The credentials are percent-encoded. RDS generates the password, and a
+        generated password containing `@`, `/` or `:` would otherwise split the
+        URL at the wrong place -- the failure surfaces as an unresolvable host,
+        which points nowhere near the actual cause.
+        """
+        if self.DATABASE_URL:
+            return self
+
+        parts = (self.DB_HOST, self.DB_NAME, self.DB_USER, self.DB_PASSWORD)
+        if not all(parts):
+            return self
+
+        user = quote(self.DB_USER or "", safe="")
+        password = quote(self.DB_PASSWORD or "", safe="")
+        self.DATABASE_URL = (
+            f"postgresql://{user}:{password}"
+            f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+        )
+        return self
 
     @property
     def allowed_origins_list(self) -> list[str]:
