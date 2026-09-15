@@ -215,6 +215,27 @@ def test_cors_omits_headers_for_unconfigured_origin():
     assert "Access-Control-Allow-Origin" not in response.headers
 
 
+def test_cors_exposes_rate_limit_retry_after(monkeypatch):
+    monkeypatch.setattr(settings, "CHAT_RATE_LIMIT", "1/minute")
+    test_client = client()
+    headers = {"Origin": "http://localhost:3000"}
+
+    test_client.post("/v1/chat", headers=headers, json={"message": "hi"})
+    response = test_client.post(
+        "/v1/chat",
+        headers=headers,
+        json={"message": "hi"},
+    )
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "60"
+    exposed_headers = {
+        name.strip().lower()
+        for name in response.headers["Access-Control-Expose-Headers"].split(",")
+    }
+    assert "retry-after" in exposed_headers
+
+
 def test_chat_rate_limit_returns_safe_429(monkeypatch):
     monkeypatch.setattr(settings, "CHAT_RATE_LIMIT", "2/minute")
     test_client = client()
@@ -226,8 +247,7 @@ def test_chat_rate_limit_returns_safe_429(monkeypatch):
     assert first.status_code == 200
     assert second.status_code == 200
     assert third.status_code == 429
-    retry_after = int(third.headers["Retry-After"])
-    assert 0 < retry_after <= 60
+    assert third.headers["Retry-After"] == "60"
     assert third.json() == {
         "error": {
             "code": "rate_limited",
@@ -252,8 +272,7 @@ def test_chat_global_rate_limit_returns_safe_429(monkeypatch):
     assert first.status_code == 200
     assert second.status_code == 200
     assert third.status_code == 429
-    retry_after = int(third.headers["Retry-After"])
-    assert 0 < retry_after <= 86_400
+    assert third.headers["Retry-After"] == "86400"
     assert third.json() == {
         "error": {
             "code": "rate_limited",

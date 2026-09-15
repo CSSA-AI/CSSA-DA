@@ -11,11 +11,27 @@
 计数桶（`CHAT_GLOBAL_RATE_LIMIT`，默认 `500/day`）。per-IP 层管「单个来源
 别刷太快」，全局层管「全站总量封顶」——换 IP 绕得过前者，绕不过后者。
 
+```text
+请求 ──► per-IP 限流 ──► 全站限流 ──► /chat
+             │ 429           │ 429
+             └──────┬────────┘
+                    ▼
+             统一 429 处理器
+          安全响应体 + Retry-After
+                    │
+                    ▼
+          CORS 暴露该响应头给客户端
+```
+
+两层无论哪一层拒绝请求，都会进入[同一个处理器](../../../app/main.py#L232)。
+响应体只说明请求当前无法接受，不透露是哪一层或具体限额；标准
+`Retry-After` 响应头单独告诉客户端至少应退避多久。
+
 不引入 Redis（当前部署恒为 1 容器 × 1 uvicorn worker，内存计数就是真全局，
 见 rate_limit.py 头注释的部署边界声明）；不新建第二个 Limiter 实例（否则
 tests/conftest.py 的 autouse reset 会漏掉它）。
 
-## 两条不变量（依赖 slowapi 未文档化行为，改动前必读）
+## 三条不变量（依赖 slowapi 未文档化行为，改动前必读）
 
 以下语义在钉住版本 slowapi 0.1.10 + limits 5.8.0 的源码上核实过：
 
@@ -34,6 +50,16 @@ tests/conftest.py 的 autouse reset 会漏掉它）。
    反向代价（可接受）：请求过了 per-IP 但被全局拦下时，该 IP 的分钟额度
    被白扣一次，不退款。
 
+3. **`Retry-After` 依赖两层嵌套对象，升级依赖时必须重新核实。**
+   `RateLimitExceeded.limit` 是 slowapi 的 `Limit` 包装对象，其中同名的
+   `.limit` 才是 limits 的 `RateLimitItem`；后者的 `get_expiry()` 返回完整
+   窗口秒数。处理器用这个值作为保守上界，不查询存储中的精确剩余时间：
+   `2/minute` 返回 `60`，`2/day` 返回 `86400`。客户端可能比真实重置时间
+   多等一会儿，但不会因猜得太短而持续重试。升级 slowapi 或 limits 时，
+   必须重新检查这条对象路径和返回语义；两层的精确响应头断言是回归哨兵。
+   见 [per-IP 测试](../../../tests/unit/test_api_middleware.py#L239)和
+   [全站测试](../../../tests/unit/test_api_middleware.py#L262)。
+
 ## 配套语义
 
 - **fail-open 防护**：slowapi 对 callable 限额串的解析发生在每个请求时、
@@ -45,7 +71,9 @@ tests/conftest.py 的 autouse reset 会漏掉它）。
   自然日/UTC 对齐；进程重启计数清零。
 - 429 响应体两层完全一致（统一安全错误体，不泄漏限额数值）；区分哪层
   触发看服务端 WARNING 日志（`"10 per 1 minute"` = per-IP 噪音，
-  `"500 per 1 day"` = 全站额度耗尽，两种事态处置不同）。
+  `"500 per 1 day"` = 全站额度耗尽，两种事态处置不同）。两层都返回
+  `Retry-After`，且 [CORS 明确暴露该头](../../../app/main.py#L121)，让跨域
+  浏览器调用方也能读取并退避。
 - 生产调参：改 `CHAT_GLOBAL_RATE_LIMIT` 环境变量并重启容器。镜像内没有
   .env，该变量必须经 docker-compose 的 environment 块透传才能生效（已配）。
   调大前先按 [openai-spend-cap.md](../../openai-spend-cap.md) 的公式重算

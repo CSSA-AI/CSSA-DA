@@ -145,8 +145,7 @@ def test_rate_limit_429_still_carries_middleware_headers(
 
     assert first.status_code == 200
     assert second.status_code == 429
-    retry_after = int(second.headers["Retry-After"])
-    assert 0 < retry_after <= 60
+    assert second.headers["Retry-After"] == "60"
     assert second.json() == {
         "error": {
             "code": "rate_limited",
