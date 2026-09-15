@@ -189,7 +189,7 @@ Recall@k 曲线(Phase 5),但现在就该调大到一个合理量级。
 3. **绝对值只属于这个模型**。[0.4](#04-reranker-的任务类型是错的) 换掉 ms-marco 之后
    必须重测,这组数只能当基线用
 
-> ✅ **2026-09-15 已重测**([issue #90](https://github.com/CSSA-AI/CSSA-DA/issues/90)):
+> ✅ **2026-09-15 已重测**(#108):
 > 换成 `mmarco-mMiniLMv2-L12-H384-v1`、截断 256 后,同一台机器(x86 Ryzen 7 9800X3D,
 > 候选池 30)上 reranker 单段 p50 **3738 → 1647ms(2 线程)、2507 → 1133ms(4 线程)**。
 > 注意这台机器和上表不是同一台,只在同表内比较。复现:`python ops/benchmark_reranker.py --threads 2`。
@@ -236,8 +236,7 @@ Recall@k 曲线(Phase 5),但现在就该调大到一个合理量级。
 - 多语言仍是硬要求(用户提问是中文)
 - 体积仍是硬约束:模型进镜像,`/models` 现在 605MB,large 级会冲到 GB 量级,
   Phase 1 的验收基线全部要重测
-- **延迟是硬判据**(2026-09-14 补,呼应
-  [issue #90](https://github.com/CSSA-AI/CSSA-DA/issues/90) 的 09-14 更新):
+- **延迟是硬判据**(2026-09-14 补):
   每个候选记录 p50 / p95 重排延迟,注明所用的 `top_k` 和显式 pin 的线程数。
   运行目标已定为 arm64(Graviton)Fargate,纯 CPU,因此 benchmark **必须在
   arm64 上跑**,并写明是哪种 arm64(本机 Apple Silicon,还是真实 Fargate
@@ -249,7 +248,7 @@ Recall@k 曲线(Phase 5),但现在就该调大到一个合理量级。
 **换掉 ms-marco 这个动作没有变**,变的是拿什么标准挑替代品。判据的这次修订
 必须先于任何候选评估的提交落地——这是完成标准的一部分,不是建议。
 
-> ✅ **2026-09-15 已落地**([issue #90](https://github.com/CSSA-AI/CSSA-DA/issues/90)):
+> ✅ **2026-09-15 已落地**(#108):
 > `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`,`max_length: 256`。6 个候选、5 组分开记录的
 > 查询集、3 种截断长度、CPU 延迟网格,见
 > [reranker-selection.md](../design/implemented/reranker-selection.md)。要点:

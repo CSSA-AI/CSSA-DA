@@ -706,7 +706,7 @@ API 当前运行一个 Uvicorn worker。由于每个 worker 可能单独加载�
 - CPU saturation point
 - 可接受 latency 下的 requests per second
 
-> ⏰ **2026-09-15 来自 RAG 线的输入**([issue #90](https://github.com/CSSA-AI/CSSA-DA/issues/90),
+> ⏰ **2026-09-15 来自 RAG 线的输入**(#108,
 > reranker 已换成 `mmarco-mMiniLMv2-L12-H384-v1`,截断 256)。同一台 x86 机器上 main 与换模型后的
 > `Dockerfile.api` 对比,**arm64 上需要重测**:
 >
@@ -799,7 +799,7 @@ ECR、Secrets、迁移编排）与模型选型完全无关，不需要等待。�
 |---|---|---|---|
 | 1 | **`doc_id` 链路修复** | ✅ **已完成**（CSS-7 / PR #74）。`sources[].article.id` 现在是从 `link` 派生的稳定 id（微信为 `wx_<slug>`），不再是每次响应都变的随机 UUID。这是公开契约变更，已赶在前端接入前落地 | ✅ 已收敛 |
 | 2 | **向量维度** | `VECTOR(384)` 写死。若选型结论是 1024 维模型，需 ALTER + 全库重嵌入重导 | ⏰ **建 RDS 前**。现在 DB 是一次性容器，迁移=删了重来；上生产后要变成停机窗口+回滚方案，成本差一个数量级 |
-| 3 | **模型文件大小** | 模型烤入镜像。若换成 bge-m3 + bge-reranker-v2-m3（约各 2.2GB），镜像从 3.35GB 冲到 ~7GB，**Phase 1 的验收基线（冷启动 7.5s / idle 944MiB）全部要重测**，并可能推翻第 4.1 项的「烤入镜像」方案。✅ **2026-09-15（issue #90）：reranker 已换，未采用 bge-reranker-v2-m3**（质量最好但 CPU 延迟是现状 2.5–11 倍）。选中的模型 129MB → 470MB，embedding 不变；重测结果见[第 14 项](#14-建立资源基线) | ⏰ **写 ECS task definition 前** |
+| 3 | **模型文件大小** | 模型烤入镜像。若换成 bge-m3 + bge-reranker-v2-m3（约各 2.2GB），镜像从 3.35GB 冲到 ~7GB，**Phase 1 的验收基线（冷启动 7.5s / idle 944MiB）全部要重测**，并可能推翻第 4.1 项的「烤入镜像」方案。✅ **2026-09-15（#108）：reranker 已换，未采用 bge-reranker-v2-m3**（质量最好但 CPU 延迟是现状 2.5–11 倍）。选中的模型 129MB → 470MB，embedding 不变；重测结果见[第 14 项](#14-建立资源基线) | ⏰ **写 ECS task definition 前** |
 | 4 | **`top_k`** | retriever `top_k=30`、reranker `top_k=5`（2026-08-25 由 5/3 调大，见 [ROADMAP_rag 0.3](ROADMAP_rag.md#03-top_k-的结构性问题)），评估要求 deep pool（50）。实测 rerank 单段耗时随候选数近似线性，且**核数越少越接近线性**：14 线程 5→30 为 4.9×，2 线程为 6.2×。⚠️ **2 线程下光 reranker 就 p50 5.8s / p95 8.4s**（不含 OpenAI 往返）—— **task 规格可能倒着卡住 `top_k`**，不是只有 `top_k` 影响规格 | ⏰ **第 13/14 项（worker/扩容策略、资源基线）定稿前** |
 | 5 | **PII 脱敏 stage** | 小助手 1:1 问答是求助场景的私密对话，含真名/微信号/学号/手机号。**脱敏 + 个人化内容筛选必须是 pipeline 的一个 stage，在入库之前执行** —— 放到下游就等于原始 PII 已经进了 Postgres 和 S3 | Phase 3 生产 Pipeline 设计时 |
 | 6 | **`held_out_for_eval` 排除** | eval 划走的对话不能回流进语料。标记落在源头，**由 ingest 阶段强制排除** —— 否则下次重跑管线会静默污染 eval set，且**没有任何报错** | 同上 |

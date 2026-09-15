@@ -136,7 +136,7 @@ v1,**应该现在就派人去做**。但它已经不是 v2 的唯一入口 —�
 - [x] `/chat` → `/v1/chat` —— **已落地(2026-08-20,#73)**:趁没有消费者时改完,
       API 契约版本这个坐标从此存在
 - [x] 0.3 `top_k` 调大 —— **已落地(2026-08-25):retriever 5 → 30、reranker 3 → 5**。终值仍待 Phase 5.6 的 Recall@k 曲线
-- [x] 0.4 换 reranker(✅ 已定)—— **已落地(2026-09-15,issue #90)**:
+- [x] 0.4 换 reranker(✅ 已定)—— **已落地(2026-09-15,#108)**:
       `mmarco-mMiniLMv2-L12-H384-v1`,截断 256。真实风格中文提问 R@1 7.4% → 47.9%,
       reranker 单段延迟减半。arm64 绝对值待在 Graviton 上补测,见
       [reranker-selection.md](../design/implemented/reranker-selection.md)
