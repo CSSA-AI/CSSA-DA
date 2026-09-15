@@ -226,10 +226,15 @@ def test_chat_rate_limit_returns_safe_429(monkeypatch):
     assert first.status_code == 200
     assert second.status_code == 200
     assert third.status_code == 429
+    retry_after = int(third.headers["Retry-After"])
+    assert 0 < retry_after <= 60
     assert third.json() == {
         "error": {
             "code": "rate_limited",
-            "message": "Too many requests. Please slow down and try again shortly.",
+            "message": (
+                "The service is temporarily rate limited. Retry after "
+                "the time indicated by the Retry-After header."
+            ),
         }
     }
 
@@ -247,10 +252,15 @@ def test_chat_global_rate_limit_returns_safe_429(monkeypatch):
     assert first.status_code == 200
     assert second.status_code == 200
     assert third.status_code == 429
+    retry_after = int(third.headers["Retry-After"])
+    assert 0 < retry_after <= 86_400
     assert third.json() == {
         "error": {
             "code": "rate_limited",
-            "message": "Too many requests. Please slow down and try again shortly.",
+            "message": (
+                "The service is temporarily rate limited. Retry after "
+                "the time indicated by the Retry-After header."
+            ),
         }
     }
 

@@ -240,10 +240,18 @@ def handle_rate_limit_exceeded(
     logger.warning("Rate limit exceeded: %s", exc.detail)
     return JSONResponse(
         status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
+        # RateLimitExceeded.limit is slowapi's Limit wrapper; its nested
+        # RateLimitItem exposes the full fixed-window duration in seconds.
+        # Using that duration is a conservative Retry-After upper bound that
+        # needs no storage lookup and works for both rate-limit layers.
+        headers={"Retry-After": str(exc.limit.limit.get_expiry())},
         content={
             "error": {
                 "code": "rate_limited",
-                "message": "Too many requests. Please slow down and try again shortly.",
+                "message": (
+                    "The service is temporarily rate limited. Retry after "
+                    "the time indicated by the Retry-After header."
+                ),
             }
         },
     )
