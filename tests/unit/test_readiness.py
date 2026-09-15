@@ -63,7 +63,7 @@ def test_check_readiness_reports_missing_knowledge_base_table(monkeypatch):
     monkeypatch.setattr(
         readiness.psycopg2,
         "connect",
-        lambda database_url: FakeConnection(cursor),
+        lambda database_url, **kwargs: FakeConnection(cursor),
     )
 
     result = readiness.check_readiness("postgresql://test")
@@ -79,7 +79,7 @@ def test_check_readiness_reports_empty_matching_rows(monkeypatch):
     monkeypatch.setattr(
         readiness.psycopg2,
         "connect",
-        lambda database_url: FakeConnection(cursor),
+        lambda database_url, **kwargs: FakeConnection(cursor),
     )
 
     result = readiness.check_readiness("postgresql://test")
@@ -97,7 +97,7 @@ def test_check_readiness_reports_ready_with_matching_rows(monkeypatch):
     monkeypatch.setattr(
         readiness.psycopg2,
         "connect",
-        lambda database_url: FakeConnection(cursor),
+        lambda database_url, **kwargs: FakeConnection(cursor),
     )
 
     result = readiness.check_readiness("postgresql://test")
@@ -113,7 +113,7 @@ def test_check_readiness_rejects_failed_models(monkeypatch):
     monkeypatch.setattr(
         readiness.psycopg2,
         "connect",
-        lambda database_url: FakeConnection(cursor),
+        lambda database_url, **kwargs: FakeConnection(cursor),
     )
     monkeypatch.setattr(
         readiness.model_registry,
@@ -137,7 +137,7 @@ def test_check_readiness_reports_unavailable_database(monkeypatch, caplog):
     monkeypatch.setattr(
         readiness.psycopg2,
         "connect",
-        lambda database_url: (_ for _ in ()).throw(
+        lambda database_url, **kwargs: (_ for _ in ()).throw(
             RuntimeError(internal_error)
         ),
     )
@@ -150,3 +150,25 @@ def test_check_readiness_reports_unavailable_database(monkeypatch, caplog):
     assert internal_error not in str(result.to_dict())
     assert "Database readiness check failed" in caplog.text
     assert internal_error in caplog.text
+
+
+def test_check_readiness_passes_probe_timeouts_to_postgres(monkeypatch):
+    cursor = FakeCursor([None])
+    connect_arguments = {}
+
+    def connect(database_url, **kwargs):
+        connect_arguments.update(kwargs)
+        return FakeConnection(cursor)
+
+    monkeypatch.setattr(readiness.psycopg2, "connect", connect)
+
+    readiness.check_readiness("postgresql://test")
+
+    pgvector_config = readiness.rag_config["pgvector"]
+    assert connect_arguments == {
+        "connect_timeout": pgvector_config["probe_connect_timeout_seconds"],
+        "options": (
+            "-c statement_timeout="
+            f"{pgvector_config['probe_statement_timeout_milliseconds']}"
+        ),
+    }

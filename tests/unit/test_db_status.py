@@ -54,7 +54,7 @@ def test_status_reports_missing_table(monkeypatch):
     monkeypatch.setattr(
         db_status.psycopg2,
         "connect",
-        lambda database_url: FakeConnection(cursor),
+        lambda database_url, **kwargs: FakeConnection(cursor),
     )
 
     status = db_status.get_knowledge_base_status("postgresql://test")
@@ -82,7 +82,7 @@ def test_status_summarizes_knowledge_base(monkeypatch):
     monkeypatch.setattr(
         db_status.psycopg2,
         "connect",
-        lambda database_url: FakeConnection(cursor),
+        lambda database_url, **kwargs: FakeConnection(cursor),
     )
 
     status = db_status.get_knowledge_base_status("postgresql://test")
@@ -101,7 +101,7 @@ def test_status_reports_unavailable_database(monkeypatch):
     monkeypatch.setattr(
         db_status.psycopg2,
         "connect",
-        lambda database_url: (_ for _ in ()).throw(
+        lambda database_url, **kwargs: (_ for _ in ()).throw(
             RuntimeError("connection refused")
         ),
     )
@@ -111,3 +111,25 @@ def test_status_reports_unavailable_database(monkeypatch):
     assert status.database == "unavailable"
     assert status.table_exists is False
     assert status.reason == "connection refused"
+
+
+def test_status_passes_configured_timeouts_to_postgres(monkeypatch):
+    cursor = FakeCursor([None])
+    connect_arguments = {}
+
+    def connect(database_url, **kwargs):
+        connect_arguments.update(kwargs)
+        return FakeConnection(cursor)
+
+    monkeypatch.setattr(db_status.psycopg2, "connect", connect)
+
+    db_status.get_knowledge_base_status("postgresql://test")
+
+    pgvector_config = db_status.rag_config["pgvector"]
+    assert connect_arguments == {
+        "connect_timeout": pgvector_config["connect_timeout_seconds"],
+        "options": (
+            "-c statement_timeout="
+            f"{pgvector_config['statement_timeout_milliseconds']}"
+        ),
+    }
