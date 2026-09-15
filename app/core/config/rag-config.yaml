@@ -32,6 +32,12 @@ pgvector:
   # timeout (~127s on Linux), which a packet-dropping DB host would turn into
   # a stalled lifespan startup and a container restart loop.
   connect_timeout_seconds: 5
+  # Cancels queries that exceed the request-path database budget.
+  statement_timeout_milliseconds: 5000
+  # Health endpoints must fail before the load balancer's own timeout so they
+  # can return a useful 503 response instead of being cut off externally.
+  probe_connect_timeout_seconds: 2
+  probe_statement_timeout_milliseconds: 2000
 
 generator:
   provider: openai

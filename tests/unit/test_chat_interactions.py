@@ -254,11 +254,13 @@ def test_duplicate_request_id_warns_instead_of_dropping_silently(
         def __exit__(self, *exc):
             return False
 
-    monkeypatch.setattr(
-        chat_interactions.psycopg2,
-        "connect",
-        lambda *args, **kwargs: FakeConnection(),
-    )
+    connect_arguments = {}
+
+    def connect(*args, **kwargs):
+        connect_arguments.update(kwargs)
+        return FakeConnection()
+
+    monkeypatch.setattr(chat_interactions.psycopg2, "connect", connect)
 
     record = ChatInteractionRecord(request_id="reused", query="a query")
 
@@ -268,6 +270,14 @@ def test_duplicate_request_id_warns_instead_of_dropping_silently(
     assert "Duplicate chat interaction request_id" in caplog.text
     assert caplog.records[-1].request_id == "reused"
     assert "a query" not in caplog.text
+    pgvector_config = rag_config["pgvector"]
+    assert connect_arguments == {
+        "connect_timeout": pgvector_config["connect_timeout_seconds"],
+        "options": (
+            "-c statement_timeout="
+            f"{pgvector_config['statement_timeout_milliseconds']}"
+        ),
+    }
     # Runs once per answered request, so the connection must not be left for
     # the garbage collector to reclaim.
     assert FakeConnection.closed_explicitly is True

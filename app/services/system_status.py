@@ -3,7 +3,7 @@ from typing import Any
 
 import psycopg2
 
-from app.core.config import settings
+from app.core.config import rag_config, settings
 from app.services.readiness import ReadinessCheck, check_readiness
 
 
@@ -85,7 +85,17 @@ def get_pipeline_metadata_status(
         )
 
     try:
-        with psycopg2.connect(database_url) as connection:
+        pgvector_config = rag_config["pgvector"]
+        with psycopg2.connect(
+            database_url,
+            connect_timeout=pgvector_config[
+                "probe_connect_timeout_seconds"
+            ],
+            options=(
+                "-c statement_timeout="
+                f"{pgvector_config['probe_statement_timeout_milliseconds']}"
+            ),
+        ) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
