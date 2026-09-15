@@ -99,6 +99,7 @@ def build_config_fingerprint(
         "embedding_revision": retriever.get("embedding_revision"),
         "reranker_model": reranker.get("model_name"),
         "reranker_revision": reranker.get("model_revision"),
+        "reranker_max_length": reranker.get("max_length"),
         "generator_model": generator.get("model_name"),
         "top_k": top_k if top_k is not None else retriever.get("top_k"),
         "rerank_top_k": (

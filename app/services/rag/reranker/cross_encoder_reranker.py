@@ -34,6 +34,10 @@ class CrossEncoderReranker(BaseReranker):
             self.model = model_registry.get_reranker_model()
         else:
             model_kwargs = {"revision": model_revision} if model_revision else {}
+            # Apply the configured truncation to ad-hoc models too, so a model
+            # tried here is scored under the same conditions as the one that ships.
+            if reranker_config.get("max_length"):
+                model_kwargs["max_length"] = reranker_config["max_length"]
             self.model = CrossEncoder(model_name, **model_kwargs)
 
         # LoRA adapter（可选）

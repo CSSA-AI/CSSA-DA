@@ -55,6 +55,7 @@ def test_fingerprint_carries_every_coordinate():
         "embedding_revision",
         "reranker_model",
         "reranker_revision",
+        "reranker_max_length",
         "generator_model",
         "top_k",
         "rerank_top_k",
@@ -69,6 +70,10 @@ def test_fingerprint_carries_every_coordinate():
     assert (
         fingerprint["reranker_revision"]
         == rag_config["reranker"]["model_revision"]
+    )
+    assert (
+        fingerprint["reranker_max_length"]
+        == rag_config["reranker"]["max_length"]
     )
     assert (
         fingerprint["generator_model"]

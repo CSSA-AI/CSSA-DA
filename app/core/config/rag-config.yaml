@@ -15,13 +15,31 @@ retriever:
   top_k: 30
 
 reranker:
-  model_name: cross-encoder/ms-marco-MiniLM-L12-v2
-  model_revision: 7b0235231ca2674cb8ca8f022859a6eba2b1c968
+  # Multilingual cross-encoder with the same MiniLM-L12/H384 encoder shape as
+  # the English-only ms-marco-MiniLM-L12-v2 it replaced. On realistic Chinese
+  # questions that model ranked the right article first 7% of the time in a
+  # 30-candidate pool; this one does 48%. Larger BGE rerankers score higher but
+  # cost 3-11x the CPU per request. Candidates, measurements and the decision
+  # rule: docs/design/implemented/reranker-selection.md (issue #90).
+  model_name: cross-encoder/mmarco-mMiniLMv2-L12-H384-v1
+  model_revision: 1427fd652930e4ba29e8149678df786c240d8825
   # How many survive into the generator prompt. Kept equal to
   # generator.context.max_items: at 3, the generator was handed 5 context slots
   # and left 2 of them empty. Raising this costs nothing — the cross-encoder has
   # already scored the whole pool; this only moves where the list is truncated.
   top_k: 5
+  # Tokens per (query, passage) pair before truncation. Pinned rather than
+  # left to the tokenizer default, because that default is 512 for MiniLM-style
+  # models but 8192+ for long-context rerankers: swapping the model would
+  # otherwise change per-request compute by an order of magnitude with no diff
+  # in this file. ops/benchmark_reranker.py reads the same value.
+  #
+  # 256, not 512: for this model the two were statistically indistinguishable
+  # on every realistic query set (paired bootstrap CIs span zero), 256 was
+  # better when the query is an article title, and it halves rerank latency.
+  # Raise it only with a measurement that says the extra context pays for
+  # doubling the per-request CPU.
+  max_length: 256
   adapter_path: null
 
 pgvector:
