@@ -145,10 +145,14 @@ def test_rate_limit_429_still_carries_middleware_headers(
 
     assert first.status_code == 200
     assert second.status_code == 429
+    assert second.headers["Retry-After"] == "60"
     assert second.json() == {
         "error": {
             "code": "rate_limited",
-            "message": "Too many requests. Please slow down and try again shortly.",
+            "message": (
+                "The service is temporarily rate limited. Retry after "
+                "the time indicated by the Retry-After header."
+            ),
         }
     }
     # The 429 rejection still passes back out through the outer middleware,
