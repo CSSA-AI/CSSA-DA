@@ -47,3 +47,9 @@ output "ecs_service_name" {
 output "alb_url" {
   value = "http://${aws_lb.main.dns_name}"
 }
+
+# Where pipeline inputs are staged. `aws s3 cp` targets this, and the presigned
+# URL the container fetches with is generated against it.
+output "data_bucket" {
+  value = aws_s3_bucket.data.bucket
+}
