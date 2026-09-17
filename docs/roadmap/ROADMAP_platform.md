@@ -508,7 +508,17 @@ FROM continuumio/miniconda3:latest
 
 原始条目（第 5/6/7 项）保留在下方以备回顾。
 
-### 8. 在 ECS 中明确配置 health check
+### 8. 在 ECS 中明确配置 health check ✅ 已完成
+
+> **状态：已完成（2026-09-17，#111）。** 推荐语义原样落地：容器自查 `/health`，
+> ALB 目标组查 `/ready`。start period 120 秒、服务宽限期 180 秒，覆盖实测 57 秒的
+> 冷启动（其中 14 秒在加载并预热两个模型）。
+>
+> 「在使用 `/ready` 作为 ALB health check 前，需要先完成模型 readiness」这条说得
+> 对，但真正卡住的是**数据**：空库上 `/ready` 永远 503，先指过去会导致一滴流量都
+> 进不来。所以 ALB 先指 `/health`，等第 20 项的语料到位后才切回 `/ready`，切换是
+> 就地修改、目标组不重建。详见 [aws-foundation.md](../design/implemented/aws-foundation.md)。
+> 下面保留原始条目。
 
 Dockerfile 已经包含 health check，但 ECS task definition 仍需要明确配置 container
 health check。ALB target group health check 需要单独配置。
@@ -1177,7 +1187,21 @@ FastAPI 解析依赖（含 require_caller）
 
 ---
 
-### 20. 首次语料导入生产 RDS（2026-09-13 新增，v1 阻塞项）
+### 20. 首次语料导入生产 RDS（2026-09-13 新增，v1 阻塞项）✅ 已完成
+
+> **状态：已完成（2026-09-17，#111）。** 2312 行入库，`/ready` 转 200，`/v1/chat`
+> 端到端能答。
+>
+> 下面写的那个卡点（语料不在镜像里）的解法：加一个 S3 数据桶，本地上传后生成预签名
+> URL，容器用 `urllib` 拉下来。容器**不需要任何新的 IAM 权限**——镜像里既没有 boto3
+> 也没有 AWS CLI，给了角色也用不上。导入跑在 API 容器里而非另建 pipeline 镜像：这条
+> 代码路径的第三方依赖只有 `psycopg2` 和 `sentence_transformers`，都在 core 里。
+>
+> ⚠️ **留了一个已知缺陷**：语料里约 9% 是重复内容（205 条 / 164 组，最多的一组同一
+> 篇出现 7 次）。`(link, question_text)` 唯一索引拦不住——同样的内容重发一次就是一个
+> 新 URL。后果不是分数难看，而是 **top-5 可能返回同一篇的五个副本**，模型拿到的上下文
+> 塌缩成一份，且在最热门的话题上最严重。属应用层，另开 issue。
+> 下面保留原始条目。
 
 **Phase 2 部署的是一个没有数据的服务，而这个服务在没有数据时按设计拒绝服务。**
 这一项补的是 Phase 2 与 Phase 3 之间的那条缝。
