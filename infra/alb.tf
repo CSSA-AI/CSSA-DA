@@ -31,8 +31,17 @@ resource "aws_lb_target_group" "api" {
   # the wait is otherwise added to every deployment.
   deregistration_delay = 30
 
+  # /ready, not /health: this decides whether to send a request here, and a
+  # container that cannot reach its database or has no rows for the active
+  # embedding model cannot answer one. The container's own check in ecs.tf
+  # stays on /health, which asks the different question of whether the process
+  # is alive -- an empty database is not a dead container.
+  #
+  # This pointed at /health until the corpus was imported, because /ready
+  # answers 503 forever on an empty database and the load balancer would
+  # therefore never have sent any traffic at all.
   health_check {
-    path     = "/health"
+    path     = "/ready"
     protocol = "HTTP"
     matcher  = "200"
 
