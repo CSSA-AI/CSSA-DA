@@ -101,7 +101,11 @@ v1,**应该现在就派人去做**。但它已经不是 v2 的唯一入口 —�
 ### Platform
 
 - [ ] Phase 2 全部:IaC(VPC/SG/ECR/ECS/ALB/RDS/Secrets/CloudWatch/IAM)、部署、smoke test
-- [ ] 第 8 项 ECS/ALB health check 配置
+      —— **括号里那些已落地(2026-09-17,#111)**,公网 URL 上 `/v1/chat` 能答。
+      整条**不勾**:Phase 2 第 4 步(migration 部署关卡,即第 11 项)还没做
+- [x] 第 8 项 ECS/ALB health check 配置 —— **已落地(2026-09-17,#111)**:两层分开——
+      容器自查 `/health`(进程活着),ALB 目标组查 `/ready`(答得了)。导语料前 ALB 先
+      指 `/health`,否则空库上 `/ready` 永远 503、流量一滴进不来;语料到位后切回
 - [ ] 第 11 项 migration 部署关卡
 - [ ] 第 12 项 outbound networking
 - [ ] 第 17 项 生产 RDS 配置
@@ -115,8 +119,11 @@ v1,**应该现在就派人去做**。但它已经不是 v2 的唯一入口 —�
 - [x] **鉴权形状重构**(`Principal`)—— **已落地(2026-09-13,#96/#99)**:鉴权一次
       解析出调用者,限流读这个结论而不再自己重读请求;行为零变化。设计见
       [caller-identity.md](../design/implemented/caller-identity.md)
-- [ ] **第 20 项 首次语料导入生产 RDS** —— Phase 2 与 Phase 3 之间的缝。语料不在
-      镜像里,空库时 `/ready` 永远 503,表象却像网络配错
+- [x] **第 20 项 首次语料导入生产 RDS** —— **已落地(2026-09-17,#111)**:2312 行,
+      `/ready` 转 200。卡点(语料不在镜像里)用 S3 数据桶 + 预签名 URL 解决,容器
+      不需要任何新的 IAM 权限。**留一个已知缺陷**:语料里约 9% 是重复内容
+      (205 条 / 164 组),`(link, question_text)` 索引拦不住同内容不同 URL,
+      正在挤占检索名额 —— 属应用层,另开
 - [ ] **CORS 认真配** —— 直连之后它从摆设变成承重墙;部署那天配生产域名 + smoke test
       加正反两条断言
 
