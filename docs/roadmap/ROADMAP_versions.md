@@ -106,7 +106,10 @@ v1,**应该现在就派人去做**。但它已经不是 v2 的唯一入口 —�
 - [x] 第 8 项 ECS/ALB health check 配置 —— **已落地(2026-09-17,#111)**:两层分开——
       容器自查 `/health`(进程活着),ALB 目标组查 `/ready`(答得了)。导语料前 ALB 先
       指 `/health`,否则空库上 `/ready` 永远 503、流量一滴进不来;语料到位后切回
-- [ ] 第 11 项 migration 部署关卡
+- [ ] 第 11 项 migration 部署关卡 —— **并入 Phase 4(2026-09-22,#111)**:能跑的那半
+      已具备(`cssa-da-prod-migrate` 任务 + 退出码),但「绕不过去」要等 CI——只要还能
+      手敲 `terraform apply` 部署,本地脚本就只是默认做法、不是唯一做法。在那之前
+      [docs/deployment.md](../deployment.md) 是唯一的关卡
 - [ ] 第 12 项 outbound networking
 - [ ] 第 17 项 生产 RDS 配置
 - [ ] 第 14 项 资源基线(粗版,够填 task 规格即可)
