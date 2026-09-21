@@ -1,10 +1,11 @@
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 import yaml
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.core.database_url import build_database_url
 
 
 CONFIG_DIR = Path(__file__).resolve().parent
@@ -72,23 +73,18 @@ class Settings(BaseSettings):
         configuration changes. Everything downstream keeps reading
         `settings.DATABASE_URL` and never learns where it came from.
 
-        The credentials are percent-encoded. RDS generates the password, and a
-        generated password containing `@`, `/` or `:` would otherwise split the
-        URL at the wrong place -- the failure surfaces as an unresolvable host,
-        which points nowhere near the actual cause.
+        The rule itself lives in `app.core.database_url`, because Alembic needs
+        the same one and does not go through `Settings` -- see the note there.
         """
         if self.DATABASE_URL:
             return self
 
-        parts = (self.DB_HOST, self.DB_NAME, self.DB_USER, self.DB_PASSWORD)
-        if not all(parts):
-            return self
-
-        user = quote(self.DB_USER or "", safe="")
-        password = quote(self.DB_PASSWORD or "", safe="")
-        self.DATABASE_URL = (
-            f"postgresql://{user}:{password}"
-            f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+        self.DATABASE_URL = build_database_url(
+            host=self.DB_HOST,
+            port=self.DB_PORT,
+            name=self.DB_NAME,
+            user=self.DB_USER,
+            password=self.DB_PASSWORD,
         )
         return self
 
