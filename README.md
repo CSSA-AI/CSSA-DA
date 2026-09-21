@@ -109,6 +109,7 @@ CSSA-DA/
 ├── CONTRIBUTING.md                           # Branching, commits, PRs, versioning, releases
 └── docs/
     ├── local-development.md                  # Local Docker workflows and command reference
+    ├── deployment.md                         # Shipping a commit to production — follow it in order
     ├── roadmap/                              # What to build and when
     │   ├── ROADMAP_versions.md               #   Milestone boundaries v1–v4 — start here
     │   ├── BACKLOG.md                        #   Flattened issue list for GitHub import
@@ -391,6 +392,7 @@ the ids in the retrieval logs.
 | [docs/design/storage-abstraction.md](docs/design/implemented/storage-abstraction.md) | Pipeline storage abstraction (中文) |
 | [docs/design/deployment-packaging.md](docs/design/implemented/deployment-packaging.md) | Dependency locking and container images (中文) |
 | [pipelines/README.md](pipelines/README.md) | Pipeline layout, local workflows, checkpoints |
+| [docs/deployment.md](docs/deployment.md) | **部署清单：把一个 commit 发到生产。顺序不能反——先改库,再上代码** |
 | [docs/local-development.md](docs/local-development.md) | Local Docker workflows and command reference |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Branching, commits, PRs, versioning and releases |
 
