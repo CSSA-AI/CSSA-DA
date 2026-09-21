@@ -5,6 +5,8 @@ from alembic import context
 from dotenv import load_dotenv
 from sqlalchemy import engine_from_config, pool
 
+from app.core.database_url import build_database_url
+
 
 config = context.config
 
@@ -12,9 +14,24 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 load_dotenv()
-database_url = os.getenv("DATABASE_URL")
+
+# An explicit DATABASE_URL wins, which is how local and CI runs are configured.
+# The deployed container has no such variable: RDS keeps the credentials in
+# Secrets Manager as separate fields and ECS can inject a field but cannot
+# concatenate two, so the parts arrive separately and are assembled here by the
+# same rule the application uses.
+database_url = os.getenv("DATABASE_URL") or build_database_url(
+    host=os.getenv("DB_HOST"),
+    port=os.getenv("DB_PORT"),
+    name=os.getenv("DB_NAME"),
+    user=os.getenv("DB_USER"),
+    password=os.getenv("DB_PASSWORD"),
+)
 if not database_url:
-    raise RuntimeError("DATABASE_URL is required to run database migrations")
+    raise RuntimeError(
+        "DATABASE_URL, or all of DB_HOST/DB_NAME/DB_USER/DB_PASSWORD, "
+        "is required to run database migrations"
+    )
 
 config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 target_metadata = None
