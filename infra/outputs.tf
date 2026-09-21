@@ -53,3 +53,14 @@ output "alb_url" {
 output "data_bucket" {
   value = aws_s3_bucket.data.bucket
 }
+
+# Under awsvpc the network is chosen when a task is RUN, not when it is
+# defined, so anything launching the migration task has to supply these
+# alongside the family below. `private_subnet_ids` above is the other half.
+output "ecs_tasks_security_group_id" {
+  value = aws_security_group.ecs_tasks.id
+}
+
+output "ecs_migrate_task_family" {
+  value = aws_ecs_task_definition.migrate.family
+}
