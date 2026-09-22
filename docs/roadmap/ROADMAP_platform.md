@@ -589,6 +589,8 @@ ALB target health check      -> /ready
 > 的容器起得来、Secrets Manager 两个字段注得进去、私有子网连得上 RDS、以及
 > **容器里没有 `DATABASE_URL` 而 alembic 照样连上了**（日志里是 alembic 的输出而不是
 > `RuntimeError`）。最后一条最要紧：不是「迁移能跑」，而是「成败能被程序读到」。
+> （2026-09-22，#105 起命令后面多了一句 `&& python -m ops.provision_runtime_role`：
+> 迁移之后把 API 的运行时角色对齐到授权清单，仍然只报一个退出码。）
 >
 > **绕不过去的那半做不了，而那半才是「关卡」的意义。** 关卡稳不稳，取决于通向生产
 > 是不是只有一条路——只要手敲 `terraform apply` 还能部署，赶时间的那天人就会用它。
@@ -1230,8 +1232,15 @@ FastAPI 解析依赖（含 require_caller）
 >   - `CORPUS_SHA256` 配进 API 任务定义（`infra/variables.tf` 里的变量，提交进仓库）。
 >   - 之后的导入以迁移身份、用迁移任务定义起一次性任务来跑 —— API 的角色写不了语料。
 >
+> **导入的路线变了**：下面原始条目选的是 A（本地经 SSM 端口转发）、否掉了 B（一次性 ECS
+> 任务从 S3 拉，理由是要 Phase 3 的 `S3Storage`）。现在走的是 **B 的形状，但不需要
+> `S3Storage`**：预签名链接 + `urllib`，没有新 IAM、没有新代码。A 反而不合适了——导入要以
+> 迁移身份跑，而迁移身份的凭据只注入在 VPC 里的迁移任务里。
+>
 > **勾选条件**：按 [deployment.md「一次性：切换到运行时身份」](../deployment.md#一次性切换到运行时身份105)
-> 在生产上执行一遍，五条完成标准的核对结果贴到 #105。设计见
+> 在生产上执行一遍。**由提交 `corpus_sha256` 的那个 PR 勾掉本项**（这里和
+> [ROADMAP_versions](ROADMAP_versions.md) 两处），把导入日志那一行和五条完成标准的核对输出
+> 贴进 PR 描述，再贴到 #105 上关掉它。设计见
 > [first-corpus-import.md](../design/implemented/first-corpus-import.md)。
 >
 > ⚠️ **#111 发现、本项未处理的已知缺陷**：语料里约 9% 是重复内容（205 条 / 164 组，最多的

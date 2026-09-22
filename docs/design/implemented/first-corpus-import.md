@@ -103,8 +103,9 @@ WHERE embedding_model = %s
 不同模型的向量不在同一个空间里,维度都可能不同,拿来检索比没有更糟。
 
 完成标准要求**拿导入报告的数去对 `/ready` 的数**。这只有在两边是同一个定义时才有意义。同一条
-SQL 原来有三份:`/ready`、[ops/db_status.py](../../../ops/db_status.py) 的 `active_rows`、
-以及导入报告。现在它只有一份,在 [app/services/knowledge_base.py](../../../app/services/knowledge_base.py)。
+SQL 原来有两份:`/ready` 和 [ops/db_status.py](../../../ops/db_status.py) 的 `active_rows`;
+导入报告要成为第三个使用者。与其写第三份,不如收成一份,在
+[app/services/knowledge_base.py](../../../app/services/knowledge_base.py)。
 
 ### 二、checkpoint 说「完成」,说的是什么
 
@@ -145,10 +146,13 @@ checkpoint 有一个**身份**,身份变了就从头来:
 > 内容和这条记录**逐字节相同**,且嵌入模型 / revision 是当前的。
 
 只比「行数够不够」是不够的 —— 上面第 3 种情况里,行数完全一样。按键和内容比才能抓到它。
-为什么比内容就够、不比 `source`、`tags` 这些:向量是从 `question_text` 和 `content`
-算出来的([knowledge_base_text.py](../../../pipelines/embedding/knowledge_base_text.py)),键和
-内容相同,检索看到的就是同一个东西。内容本身很大,所以比的是 md5:本地算记录内容的 md5,
-库里用 `md5(content)`,只把键和 md5 传过去。
+为什么比键和内容:向量是从 `question_text` 和 `content` 算出来的
+([knowledge_base_text.py](../../../pipelines/embedding/knowledge_base_text.py)),键和内容相同,
+**检索**看到的就是同一个东西。(`source`、`post_date` 这些元数据不比 —— 它们会进给模型的上下文,
+取舍见[已知取舍](#已知取舍与未完成)。)内容本身很大,所以比的是 md5:本地算记录内容的 md5,
+库里用 `md5(content)`,只把键和 md5 传过去。为了让两边算的是同一串字节,校验要求
+`question_text` 和 `content` 必须是字符串 —— 布尔值、数字、列表进了 Postgres 会变成它们的 SQL
+文本形式(`true`、`1e+20`、`{a,b}`),和原记录对不上,也和嵌入时用的文本对不上。
 
 核对不上就**失败**,而不是悄悄替你 reset 重导。报错写明原因和补救(`--reset-checkpoint`,
 完整管线是 `--reset-import-checkpoint`)。自动重导看着体贴,但它会让「checkpoint 和数据库对
@@ -158,13 +162,14 @@ checkpoint 有一个**身份**,身份变了就从头来:
 
 - `skipped_by_checkpoint` —— 这次是真跑了,还是被 checkpoint 跳过、只做了核对。跳过时
   `affected_count` 是**上一次**运行的数,不是这次的。
-- `rows_outside_corpus` —— 表里同一模型、但不属于这份语料的行。loader 只做 upsert、从不删,
-  所以更新语料时被删掉的文章会留在库里。它们不影响「这份语料完整」,但 `/ready` 会数它们、
-  检索会返回它们,此时 `CORPUS_SHA256` 只描述了在线内容的一部分。所以报告和日志里单列、并打
-  一条 warning,而不是让它失败。
+- `rows_outside_corpus` —— 表里同一模型、而**键**不属于这份语料的行。(键属于这份语料、内容
+  却不同的行不算在这里 —— 那是「导入不完整」。)loader 只做 upsert、从不删,所以更新语料时被
+  删掉的文章会留在库里。它们不影响「这份语料完整」,但 `/ready` 会数它们、检索会返回它们,此时
+  `CORPUS_SHA256` 只描述了在线内容的一部分。所以报告和日志里单列、并打一条 warning,而不是让
+  它失败。
 
-还有一个边界:**空输入**(比如 `--limit 0`)的状态是 `empty`,`corpus_sha256` 为 null ——
-「空列表的 hash」绝不能被当成一份语料的坐标配进部署。
+还有一个边界:**空输入**(比如 `--limit 0`)的状态是 `empty`,`corpus_sha256` 和
+`rows_outside_corpus` 都为 null —— 「空列表的 hash」绝不能被当成一份语料的坐标配进部署。
 
 ### 三、CORPUS_SHA256 是「什么」的 hash
 
@@ -228,8 +233,12 @@ API 是面向公网的进程。它用主用户连库,意味着任何一个能让
 **RDS 的主用户不是超级用户。** 它有 `CREATEROLE`、`CREATEDB`,是 `rds_superuser` 的成员,
 但不是 Postgres 意义上的 superuser。Postgres 16 对这种角色有一条很容易踩的规矩:建角色时可以
 写 `NOSUPERUSER NOREPLICATION NOBYPASSRLS`,但 **`ALTER ROLE` 里连提都不能提这三个属性** ——
-哪怕是关掉它们。所以脚本的「改」路径只碰 `LOGIN` 和密码;否则第一次部署能过,之后每一次都会
-卡在迁移任务上。本地和 CI 都用真超级用户,发现不了这一点 —— 见 [Step 5](#step-5用像-rds-的postgres-证明权限够也证明权限不多)。
+哪怕是关掉它们。所以脚本的「改」路径只碰 `LOGIN`、密码和有效期;否则第一次部署能过,之后每一次
+都会卡在迁移任务上。本地和 CI 都用真超级用户,发现不了这一点 —— 见 [Step 5](#step-5用像-rds-的postgres-证明权限够也证明权限不多)。
+
+密码有效期每次都设为永不过期(`VALID UNTIL 'infinity'`):API 的角色不该在某个没人记得的日子
+突然登不上。**角色级的设置(`ALTER ROLE … SET`)和连接数上限则故意不动** —— 运维可能有意在
+角色上设 `statement_timeout` 或连接预算,脚本不该每次部署把它抹掉。
 
 **声明式地收敛,而不是累加。** 授权是会累积的:今天授了、明天从清单里删了,库里那条授权还在。
 所以脚本每次都「先收回,再按清单授予」,放在**同一个事务**里 —— 其他会话要么看到旧的完整
@@ -238,9 +247,10 @@ API 是面向公网的进程。它用主用户连库,意味着任何一个能让
 
 **验证的是「实际拥有」,不是「我授了什么」。** `REVOKE … FROM cssa_app` 只能收回自己授的;
 授给 `PUBLIC` 的、别的授权人给的、通过成员关系继承的,都不受影响。所以收尾时脚本用
-`has_table_privilege` / `has_column_privilege` 逐表逐列查 `cssa_app` 实际能做什么,和清单
-逐项比对,多一项少一项都失败。授给 `PUBLIC` 的它**不替你收回**(那会影响所有角色),只报出
-来。
+`has_table_privilege` / `has_column_privilege` / `has_sequence_privilege`,在 `cssa_app` 能进入
+的**每一个** schema 里逐表、逐列、逐序列查它实际能做什么,和清单逐项比对,多一项少一项都失败。
+授给 `PUBLIC` 的它**不替你收回**(那会影响所有角色),只报出来。它不检查函数:`SECURITY DEFINER`
+函数能以所有者的身份做事,但这个库里没有,迁移也不建。
 
 **密码在客户端哈希。** `CREATE ROLE … PASSWORD '<明文>'` 会让明文出现在语句里,而语句可能
 进服务器日志。脚本先在本地算出 SCRAM 校验值再发过去,服务器只见过哈希。
@@ -259,16 +269,25 @@ API 是面向公网的进程。它用主用户连库,意味着任何一个能让
 都该被记住。而 API 是一直在跑、面向公网的进程:一个被攻破的 API 如果能写语料,它能污染的不是
 一次回答,而是**之后所有的回答**,而且没有任何报错。
 
-具体做法是用迁移任务定义起一个一次性任务,把命令换成「下载语料 + 导入」。这带来三个后果,
-都已处理:
+具体做法是用迁移任务定义起一个一次性任务,把命令换成「下载语料 + 导入」,语料从 S3 用预签名
+链接拉。
+
+> **这推翻了第 20 项原先的「选 A、不选 B」。** 原先选 A(本地经 SSM 端口转发连 RDS)、否掉 B
+> (一次性 ECS 任务从 S3 拉),理由是 B 需要 Phase 3 的 `S3Storage`。现在走的是 B 的形状,但
+> 不需要 `S3Storage`:预签名链接把授权写在 URL 里,容器用标准库 `urllib` 下载,不用新 IAM
+> 权限、不用新代码 —— #111 已经这么做过一次。而 A 反而不合适了:导入必须以迁移身份跑,迁移身份
+> 的凭据本来就只注入在 VPC 里的迁移任务里,从笔记本转发过去意味着把主用户密码拿到本地。
+
+这带来三个后果,都已处理:
 
 - 导入不再跑在 API 容器里。#111 那次是 `ecs exec` 进 API 容器跑的,那时 API 还是主用户;
   现在 API 的角色写不了语料,而且把导入和 `/ready` 转绿绑在同一个容器里本来就别扭 —— 空库上
   ALB 会判它不健康、ECS 会回收它,正在导入的进程也跟着没了。
 - 迁移任务里只有 `DB_*` 分件、没有 `DATABASE_URL`,所以管线 CLI 改为从 `Settings` 取连接串
   (#111 已经让 `Settings` 会从分件拼),和迁移、授权脚本走同一条规则。
-- 任务的文件系统随任务消失,报告文件带不走。所以报告里的数字**同样写在日志最后一行
-  `command_completed` 里**,那一行进 CloudWatch,就是能留下来的报告。
+- 任务的文件系统随任务消失,报告文件带不走。所以报告的要点 —— 状态、坐标、各项行数、模型、
+  目标库、`limit` —— **同样写在日志最后一行 `command_completed` 里**,那一行进 CloudWatch(保留
+  90 天),操作者再把它贴进提交坐标的那个 PR,就留下来了。
 
 > Phase 3 管线变成定时任务之后,它该有**自己的**角色(能写 `knowledge_base` 和
 > `pipeline_runs`,不能改表结构)。v1 只有两个身份,是因为 v1 的导入只有人手动跑。
@@ -301,7 +320,8 @@ API 是面向公网的进程。它用主用户连库,意味着任何一个能让
 4. `incomplete` 就抛 `KnowledgeBaseImportIncompleteError`,命令以非零退出;有语料外的行就
    打 warning。
 
-报告长这样(CLI 最后一行日志里是同样的数字):
+报告长这样(CLI 最后一行 `command_completed` 日志带着同样的要点,只是没有 `input_key`、起止
+时间和表名;值为 null 的字段不出现在日志里):
 
 ```json
 {
@@ -348,12 +368,13 @@ RUNTIME_DB_PASSWORD=… python -m ops.provision_runtime_role    # 角色名默�
    角色已存在但带着 `SUPERUSER` / `CREATEROLE` / `CREATEDB` 等高权限属性 —— 那是别人的账号,
    不该被悄悄拿来当运行时角色。
 2. **建或改角色**。建:显式 `NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`;
-   改:只动 `LOGIN` 和密码(RDS 的规矩,见[四](#四数据库里的身份与权限))。密码是本地算好的
-   SCRAM 校验值。
+   改:只动 `LOGIN`、密码和有效期(RDS 的规矩,见[四](#四数据库里的身份与权限))。密码是本地
+   算好的 SCRAM 校验值,有效期永不过期。
 3. **收敛授权**:`CONNECT` 这个库、`USAGE` public schema;对迁移身份管得着的每张表和序列
    收回全部权限;再按 `RUNTIME_TABLE_PRIVILEGES` 和 `RUNTIME_COLUMN_PRIVILEGES` 授予。
-4. **验证实际拥有的**:属性、成员关系、能否建 schema / 建对象、拥有哪些对象,以及逐表逐列、
-   逐序列的实际权限和清单比对。任何一项不符,整个事务回滚、报错,列出每一条。
+4. **验证实际拥有的**:属性、成员关系、能否建 schema / 建对象、拥有哪些对象,以及在它能进入
+   的每个 schema 里逐表、逐列、逐序列的实际权限和清单比对。任何一项不符,整个事务回滚、报错,
+   列出每一条。
 
 第 4 步是这个脚本存在的意义本身:「运行时身份与迁移身份不同」这条完成标准,不是靠名字不同来
 满足的,而是靠**运行时身份确实做不了迁移身份做的事**,并且每次部署都当场证明一次。
@@ -373,6 +394,7 @@ RUNTIME_DB_PASSWORD=… python -m ops.provision_runtime_role    # 角色名默�
 | [ecs.tf](../../../infra/ecs.tf) | API 的 `DB_USER` 改为 `cssa_app`(普通环境变量)、`DB_PASSWORD` 取自新密钥,**不再注入主用户密钥**;`CORPUS_SHA256` 来自变量,为 null 时整条不注入,指纹记为诚实的 null 而不是空字符串 |
 | [variables.tf](../../../infra/variables.tf) | `runtime_db_user`(默认 `cssa_app`)和 `corpus_sha256`(默认 null,校验 64 位十六进制) |
 | [outputs.tf](../../../infra/outputs.tf) | `rds_security_group_id`(核对「没有暴露过」用)、运行时角色名和密钥名 |
+| [tests/runtime_identity.tftest.hcl](../../../infra/tests/runtime_identity.tftest.hcl) | 用 mock provider 验证上面这些接线,不需要 AWS 账号 |
 
 `corpus_sha256` 写成**变量的默认值、提交进仓库**,而不是每次 `apply` 时 `-var` 传:漏传一次,
 新任务定义里这个变量就没了,指纹悄悄变回 null;而写进仓库,「语料什么时候换的、换成了哪份」
@@ -399,10 +421,12 @@ RUNTIME_DB_PASSWORD=… python -m ops.provision_runtime_role    # 角色名默�
 - 参数化逐条证明它**做不了**迁移做的事(建表、改表、删表、建扩展、建 schema)、做不了导入
   做的事(写、改、删语料 —— 插入时显式给 id,确保拦住它的是表权限而不是序列权限)、也读不了
   别人的问题;
-- 以非超级用户**连跑三次**授权脚本,确认收敛掉手工加的授权、密码真的换了。把 `ALTER ROLE`
-  改回带那三个属性的写法,这条测试就会失败 —— 已经验证过;
-- 授给 `PUBLIC` 的权限、角色拥有的表、继承来的成员关系都会被报出来;一张别人的表不会让脚本
-  中止。
+- 以非超级用户**连跑三次**授权脚本,确认收敛掉手工加的授权;密码换没换,直接拿库里存的 SCRAM
+  校验值和新旧密码核对 —— 不靠「用旧密码登不上」,因为信任本地连接的环境里任何密码都登得上。
+  把 `ALTER ROLE` 改回带那三个属性的写法,这条测试就会失败 —— 已经验证过;
+- 每一类撤不掉的漂移各一条:授给 `PUBLIC` 的表权限、列权限、序列权限、在 public 建对象、在库里
+  建 schema,另一个 schema 里对 `PUBLIC` 开放的表,角色拥有的 schema 和表、继承来的成员关系 ——
+  都会被报出来,漂移去掉后再跑又会通过;一张别人的表不会让脚本中止。
 
 ---
 
@@ -419,12 +443,15 @@ RUNTIME_DB_PASSWORD=… python -m ops.provision_runtime_role    # 角色名默�
 1. **建密钥并写入值** —— 迁移任务要读它,ECS 起不了一个密钥没有值的任务。
 2. **构建推送镜像**。
 3. **跑迁移任务** —— 建出 `cssa_app`。先有角色,API 才能用它登录。
-4. **以迁移身份导入语料,记下 `corpus_sha256`**。库里还是 #111 那份时用同一份文件:
-   `affected_count` 为 0、`knowledge_base_rows` 等于 `unique_record_count`、
-   `rows_outside_corpus` 为 0,三个数一起证明库里正是这份语料。库被重建过就是一次正常的首次
-   导入。**这一步在 API 切换之前**:空库上的 API 过不了 `/ready`,部署熔断器会回滚它。
-5. **把坐标写进 `variables.tf`,部署 API** —— 这次部署把 API 切到 `cssa_app`。
-6. **核对五条完成标准,结果贴到 #105 上再关。**
+4. **以迁移身份导入语料,记下 `corpus_sha256`**。库里还是 #111 那份时,用**桶里 #111 放进去的
+   那一版**,不要从谁的笔记本上重新上传:`affected_count` 为 0、`knowledge_base_rows` 等于
+   `unique_record_count`、`rows_outside_corpus` 为 0,三个数一起证明库里正是这份语料。库被重建过
+   就是一次正常的首次导入。**这一步在 API 切换之前**:空库上的 API 过不了 `/ready`,部署熔断器会
+   回滚它。
+5. **把坐标写进 `variables.tf`,开 PR,部署 API** —— 这次部署把 API 切到 `cssa_app`。**同一个
+   PR 勾掉 roadmap 的第 20 项**,把导入那一行日志和第 6 步的输出贴进描述:勾和证据落在一起。
+6. **核对五条完成标准** —— 先确认 API 跑着的是刚注册的那一版(熔断器回滚后,`/ready` 和按
+   family 查任务定义都照样「通过」),再贴到 #105 上关掉它。
 
 ---
 
@@ -432,16 +459,16 @@ RUNTIME_DB_PASSWORD=… python -m ops.provision_runtime_role    # 角色名默�
 
 | 层 | 测什么 |
 |---|---|
-| 单元(导入) | 报告内容与返回值一致;`corpus_sha256` 等于实际导入记录的指纹、`--limit` 时只覆盖导入的那部分;传给核对的是每条记录的键和内容 md5,重复键以最后一条为准;checkpoint「已完成」而表是空的、或表里是规模相同的另一份语料 → 失败、报告为 `incomplete`、报错里两个命令的 flag 都有,`--reset-checkpoint` 之后真的重导;语料外的行被报出并打 warning;空输入不给出坐标;表不存在时提示先迁移;报告里没有密码 |
-| 单元(CLI) | `command_completed` 那一行带齐 `corpus_sha256` 等全部字段、没有密码、`run_id` 与报告一致;没有 `--database-url` 时用 `Settings` 拼出的连接串 |
+| 单元(导入) | 报告内容与返回值一致;`corpus_sha256` 等于实际导入记录的指纹、`--limit` 时只覆盖导入的那部分;传给核对的是每条记录的键和内容 md5,重复键以最后一条为准;checkpoint「已完成」而表是空的、或表里是规模相同的另一份语料 → 失败、报告为 `incomplete`、报错里两个命令的 flag 都有,`--reset-checkpoint` 之后真的重导;内容过时的语料记录算「不完整」而不算「语料外」;语料外的行被报出并打 warning;空输入不给出坐标、不打 warning;表不存在时提示先迁移;报告里没有密码;非字符串的 `question_text` / `content` 在校验时被拒 |
+| 单元(CLI、管线) | `command_completed` 那一行带齐状态、坐标、各项行数、模型、目标库,没有密码,`run_id` 与报告一致;没有 `--database-url` 时用 `Settings` 拼出的连接串;`run-wechat-pipeline` 把坐标、行数、跳过标记和导入报告位置带进自己的结果、报告和日志 |
 | 单元(脚本) | 短密码在连库之前就被拒;密码缺失、授权失败时的退出码;清单本身的两条策略:语料只读、交互日志只写 |
-| 集成(导入) | 真 Postgres 上:别的模型的行不计入;报告的行数与 `/ready` 一致;语料外的行被报出;库里是旧版本内容(键相同、行数相同)时被抓出;重建后的库被抓出;中文内容下 Python 的 md5 与 Postgres 的 `md5()` 一致 |
+| 集成(导入) | 真 Postgres 上:别的模型的行不计入;报告的行数与 `/ready` 一致;语料外的行被报出;语料自己的一行被别的模型重新嵌入过、或内容是旧版本(键相同、行数相同)时被抓出;重建后的库被抓出;中文内容下 Python 的 md5 与 Postgres 的 `md5()` 一致 |
 | 集成(角色) | 见 [Step 5](#step-5用像-rds-的postgres-证明权限够也证明权限不多) |
-| Terraform | `terraform fmt -check`、`terraform validate`;以及一次用 mock provider 的 `terraform test`(本地跑过,未提交):API 任务里 `DB_USER=cssa_app`、没有主用户密钥;`CORPUS_SHA256` 为 null 时不注入、有值时注入;非法值被变量校验拒绝;迁移任务的命令和注入正确 |
+| Terraform | `terraform fmt -check`、`terraform validate`,以及 [infra/tests/runtime_identity.tftest.hcl](../../../infra/tests/runtime_identity.tftest.hcl)(mock provider,不需要 AWS 账号):API 任务用 `cssa_app` 和运行时密钥、不拿主用户密钥;迁移任务仍是主用户、先迁移再授权;`CORPUS_SHA256` 为 null 时不注入、有值时注入;非法值被变量校验拒绝。CI 里还没有 Terraform 这一步,改这几个文件后手动跑 `terraform -chdir=infra test` |
 
-全部结果:单元 305 通过,集成 34 通过(本地 `docker compose --profile test` 的 pgvector pg16,
-与 CI 同一镜像)。集成测试里的角色和临时库每次都不同名、结束时删除 —— 角色是整个集群的,不像
-表那样随库清理。
+全部结果:单元 300 通过,集成 40 通过(本地 `docker compose --profile test` 的 pgvector pg16,
+与 CI 同一镜像),Terraform 测试 4 个 run 通过。集成测试里的角色和临时库每次都不同名,结束时
+—— 包括搭建到一半失败时 —— 都会删除:角色是整个集群的,不像表那样随库清理。
 
 ---
 
@@ -449,12 +476,18 @@ RUNTIME_DB_PASSWORD=… python -m ops.provision_runtime_role    # 角色名默�
 
 - **生产上还没有执行。** 代码和配置都在这里,但 #105 的五条完成标准里有四条是「生产上是什么
   状态」,要按[上线](#上线)的步骤执行一遍才算数。
-- **`CORPUS_SHA256` 是配出来的,不是从库里读的。** 有人重导了新语料却忘了改变量,之后每一行
-  都会带着错的坐标。写进仓库 + 导入日志里醒目的一行降低了这个概率,但没有消除它。按构造就
-  正确的形状是让导入把 hash 写进库里、API 从库里读 —— 真出现过一次漂移,就该换成那样。
+- **`CORPUS_SHA256` 是配出来的,不是从库里读的。** 两个后果:有人重导了新语料却忘了改变量,
+  之后每一行都会带着错的坐标;即使没忘,从导入完成到 API 带着新值重新部署之间,也有一段时间
+  API 服务的是新语料、盖的是旧坐标(所以操作手册要求导入、提交、部署一次坐下来做完)。写进仓库 +
+  导入日志里醒目的一行降低了风险,但没有消除它。按构造就正确的形状是让导入把 hash 写进库里、
+  API 从库里读 —— 真出现过一次漂移,就该换成那样。
 - **指纹对记录顺序敏感。** 见[三](#三corpus_sha256-是什么的-hash)。
-- **核对比的是键和内容,不比元数据。** `source`、`tags`、日期变了而内容没变,核对照样通过,但
-  `corpus_sha256` 会不同。这些字段不影响检索,只影响展示。
+- **核对比的是键和内容,不比元数据。** `source`、`tags`、`post_date` 变了而内容没变,核对照样
+  通过,但 `corpus_sha256` 会不同。这些字段不影响**检索**(向量只由键和内容算出),但 `source`、
+  链接和 `post_date` 会进给模型的上下文
+  ([context_formatter.py](../../../app/services/rag/generator/context_formatter.py)),所以
+  「checkpoint 跳过 + 库里是元数据较旧的同一份语料」这种情况下,生成的回答可能不同而核对不报。
+  把日期也纳入比对需要两边对日期格式做规范化,容易误报,没有做。
 - **内容 md5 假定数据库是 UTF8 编码。** RDS 和本地 pgvector 镜像默认都是。
 - **本地 compose 的 API 仍用超级用户。** 所以「只有生产报 permission denied」这一类问题只靠
   `test_runtime_role.py` 兜,而它只覆盖它驱动过的代码路径。**加一条碰数据库的新代码路径,就在
@@ -466,3 +499,7 @@ RUNTIME_DB_PASSWORD=… python -m ops.provision_runtime_role    # 角色名默�
   (`GRANT cssa_app TO cssa_admin`)再删。
 - **运行时角色能建临时表。** Postgres 默认把 `TEMP` 授给 `PUBLIC`。临时表随会话消失,不影响
   持久的库结构,没有收回。
+- **从授权清单里删东西要分两次发版。** 迁移任务用新镜像,一跑就收回新清单之外的权限,而旧任务
+  还在服务;回滚也不会重跑迁移任务。和删列同理,先让代码不再用,下一版再删。
+- **往 `public` 里装扩展可能挡住部署。** 像 `pg_stat_statements` 这样把视图开放给 `PUBLIC` 的
+  扩展,会被「实际权限」检查报出来,让迁移任务失败。扩展应装进自己的 schema。

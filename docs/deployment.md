@@ -120,14 +120,16 @@ aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" --region ap-southeas
 从 `run-task` 到任务停止约一到两分钟,**其中大部分时间在拉 982MB 的镜像**,不是在跑
 迁移。`aws ecs wait` 期间终端没有任何输出,那是正常的。
 
-日志在这里:
+日志在这里(只看这一次任务的那条日志流):
 
 ```bash
-aws logs tail /ecs/cssa-da-prod-migrate --region ap-southeast-2 --since 10m
+aws logs tail /ecs/cssa-da-prod-migrate --region ap-southeast-2 --since 1h \
+  --log-stream-name-prefix "ecs/migrate/${TASK##*/}"
 ```
 
-没有待执行的迁移时,日志只有 alembic 的两行连接信息——**看着像什么都没发生,那就是对的**。
-有迁移要跑时,每一条会打出 `Running upgrade <from> -> <to>`。
+没有待执行的迁移时,alembic 只打出两行连接信息——**看着像什么都没发生,那就是对的**。
+有迁移要跑时,每一条会打出 `Running upgrade <from> -> <to>`。之后是授权脚本的几行输出,
+见下。
 
 > `exitCode` 是 `null` 而不是数字,通常意味着容器压根没起来(拉镜像失败、架构不对、
 > 密钥取不到)。这种情况 `reason` 字段会说明原因。
@@ -146,6 +148,10 @@ Runtime role cssa_app: updated
 手工给这个角色、或给 `PUBLIC` 加过权限。脚本**故意不替你收回**给 `PUBLIC` 的授权——那会
 影响所有角色——报错里会列出是哪张表、哪项权限,查清来源、手工收回后重跑本步。
 
+> 同样的报错也会出现在**往 `public` 里装了一个把视图开放给 `PUBLIC` 的扩展**之后(比如
+> `pg_stat_statements`)。扩展请装进它自己的 schema(`CREATE EXTENSION ... SCHEMA ...`),
+> 别装进 `public`;确实要放在 `public` 的,把它的对象加进脚本的清单,而不是绕过检查。
+
 ### 4. 上代码
 
 ```bash
@@ -155,10 +161,21 @@ terraform -chdir=infra apply -var="image_tag=$SHA"
 这会注册新的 API 任务定义并滚动更新服务。部署有熔断器,新任务一直不健康会自动回滚。
 
 ```bash
-aws ecs wait services-stable --cluster "$CLUSTER" \
-  --services "$(terraform -chdir=infra output -raw ecs_service_name)" \
-  --region ap-southeast-2
+SVC=$(terraform -chdir=infra output -raw ecs_service_name)
+aws ecs wait services-stable --cluster "$CLUSTER" --services "$SVC" --region ap-southeast-2
 ```
+
+**`services-stable` 在回滚之后也会返回**——回滚到旧版本同样是「稳定」。所以要确认跑着的
+是刚注册的那一版:
+
+```bash
+aws ecs describe-services --cluster "$CLUSTER" --services "$SVC" --region ap-southeast-2 \
+  --query 'services[0].deployments[?status==`PRIMARY`].{taskDefinition:taskDefinition,rollout:rolloutState}'
+```
+
+`rollout` 要是 `COMPLETED`,`taskDefinition` 要等于 `terraform apply` 刚注册的那一版
+(`terraform -chdir=infra state show aws_ecs_task_definition.api | grep arn` 能看到)。熔断器
+回滚时 `rollout` 是 `FAILED`,`taskDefinition` 是旧的那一版。
 
 ### 5. 验证
 
@@ -202,6 +219,10 @@ curl -s "$URL/ready" | jq .
 [tests/integration/test_runtime_role.py](../tests/integration/test_runtime_role.py) 里给
 新的代码路径加一条,CI 就能替你发现。
 
+**反过来,从清单里删权限要分两次发版**——和删列一样。迁移任务用的是新镜像,它一跑就把
+新清单之外的权限收回了,而此刻旧任务还在服务;回滚也不会重跑迁移任务,新清单会一直留着。
+所以先发一版代码不再用它,下一版才从清单里删。
+
 ---
 
 ## 出问题了
@@ -222,19 +243,38 @@ Alembic 记录了自己跑到哪一版,重跑不会重复执行已经成功的�
 故意的。导入以迁移身份跑,方法是用迁移任务定义起一个一次性任务,把命令换成「下载语料 +
 导入」,并把 CPU / 内存调大(导入要加载嵌入模型,迁移任务的 512MB 装不下)。
 
-**1. 把语料放进数据桶,生成一个一小时有效的下载链接。**容器里没有 AWS CLI 也没有权限读
-桶,预签名链接把授权写在 URL 里:
+下面沿用第 2 步的 `CLUSTER` / `FAMILY` / `SUBNETS` / `SG`,以及第 4、5 步的 `SVC` / `URL`。
+
+**1. 准备一个一小时有效的语料下载链接。**容器里没有 AWS CLI 也没有权限读桶,预签名链接
+把授权写在 URL 里。
+
+- **换一份新语料**:转换步骤(`python -m pipelines transform-wechat`)的产物在
+  `data/current/wechat_articles_processed.json`,把它传上去:
+
+  ```bash
+  BUCKET=$(terraform -chdir=infra output -raw data_bucket)
+  aws s3 cp data/current/wechat_articles_processed.json \
+    "s3://$BUCKET/current/wechat_articles_processed.json"
+  ```
+
+- **用桶里已经有的那一份**(比如给已经导入过的语料补坐标):**不要上传**——上传会覆盖它。
+  先确认桶里现在那一版是你以为的那一版(桶开了版本控制):
+
+  ```bash
+  BUCKET=$(terraform -chdir=infra output -raw data_bucket)
+  aws s3api list-object-versions --bucket "$BUCKET" \
+    --prefix current/wechat_articles_processed.json \
+    --query 'Versions[].{latest:IsLatest,modified:LastModified,size:Size}'
+  ```
+
+然后生成链接:
 
 ```bash
-BUCKET=$(terraform -chdir=infra output -raw data_bucket)
-aws s3 cp data/current/wechat_articles_processed.json \
-  "s3://$BUCKET/current/wechat_articles_processed.json"
 CORPUS_URL=$(aws s3 presign "s3://$BUCKET/current/wechat_articles_processed.json" \
   --expires-in 3600 --region ap-southeast-2)
 ```
 
-**2. 起一次性任务。**变量沿用第 2 步的 `CLUSTER` / `FAMILY` / `SUBNETS` / `SG`。链接通过
-环境变量传进去,不拼进命令字符串:
+**2. 起一次性任务。**链接通过环境变量传进去,不拼进命令字符串:
 
 ```bash
 jq -n --arg url "$CORPUS_URL" '{
@@ -257,33 +297,57 @@ aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK" --region ap-sout
 ```
 
 `--reset-checkpoint`:容器每次都是新的,本来就没有 checkpoint;写上它是为了让这条命令的
-含义不依赖这一点。`wait` 最多等 10 分钟,导入比这久就再敲一次 `wait`。
+含义不依赖这一点。`wait` 最多等 10 分钟,导入比这久就再敲一次 `wait`。导入会从 Hugging
+Face 下载一次嵌入模型(走 NAT),这是故意的,原因见
+[aws-foundation.md 第 14 步](design/implemented/aws-foundation.md)。
 
-**3. 读结果。**任务的文件系统随任务消失,**日志里那一行 `command_completed` 就是导入报告**:
+**3. 确认成功,读结果。**先看退出码,和第 3 步一样:
+
+```bash
+aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" --region ap-southeast-2 \
+  --query 'tasks[0].containers[0].{exitCode:exitCode,reason:reason}'
+```
+
+`exitCode` 必须是 `0`。然后读这一次任务的日志——任务的文件系统随任务消失,**日志最后那一行
+`command_completed` 带着导入报告的全部要点**:
 
 ```bash
 aws logs tail /ecs/cssa-da-prod-migrate --region ap-southeast-2 --since 1h \
-  | grep '"command_completed"'
+  --log-stream-name-prefix "ecs/migrate/${TASK##*/}" | grep '"command_completed"'
 ```
-
-要看的字段:
 
 | 字段 | 应该是 |
 |---|---|
+| `status` | `completed` |
 | `corpus_sha256` | 64 位十六进制。**这就是这份语料的坐标**,下一步要用 |
 | `knowledge_base_rows` | 部署后 `/ready` 必须报同一个数 |
-| `unique_record_count` | 这份语料的唯一记录数 |
+| `unique_record_count` / `corpus_rows` | 相等:这份语料的每一条都原样在库里 |
 | `rows_outside_corpus` | 通常是 0。大于 0 表示库里还有不属于这份语料、但同一模型嵌入的行(比如更新语料时被删掉的文章),`/ready` 会数它们、检索也会返回它们 |
 | `affected_count` | 这次改动了几行;库里已经是同一份语料时是 0 |
+| `limit` | 不应出现(出现说明只导了前 N 条) |
+| `model_name` / `model_revision` / `target_id` | 用的是哪个模型、连的是哪个库 |
 
-导入失败(退出码非 0)时,日志里会写明原因;`KnowledgeBaseImportIncompleteError` 表示
-**导完之后库里并没有这份语料**,按报错里的提示处理。
+退出码非 0 时日志里会写明原因;`KnowledgeBaseImportIncompleteError` 表示**导完之后库里并没有
+这份语料**,按报错里的提示处理。**把这一行存下来**,下一步要贴进 PR——日志组只保留 90 天。
 
-**4. 把坐标配给 API。**把 `corpus_sha256` 写进
-[infra/variables.tf](../infra/variables.tf) 里 `corpus_sha256` 的 `default`,**提交进仓库**,
-然后按正常流程部署(第 4 步)。不要用 `-var` 临时传:漏传一次,新任务定义里这个变量就没了,
-每一行 `chat_interactions` 的「哪份语料」又悄悄变回 null。也**不要自己对文件算 hash**——
-这个值的意义就在于它来自真正把数据导进去的那一次运行。
+**4. 把坐标配给 API,同一次坐下来做完。**导入完成的那一刻起,API 服务的已经是新语料,但它的
+`CORPUS_SHA256` 还是旧值,直到这一步部署完。所以别隔天。
+
+把 `corpus_sha256` 写进 [infra/variables.tf](../infra/variables.tf) 里 `corpus_sha256` 的
+`default`,在分支上提交、开 PR,把上一步那一行日志贴进 PR 描述。然后**立刻**部署——不用重新
+构建镜像:`infra/` 不进镜像,代码没变,沿用正在跑的那个 tag:
+
+```bash
+RUNNING=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SVC" \
+  --region ap-southeast-2 --query 'services[0].taskDefinition' --output text)
+TAG=$(aws ecs describe-task-definition --task-definition "$RUNNING" --region ap-southeast-2 \
+  --query 'taskDefinition.containerDefinitions[0].image' --output text)
+terraform -chdir=infra apply -var="image_tag=${TAG##*:}"
+```
+
+再做第 4 步末尾的回滚检查。不要用 `-var corpus_sha256=...` 临时传:漏传一次,新任务定义里
+这个变量就没了,每一行 `chat_interactions` 的「哪份语料」又悄悄变回 null。也**不要自己对文件
+算 hash**——这个值的意义就在于它来自真正把数据导进去的那一次运行。
 
 **5. 核对。**
 
@@ -301,12 +365,14 @@ Postgres 一个角色只有一个密码,改了立刻生效;而 API 任务只在*
 读一次密码。所以顺序必须是:
 
 1. 往密钥里写新值(做法见 [infra/secrets.tf](../infra/secrets.tf) 顶部注释)。
-2. 跑一次迁移任务(第 2、3 步)——它把 `cssa_app` 的密码改成新值。
-3. **马上**强制 API 重新部署,让新任务读到新密码:
+2. 跑一次迁移任务:只要第 2 步里的 `aws ecs run-task` 和 `wait`,再加第 3 步的检查——任务
+   定义没变,**不需要**那条 targeted `terraform apply`。它把 `cssa_app` 的密码改成新值。
+3. **马上**让 API 重新起任务读新密码,并确认滚动完成:
 
    ```bash
-   aws ecs update-service --cluster "$CLUSTER" --force-new-deployment --region ap-southeast-2 \
-     --service "$(terraform -chdir=infra output -raw ecs_service_name)"
+   aws ecs update-service --cluster "$CLUSTER" --service "$SVC" --force-new-deployment \
+     --region ap-southeast-2
+   aws ecs wait services-stable --cluster "$CLUSTER" --services "$SVC" --region ap-southeast-2
    ```
 
 第 2 步和第 3 步之间,旧任务已有的连接还能用,但**新开的连接会认证失败**:`/ready` 会报
@@ -318,29 +384,40 @@ Postgres 一个角色只有一个密码,改了立刻生效;而 API 任务只在*
 
 #105 的完成标准之一是「RDS 全程没有公网地址,也没有为导入加进 SG、事后忘了删的规则」。
 看 Terraform 文件不够——在控制台手工加的规则既不在文件里,也不会出现在 `terraform plan`
-的差异里。要看**线上实际的状态**:
+的差异里。要看**线上实际的状态**,以及**这段时间里发生过什么**:
 
 ```bash
-# 1. 没有公网地址
+RDS_SG=$(terraform -chdir=infra output -raw rds_security_group_id)
+DB_ID=$(aws rds describe-db-instances --region ap-southeast-2 \
+  --query 'DBInstances[0].DBInstanceIdentifier' --output text)
+
+# 1. 现在没有公网地址
 aws rds describe-db-instances --region ap-southeast-2 \
   --query 'DBInstances[].{id:DBInstanceIdentifier,public:PubliclyAccessible}'
 
-# 2. 数据库安全组只有一条入站规则,来源是 ECS 任务的安全组、端口 5432
+# 2. 现在只有一条入站规则:来源是 ECS 任务的安全组,端口 5432
 aws ec2 describe-security-group-rules --region ap-southeast-2 \
-  --filters Name=group-id,Values="$(terraform -chdir=infra output -raw rds_security_group_id)" \
-  --query 'SecurityGroupRules[].{egress:IsEgress,port:FromPort,from:ReferencedGroupInfo.GroupId,cidr:CidrIpv4}'
+  --filters Name=group-id,Values="$RDS_SG" \
+  --query 'SecurityGroupRules[?IsEgress==`false`].{port:FromPort,fromGroup:ReferencedGroupInfo.GroupId,cidr4:CidrIpv4,cidr6:CidrIpv6,prefixList:PrefixListId}'
 
-# 3. 这段时间里没人改过数据库的网络形状(CloudTrail 保留 90 天)
-for EVENT in ModifyDBInstance AuthorizeSecurityGroupIngress; do
+# 3. 过去 90 天里,谁动过这个安全组和这个数据库实例(CloudTrail 只保留 90 天)
+for RESOURCE in "$RDS_SG" "$DB_ID"; do
   aws cloudtrail lookup-events --region ap-southeast-2 \
-    --lookup-attributes AttributeKey=EventName,AttributeValue=$EVENT \
-    --query 'Events[].{time:EventTime,user:Username}'
+    --lookup-attributes AttributeKey=ResourceName,AttributeValue="$RESOURCE" \
+    --query 'Events[?ReadOnly==`false`].{time:EventTime,event:EventName,user:Username}'
 done
 ```
 
-期望:`public` 是 `false`;入站规则只有一条,`from` 等于
-`terraform output ecs_tasks_security_group_id`;两个 CloudTrail 查询里没有导入期间的
-记录(`AuthorizeSecurityGroupIngress` 里 Terraform 建栈时的那条是正常的)。
+期望:
+
+- 第 1 条:`public` 是 `false`。
+- 第 2 条:只有一条,`fromGroup` 等于 `terraform -chdir=infra output -raw ecs_tasks_security_group_id`,
+  没有任何 `cidr4` / `cidr6` / `prefixList`。
+- 第 3 条:安全组上只有 Terraform 建栈时的 `CreateSecurityGroup` / `AuthorizeSecurityGroupIngress`
+  (每次重建一组),**没有**导入期间的 `AuthorizeSecurityGroupIngress` / `ModifySecurityGroupRules`;
+  实例上没有 `ModifyDBInstance`(除了建栈时的)。拿不准某一条是什么,看它的明细——把 query 换成
+  `Events[].CloudTrailEvent`,里面的 `requestParameters` 写着改了什么(`ModifyDBInstance` 的
+  `publiclyAccessible`、入站规则的来源 CIDR)。
 
 ---
 
@@ -365,28 +442,73 @@ rm /tmp/p
 **3. 跑迁移任务**(第 2、3 步)。日志里应该是 `Runtime role cssa_app: created`。targeted
 apply 会顺带把「执行角色能读新密钥」那条权限一起建好——迁移任务定义依赖它。
 
-**4. 导入语料并记下坐标**(上面「导入或更新语料」的第 1–3 步)。
-
-- 库里已经有 #111 导入的那 2312 行时,用**同一份文件**:`affected_count` 为 0、
-  `knowledge_base_rows` 等于 `unique_record_count`、`rows_outside_corpus` 为 0,这三个数
-  一起证明库里正是这份语料,此时的 `corpus_sha256` 就是它的坐标。
-- 库是空的(栈被重建过)时就是一次正常的首次导入,`affected_count` 等于行数。
-
-**5. 配上坐标并部署 API**(「导入或更新语料」第 4 步)。这次部署会把 API 切到 `cssa_app`。
-
-**6. 核对完成标准,贴到 #105 上再关:**
+**4. 导入语料并记下坐标**(上面「导入或更新语料」的第 1–3 步)。先看库里现在有什么:
 
 ```bash
-curl -s "$URL/ready" | jq '{status, knowledge_base_rows}'   # ready,且行数 == 第 4 步日志
-
-for FAMILY_NAME in cssa-da-prod-api cssa-da-prod-migrate; do
-  aws ecs describe-task-definition --task-definition "$FAMILY_NAME" --region ap-southeast-2 \
-    --query 'taskDefinition.containerDefinitions[0].{env:environment[?name==`DB_USER`||name==`CORPUS_SHA256`],secrets:secrets[].name}'
-done
+curl -s "$URL/ready" | jq '{status, knowledge_base_rows}'
 ```
 
-API 那一份应该有 `DB_USER=cssa_app` 和 `CORPUS_SHA256`,秘密里没有 `DB_USER`;迁移那一份
-的 `DB_USER` 来自主用户密钥。再做一遍上面的[「核对:数据库没有被暴露过」](#核对数据库没有被暴露过)。
+- **2312,且 `ready`**(还是 #111 导入的那一份):**用桶里已有的那一版,不要上传**,先按第 1
+  步确认它的修改时间是 #111 导入的那天(2026-09-17)。期望 `affected_count` 为 0、
+  `knowledge_base_rows` 等于 `unique_record_count`、`rows_outside_corpus` 为 0——这三个数一起
+  证明库里正是这份语料,此时的 `corpus_sha256` 就是它的坐标。`affected_count` 不是 0,说明桶里
+  这份和库里原来的内容有出入;现在库里已经是桶里这份了,`corpus_sha256` 对它依然成立,把这件事
+  记在 #105 上。
+- **0,或者不是 `ready`**(栈被重建过):就是一次正常的首次导入,用「换一份新语料」那条路。
+
+**5. 配上坐标并部署 API。**和「导入或更新语料」第 4 步一样提交 `variables.tf`、开 PR,但这次
+部署用第 2 步构建的镜像:`terraform -chdir=infra apply -var="image_tag=$SHA"`。这次部署会把
+API 切到 `cssa_app`。**这个 PR 同时在 [ROADMAP_versions.md](roadmap/ROADMAP_versions.md) 和
+[ROADMAP_platform.md](roadmap/ROADMAP_platform.md) 里勾掉第 20 项**,并把第 4 步那一行日志和
+下面第 6 步的输出贴进描述——这样 roadmap 的勾和它的证据落在同一个 PR 里。
+
+**6. 核对完成标准:**
+
+```bash
+# API 跑着的是刚注册的那一版(不是被熔断器回滚后的旧版)
+aws ecs describe-services --cluster "$CLUSTER" --services "$SVC" --region ap-southeast-2 \
+  --query 'services[0].deployments[?status==`PRIMARY`].{taskDefinition:taskDefinition,rollout:rolloutState}'
+
+# 就看那一版:API 用 cssa_app 和运行时密钥,有 CORPUS_SHA256
+RUNNING=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SVC" \
+  --region ap-southeast-2 --query 'services[0].taskDefinition' --output text)
+aws ecs describe-task-definition --task-definition "$RUNNING" --region ap-southeast-2 \
+  --query 'taskDefinition.containerDefinitions[0].{env:environment[?name==`DB_USER`||name==`CORPUS_SHA256`],secrets:secrets[].{name:name,from:valueFrom}}'
+
+# 迁移任务仍然用主用户
+aws ecs describe-task-definition --task-definition "$FAMILY" --region ap-southeast-2 \
+  --query 'taskDefinition.containerDefinitions[0].secrets[].{name:name,from:valueFrom}'
+
+curl -s "$URL/ready" | jq '{status, knowledge_base_rows}'
+```
+
+期望:`rollout` 是 `COMPLETED`;API 那一版有 `DB_USER=cssa_app` 和 `CORPUS_SHA256`,`secrets` 里
+没有 `DB_USER`,`DB_PASSWORD` 的 `from` 是运行时密码密钥;迁移任务的 `DB_USER` / `DB_PASSWORD`
+的 `from` 是 RDS 主用户密钥(`terraform -chdir=infra output -raw db_secret_arn`);`/ready` 是
+`ready`,行数等于第 4 步日志。再做一遍上面的[「核对:数据库没有被暴露过」](#核对数据库没有被暴露过)。
+
+---
+
+## 从零重建之后
+
+栈 destroy 之后再 apply(#111 的设计允许这么做),数据库是空的,`cssa_app` 也不存在,API 起
+不来是正常的。按这个顺序把它带回来:
+
+1. 按 [aws-foundation.md「演练:destroy 与重建」](design/implemented/aws-foundation.md#演练destroy-与重建)
+   建出栈、推镜像。
+2. **三个**应用密钥都要有值:OpenAI、chat key、运行时数据库密码(还在 7 天恢复期内的,用
+   `aws secretsmanager restore-secret` 捞回来,连值都不用重灌)。
+3. 跑迁移任务(第 2、3 步)——建表,建出 `cssa_app`。
+4. 导入语料(「导入或更新语料」第 1–3 步)。用的是同一份文件的话,日志里的 `corpus_sha256`
+   应该等于 `variables.tf` 里已经提交的值;不一样就按第 4 步提交新值。
+5. 让 API 重新起任务,并确认滚动完成、`/ready` 转绿:
+
+   ```bash
+   aws ecs update-service --cluster "$CLUSTER" --service "$SVC" --force-new-deployment \
+     --region ap-southeast-2
+   aws ecs wait services-stable --cluster "$CLUSTER" --services "$SVC" --region ap-southeast-2
+   curl -s "$URL/ready" | jq '{status, knowledge_base_rows}'
+   ```
 
 ---
 

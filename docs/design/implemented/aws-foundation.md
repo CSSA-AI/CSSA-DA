@@ -1319,7 +1319,15 @@ provider 建的每个资源自动带上**,所以单个资源里只写 `Name`。�
 
 **没有一步需要重新思考或重新写代码。**
 
-> ⚠️ **一个会卡住重建的坑**:两个应用密钥设了 `recovery_window_in_days = 7`,删除后进入
+> **2026-09-22(#105)之后,这张表多了几行,少了 `exec` 那一行。** API 现在以低权限角色
+> `cssa_app` 连库,它不能建表,在新建的库里也还不存在;语料也必须先导进去,API 才过得了
+> `/ready`。所以重建是:`terraform apply` → 推镜像 → 灌**三个**密钥(多了运行时数据库密码)
+> → 跑迁移任务(建表,并建出 `cssa_app`,不再用 `exec`)→ 跑一次导入任务 →
+> `update-service --force-new-deployment`。命令见
+> [deployment.md「从零重建之后」](../../deployment.md#从零重建之后)。
+
+> ⚠️ **一个会卡住重建的坑**:三个应用密钥(OpenAI、chat key、运行时数据库密码)都设了
+> `recovery_window_in_days = 7`,删除后进入
 > 七天恢复期,**期间名字被占着**,于是重建时 Terraform 建同名密钥会失败。要么先
 > `delete-secret --force-delete-without-recovery` 彻底删掉,要么 `restore-secret` 把旧的
 > 捞回来(那样连值都不用重新灌)。
