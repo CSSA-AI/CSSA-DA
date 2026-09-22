@@ -3,9 +3,9 @@ import logging
 from typing import Any
 
 import psycopg2
-from psycopg2 import sql
 
 from app.core.config import rag_config, settings
+from app.services.knowledge_base import count_active_rows
 from app.services.rag.model_registry import (
     ModelRegistryStatus,
     model_registry,
@@ -79,16 +79,12 @@ def check_readiness(database_url: str | None = None) -> ReadinessCheck:
                         reason=f"{table_name} table does not exist",
                     )
 
-                cursor.execute(
-                    sql.SQL("""
-                        SELECT COUNT(*)
-                        FROM {table}
-                        WHERE embedding_model = %s
-                          AND embedding_revision IS NOT DISTINCT FROM %s;
-                    """).format(table=sql.Identifier(table_name)),
-                    (embedding_model, embedding_revision),
+                row_count = count_active_rows(
+                    cursor,
+                    table_name,
+                    embedding_model=embedding_model,
+                    embedding_revision=embedding_revision,
                 )
-                row_count = cursor.fetchone()[0]
     except Exception:
         logger.exception("Database readiness check failed")
         return ReadinessCheck(
