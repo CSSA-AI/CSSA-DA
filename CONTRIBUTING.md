@@ -188,6 +188,10 @@ Clients that persisted the old value must re-fetch.
 - [ ] Rebased onto the latest `main`
 - [ ] Unit tests pass locally
 - [ ] Integration tests pass if you touched the database or retrieval path
+- [ ] The [generator contract suite](#the-generator-contract-suite) passes, with
+      its output in the PR description, if you touched the system prompt, the
+      generator model or temperature, the context limits, or how the model's
+      input is built
 - [ ] New behaviour is covered by tests
 - [ ] Breaking changes are flagged in the commit **and** the PR description
 - [ ] Roadmap items you completed are ticked in [docs/roadmap/](docs/roadmap/), in
@@ -204,6 +208,9 @@ Clients that persisted the old value must re-fetch.
 | `docker-check.yml` | PRs to `main`; pushes to `main` |
 
 All checks must be green before merge.
+
+The [generator contract suite](#the-generator-contract-suite) is deliberately in
+none of these. It runs by hand, at the points listed in that section.
 
 ### Review and merge
 
@@ -225,12 +232,42 @@ uv run pytest tests/unit -q                     # fast, no external services
 RUN_INTEGRATION_TESTS=1 \
   DATABASE_URL=postgresql://... \
   uv run pytest tests/integration -q            # requires Postgres + pgvector
+
+RUN_GENERATOR_CONTRACT=1 \
+  uv run pytest tests/generator_contract -v     # calls OpenAI for real, see below
 ```
 
 - `tests/unit/` must not touch the network, the database, or model downloads.
 - `tests/integration/` may use a real Postgres with pgvector; mark them with
   `@pytest.mark.integration` (registered in `pytest.ini`).
+- `tests/generator_contract/` calls OpenAI with a real `OPENAI_API_KEY`. It is
+  marked `@pytest.mark.generator_contract` and skipped unless
+  `RUN_GENERATOR_CONTRACT=1`.
 - Add a regression test with every bug fix.
+
+### The generator contract suite
+
+**You must run it, and paste its output into the pull request, when you
+change** the system prompt, the generator's `model_name` or `temperature`, or
+the `context` limits in
+[rag-config.yaml](app/core/config/rag-config.yaml), or the code that builds
+the model's input
+([chatgpt_generator.py](app/services/rag/generator/chatgpt_generator.py)'s
+messages, [context_formatter.py](app/services/rag/generator/context_formatter.py)).
+**It also runs once before every release tag.** The first line of its output
+names the model, temperature and prompt fingerprint it tested; keep that line
+in what you paste.
+
+It checks that, given material that is relevant but does not contain the
+answer, the generator says the material is insufficient and invents nothing.
+That behaviour rests on one line of the prompt, with no code behind it.
+
+It is not in CI on purpose. It is non-deterministic, and a test that sometimes
+fails ends up skipped, after which it protects nothing. For the same reason
+**a failure is a finding: do not re-run until it passes.** A pass does not
+mean the model never hallucinates, only that this configuration did not
+obviously break the behaviour. The reasoning, and how to add a case, are in
+[refusal-contract.md](docs/design/implemented/refusal-contract.md).
 
 ---
 
@@ -408,12 +445,14 @@ breaking. Therefore:
 
 ```bash
 # 1. main is green
-# 2. Tag
+# 2. The generator contract suite passes on main (see Testing)
+RUN_GENERATOR_CONTRACT=1 uv run pytest tests/generator_contract -v
+# 3. Tag
 git tag -a v0.1.0 -m "v0.1.0: first internal beta deployment"
 git push origin v0.1.0
-# 3. Build the image, tagged with the Git SHA
-# 4. Run migrations before deploying (ROADMAP_platform item 11)
-# 5. Run the smoke test after deploying
+# 4. Build the image, tagged with the Git SHA
+# 5. Run migrations before deploying (ROADMAP_platform item 11)
+# 6. Run the smoke test after deploying
 ```
 
 Automated changelog generation and tagging land with CI/CD
