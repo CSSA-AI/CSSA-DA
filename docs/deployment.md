@@ -400,12 +400,18 @@ aws ec2 describe-security-group-rules --region ap-southeast-2 \
   --filters Name=group-id,Values="$RDS_SG" \
   --query 'SecurityGroupRules[?IsEgress==`false`].{port:FromPort,fromGroup:ReferencedGroupInfo.GroupId,cidr4:CidrIpv4,cidr6:CidrIpv6,prefixList:PrefixListId}'
 
-# 3. 过去 90 天里,谁动过这个安全组和这个数据库实例(CloudTrail 只保留 90 天)
+# 3. 过去 90 天里,谁动过这个安全组和这个数据库实例(CloudTrail 只保留 90 天)。
+#    ReadOnly 在 CloudTrail 里是字符串 "false",不是布尔值,所以是 `"false"`。
 for RESOURCE in "$RDS_SG" "$DB_ID"; do
   aws cloudtrail lookup-events --region ap-southeast-2 \
     --lookup-attributes AttributeKey=ResourceName,AttributeValue="$RESOURCE" \
-    --query 'Events[?ReadOnly==`false`].{time:EventTime,event:EventName,user:Username}'
+    --query 'Events[?ReadOnly==`"false"`].{time:EventTime,event:EventName,user:Username}'
 done
+
+# 3b. 兜底:按事件名直接查一遍实例的修改,不依赖 CloudTrail 怎么记录资源名
+aws cloudtrail lookup-events --region ap-southeast-2 \
+  --lookup-attributes AttributeKey=EventName,AttributeValue=ModifyDBInstance \
+  --query 'Events[].{time:EventTime,user:Username,resources:Resources[].ResourceName}'
 ```
 
 期望:
