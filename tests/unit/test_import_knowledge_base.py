@@ -9,6 +9,7 @@ import pytest
 from pipelines.embedding.knowledge_base_text import build_embedding_text
 from pipelines.orchestration.import_knowledge_base import (
     ImportResult,
+    KnowledgeBaseImportIncompleteError,
     KnowledgeBaseValidationError,
     build_import_checkpoint_identity,
     database_target_id,
@@ -17,6 +18,7 @@ from pipelines.orchestration.import_knowledge_base import (
 )
 from pipelines.shared.import_checkpoint import (
     MemoryImportCheckpointStore,
+    fingerprint_records,
 )
 from pipelines.shared.storage import LocalStorage
 
@@ -309,12 +311,18 @@ def test_import_rejects_non_positive_batch_size():
 
 @patch(
     "pipelines.orchestration.import_knowledge_base."
+    "count_knowledge_base_rows",
+    return_value=1,
+)
+@patch(
+    "pipelines.orchestration.import_knowledge_base."
     "PostgresKnowledgeBaseLoader"
 )
 @patch("sentence_transformers.SentenceTransformer")
 def test_local_import_loads_file_and_constructs_model(
     mock_sentence_transformer,
     mock_loader_class,
+    _mock_count_rows,
 ):
     temp_dir = Path(__file__).parent / ".tmp_import_knowledge_base"
     if temp_dir.exists():
@@ -351,8 +359,11 @@ def test_local_import_loads_file_and_constructs_model(
     finally:
         shutil.rmtree(temp_dir)
 
-    assert result == ImportResult(attempted_count=1, affected_count=1)
-    assert cached_result == result
+    assert (result.attempted_count, result.affected_count) == (1, 1)
+    assert (
+        cached_result.attempted_count,
+        cached_result.affected_count,
+    ) == (1, 1)
     mock_sentence_transformer.assert_called_once_with(
         "test-model",
         revision="revision-123",
@@ -365,3 +376,224 @@ def test_local_import_loads_file_and_constructs_model(
         expected_embedding_dim=384,
     )
     loader.load_batch.assert_called_once()
+
+
+def _write_records(tmp_path, records):
+    (tmp_path / "knowledge_base.json").write_text(
+        json.dumps(records),
+        encoding="utf-8",
+    )
+    return LocalStorage(tmp_path)
+
+
+def _records(count):
+    records = []
+    for index in range(count):
+        record = _valid_record()
+        record["question_text"] = f"Question {index}"
+        record["link"] = f"https://example.com/{index}"
+        records.append(record)
+    return records
+
+
+def _stub_embedding(mock_sentence_transformer, mock_loader_class):
+    model = MagicMock()
+    model.encode.side_effect = lambda texts, **_: np.array(
+        [[0.1] * 384 for _ in texts]
+    )
+    mock_sentence_transformer.return_value = model
+    loader = MagicMock()
+    loader.load_batch.side_effect = lambda batch, _: len(batch)
+    mock_loader_class.return_value.__enter__.return_value = loader
+    return loader
+
+
+@patch(
+    "pipelines.orchestration.import_knowledge_base."
+    "count_knowledge_base_rows"
+)
+@patch(
+    "pipelines.orchestration.import_knowledge_base."
+    "PostgresKnowledgeBaseLoader"
+)
+@patch("sentence_transformers.SentenceTransformer")
+def test_local_import_records_corpus_sha256_and_live_row_count(
+    mock_sentence_transformer,
+    mock_loader_class,
+    mock_count_rows,
+    tmp_path,
+):
+    records = _records(3)
+    storage = _write_records(tmp_path, records)
+    _stub_embedding(mock_sentence_transformer, mock_loader_class)
+    mock_count_rows.return_value = 3
+
+    result = run_local_import(
+        storage,
+        "postgresql://importer:s3cret@db.internal:5432/rag_vectordb",
+        input_key="knowledge_base.json",
+        model_name="test-model",
+        model_revision="revision-123",
+        run_id="run-1",
+    )
+
+    report_key = "reports/pipelines/import_knowledge_base_run-1.json"
+    report = json.loads(storage.read(report_key))
+    assert result == ImportResult(
+        attempted_count=3,
+        affected_count=3,
+        corpus_sha256=fingerprint_records(records),
+        knowledge_base_rows=3,
+        report_key=report_key,
+    )
+    assert report["status"] == "completed"
+    assert report["corpus_sha256"] == fingerprint_records(records)
+    assert report["record_count"] == 3
+    assert report["unique_record_count"] == 3
+    assert report["knowledge_base_rows"] == 3
+    assert report["embedding_model"] == "test-model"
+    assert report["embedding_revision"] == "revision-123"
+    # The report is a file people pass around; the password stays out of it.
+    assert report["target_id"] == (
+        "postgresql://db.internal:5432/rag_vectordb"
+    )
+    assert "s3cret" not in storage.read(report_key).decode("utf-8")
+    mock_count_rows.assert_called_once_with(
+        "postgresql://importer:s3cret@db.internal:5432/rag_vectordb",
+        "knowledge_base",
+        embedding_model="test-model",
+        embedding_revision="revision-123",
+    )
+
+
+@patch(
+    "pipelines.orchestration.import_knowledge_base."
+    "count_knowledge_base_rows",
+    return_value=2,
+)
+@patch(
+    "pipelines.orchestration.import_knowledge_base."
+    "PostgresKnowledgeBaseLoader"
+)
+@patch("sentence_transformers.SentenceTransformer")
+def test_corpus_sha256_covers_only_the_records_imported(
+    mock_sentence_transformer,
+    mock_loader_class,
+    _mock_count_rows,
+    tmp_path,
+):
+    records = _records(5)
+    storage = _write_records(tmp_path, records)
+    _stub_embedding(mock_sentence_transformer, mock_loader_class)
+
+    result = run_local_import(
+        storage,
+        DATABASE_URL,
+        input_key="knowledge_base.json",
+        model_name="test-model",
+        limit=2,
+    )
+
+    # Hashing the whole file would name a corpus the database does not hold.
+    assert result.corpus_sha256 == fingerprint_records(records[:2])
+    assert result.corpus_sha256 != fingerprint_records(records)
+
+
+@patch(
+    "pipelines.orchestration.import_knowledge_base."
+    "count_knowledge_base_rows",
+    return_value=1,
+)
+@patch(
+    "pipelines.orchestration.import_knowledge_base."
+    "PostgresKnowledgeBaseLoader"
+)
+@patch("sentence_transformers.SentenceTransformer")
+def test_duplicate_keys_expect_one_row_each(
+    mock_sentence_transformer,
+    mock_loader_class,
+    _mock_count_rows,
+    tmp_path,
+):
+    record = _valid_record()
+    storage = _write_records(tmp_path, [record, dict(record)])
+    _stub_embedding(mock_sentence_transformer, mock_loader_class)
+
+    result = run_local_import(
+        storage,
+        DATABASE_URL,
+        input_key="knowledge_base.json",
+        model_name="test-model",
+        run_id="run-1",
+    )
+
+    report = json.loads(storage.read(result.report_key))
+    assert report["record_count"] == 2
+    assert report["unique_record_count"] == 1
+    assert report["status"] == "completed"
+
+
+@patch(
+    "pipelines.orchestration.import_knowledge_base."
+    "count_knowledge_base_rows"
+)
+@patch(
+    "pipelines.orchestration.import_knowledge_base."
+    "PostgresKnowledgeBaseLoader"
+)
+@patch("sentence_transformers.SentenceTransformer")
+def test_completed_checkpoint_against_an_empty_table_fails_loudly(
+    mock_sentence_transformer,
+    mock_loader_class,
+    mock_count_rows,
+    tmp_path,
+):
+    records = _records(3)
+    storage = _write_records(tmp_path, records)
+    _stub_embedding(mock_sentence_transformer, mock_loader_class)
+    mock_count_rows.return_value = 3
+    run_local_import(
+        storage,
+        DATABASE_URL,
+        input_key="knowledge_base.json",
+        model_name="test-model",
+        run_id="run-1",
+    )
+
+    # Same target id, but the database behind it was rebuilt (or this is a
+    # different database reached on the same host:port/name). The checkpoint
+    # still says "completed", so nothing is re-imported.
+    mock_count_rows.return_value = 0
+    with pytest.raises(
+        KnowledgeBaseImportIncompleteError,
+        match="--reset-checkpoint",
+    ):
+        run_local_import(
+            storage,
+            DATABASE_URL,
+            input_key="knowledge_base.json",
+            model_name="test-model",
+            run_id="run-2",
+        )
+
+    report = json.loads(
+        storage.read("reports/pipelines/import_knowledge_base_run-2.json")
+    )
+    assert report["status"] == "incomplete"
+    assert report["knowledge_base_rows"] == 0
+    assert report["unique_record_count"] == 3
+    mock_sentence_transformer.assert_called_once()
+
+    # The remedy the error names actually works: the import runs again.
+    mock_count_rows.return_value = 3
+    result = run_local_import(
+        storage,
+        DATABASE_URL,
+        input_key="knowledge_base.json",
+        model_name="test-model",
+        reset_checkpoint=True,
+        run_id="run-3",
+    )
+
+    assert result.knowledge_base_rows == 3
+    assert mock_sentence_transformer.call_count == 2

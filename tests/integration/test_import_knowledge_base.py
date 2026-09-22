@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import date, datetime, timezone
 
@@ -204,3 +205,80 @@ class _FailOnSecondBatchLoader:
         if self.call_count == 2:
             raise RuntimeError("simulated batch failure")
         return self.loader.load_batch(records, embeddings)
+
+
+def test_import_report_matches_ready_and_catches_a_stale_checkpoint(
+    test_database_url,
+    tmp_path,
+    monkeypatch,
+):
+    from unittest.mock import patch
+
+    from app.services.rag.model_registry import (
+        ModelRegistryStatus,
+        model_registry,
+    )
+    from app.services.readiness import check_readiness
+    from pipelines.orchestration.import_knowledge_base import (
+        KnowledgeBaseImportIncompleteError,
+        run_local_import,
+    )
+    from pipelines.shared.storage import LocalStorage
+
+    records = [_record(1), _record(2)]
+    for record in records:
+        record["post_date"] = record["post_date"].isoformat()
+        record["created_at"] = record["created_at"].isoformat()
+    (tmp_path / "knowledge_base.json").write_text(
+        json.dumps(records),
+        encoding="utf-8",
+    )
+    storage = LocalStorage(tmp_path)
+    monkeypatch.setattr(
+        model_registry,
+        "status",
+        lambda: ModelRegistryStatus(embedding="ready", reranker="ready"),
+    )
+
+    with patch(
+        "sentence_transformers.SentenceTransformer",
+        return_value=FakeEmbedder(),
+    ):
+        result = run_local_import(
+            storage,
+            test_database_url,
+            input_key="knowledge_base.json",
+            run_id="first",
+        )
+
+        # The number an operator compares after an import: the report's
+        # count and /ready's come from the same query.
+        assert result.knowledge_base_rows == 2
+        assert (
+            check_readiness(test_database_url).knowledge_base_rows
+            == result.knowledge_base_rows
+        )
+
+        # The database is rebuilt; the checkpoint still says "completed".
+        with psycopg2.connect(test_database_url) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM knowledge_base;")
+
+        with pytest.raises(KnowledgeBaseImportIncompleteError):
+            run_local_import(
+                storage,
+                test_database_url,
+                input_key="knowledge_base.json",
+                run_id="second",
+            )
+
+        rerun = run_local_import(
+            storage,
+            test_database_url,
+            input_key="knowledge_base.json",
+            reset_checkpoint=True,
+            run_id="third",
+        )
+
+    assert rerun.knowledge_base_rows == 2
+    assert rerun.corpus_sha256 == result.corpus_sha256
