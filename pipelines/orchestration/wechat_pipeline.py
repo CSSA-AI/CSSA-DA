@@ -119,6 +119,7 @@ def run_local_wechat_pipeline(
                     batch_size=batch_size,
                     checkpoint_key=import_checkpoint_key,
                     reset_checkpoint=reset_import_checkpoint,
+                    run_id=run_id,
                 ),
                 lambda result: {
                     "record_count": result.attempted_count,

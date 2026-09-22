@@ -29,6 +29,9 @@ STRUCTURED_FIELDS = (
     "model_revision",
     "table_name",
     "target_id",
+    "corpus_sha256",
+    "knowledge_base_rows",
+    "report_key",
 )
 
 

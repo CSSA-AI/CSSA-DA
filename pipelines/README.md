@@ -73,11 +73,13 @@ Complete pipeline runs also write JSON reports:
 
 ```text
 data/reports/pipelines/wechat_pipeline_<run_id>.json
+data/reports/pipelines/import_knowledge_base_<run_id>.json
 ```
 
 Reports include the run status, start/end timestamps, source/output paths,
 record counts and failure details when a stage raises an error. They are local
-audit files today and map cleanly to future object-storage reports.
+audit files today and map cleanly to future object-storage reports. The import
+report is described under [Import batching](#import-batching).
 
 PostgreSQL also has a `pipeline_runs` table for durable run metadata. This table
 is managed by Alembic and stores run status, data freshness signals and report
@@ -146,6 +148,25 @@ automatically. To deliberately rerun an unchanged completed import:
 ```
 
 For the complete workflow, use `--reset-import-checkpoint`.
+
+A completed checkpoint only says that an earlier run finished against a target
+with the same host, port and database name. A database rebuilt since, or a
+different one reached through a tunnel on the same local port, has the same id
+and none of the rows. So after every import, including one skipped as already
+complete, the command counts the rows in the table for the active embedding
+model and revision, using the same query as `/ready`. If there are fewer rows
+than unique `(link, question_text)` keys in the input, it exits non-zero and
+tells you to rerun with `--reset-checkpoint`.
+
+Each import writes `reports/pipelines/import_knowledge_base_<run_id>.json` and
+logs the same numbers on its `command_completed` line:
+
+| Field | Meaning |
+|---|---|
+| `corpus_sha256` | SHA-256 of exactly the records imported (after `--limit`), canonical JSON, identical to the checkpoint's dataset fingerprint. This is the value for `CORPUS_SHA256` in the deployment. It is not `sha256sum` of the file: reformatting the file does not change it, but reordering records does |
+| `record_count` / `unique_record_count` | Records read, and distinct `(link, question_text)` keys among them |
+| `knowledge_base_rows` | Rows for the active model and revision, counted the way `/ready` counts them. After pointing the API at this database, `/ready` must report the same number |
+| `target_id` | Host, port and database name. Never the credentials |
 
 The embedding model revision is pinned in `app/core/config/rag-config.yaml` so
 imports and retrieval use the same immutable model files. If that revision is
