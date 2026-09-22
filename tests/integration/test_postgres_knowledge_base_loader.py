@@ -29,6 +29,7 @@ def _knowledge_base_record():
         "created_at": datetime(2026, 7, 1, tzinfo=timezone.utc),
         "tags": ["unimelb", "special consideration"],
         "link": "https://example.com/special-consideration",
+        "modality": "doc",
     }
 
 
