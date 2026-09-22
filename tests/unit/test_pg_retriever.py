@@ -79,6 +79,7 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
             maxconn=5,
             dsn="postgresql://test:test@localhost:5432/testdb",
             connect_timeout=5,
+            options="-c statement_timeout=5000",
         )
         self.assertIs(retriever.model, self.shared_embedding_model)
         self.mock_get_embedding_model.assert_called_once_with()
@@ -108,6 +109,32 @@ class TestPGVectorRetrieverUnit(unittest.TestCase):
 
         _, kwargs = mock_pool_class.call_args
         self.assertEqual(kwargs["connect_timeout"], 9)
+
+    @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
+    @patch("app.services.rag.retriever.pg_retriever.ThreadedConnectionPool")
+    @patch("app.services.rag.retriever.pg_retriever.rag_config", {
+        "retriever": {
+            "embedding_model": "fake-embedding-model",
+            "top_k": 5,
+        },
+        "pgvector": {
+            "table_name": "knowledge_base",
+            "statement_timeout_milliseconds": 7500,
+        },
+    })
+    def test_init_uses_configured_statement_timeout(
+        self,
+        mock_pool_class,
+        mock_st,
+    ):
+        mock_pool_class.return_value = MagicMock()
+
+        PGVectorRetriever(
+            database_url="postgresql://test:test@localhost:5432/testdb"
+        )
+
+        _, kwargs = mock_pool_class.call_args
+        self.assertEqual(kwargs["options"], "-c statement_timeout=7500")
 
     @patch("app.services.rag.retriever.pg_retriever.SentenceTransformer")
     @patch("app.services.rag.retriever.pg_retriever.ThreadedConnectionPool")

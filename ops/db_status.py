@@ -72,7 +72,14 @@ def get_knowledge_base_status(
         )
 
     try:
-        with psycopg2.connect(database_url) as connection:
+        with psycopg2.connect(
+            database_url,
+            connect_timeout=pgvector_config["connect_timeout_seconds"],
+            options=(
+                "-c statement_timeout="
+                f"{pgvector_config['statement_timeout_milliseconds']}"
+            ),
+        ) as connection:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT to_regclass(%s);", (table_name,))
                 table_exists = cursor.fetchone()[0] is not None

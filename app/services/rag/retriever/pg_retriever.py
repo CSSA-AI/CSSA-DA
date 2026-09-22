@@ -24,6 +24,7 @@ class PGVectorRetriever(BaseRetriever):
         pool_min_size: Optional[int] = None,
         pool_max_size: Optional[int] = None,
         connect_timeout: Optional[int] = None,
+        statement_timeout_ms: Optional[int] = None,
     ):
         retriever_config = rag_config["retriever"]
         pgvector_config = rag_config["pgvector"]
@@ -47,6 +48,11 @@ class PGVectorRetriever(BaseRetriever):
         connect_timeout = connect_timeout or pgvector_config.get(
             "connect_timeout_seconds", 5
         )
+        statement_timeout_ms = (
+            statement_timeout_ms
+            if statement_timeout_ms is not None
+            else pgvector_config.get("statement_timeout_milliseconds", 5000)
+        )
 
         if not database_url:
             raise ValueError("DATABASE_URL is required for PGVectorRetriever")
@@ -58,6 +64,8 @@ class PGVectorRetriever(BaseRetriever):
             )
         if connect_timeout <= 0:
             raise ValueError("connect_timeout must be greater than zero")
+        if statement_timeout_ms <= 0:
+            raise ValueError("statement_timeout_ms must be greater than zero")
         super().__init__(
             model_name=model_name,
             model_revision=model_revision,
@@ -72,6 +80,7 @@ class PGVectorRetriever(BaseRetriever):
             maxconn=pool_max_size,
             dsn=database_url,
             connect_timeout=connect_timeout,
+            options=f"-c statement_timeout={statement_timeout_ms}",
         )
         if uses_configured_model:
             self.model = model_registry.get_embedding_model()

@@ -64,7 +64,16 @@ def check_readiness(database_url: str | None = None) -> ReadinessCheck:
         )
 
     try:
-        with psycopg2.connect(database_url) as connection:
+        with psycopg2.connect(
+            database_url,
+            connect_timeout=pgvector_config[
+                "probe_connect_timeout_seconds"
+            ],
+            options=(
+                "-c statement_timeout="
+                f"{pgvector_config['probe_statement_timeout_milliseconds']}"
+            ),
+        ) as connection:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT 1;")
                 cursor.execute("SELECT to_regclass(%s);", (table_name,))

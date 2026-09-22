@@ -54,7 +54,7 @@ def test_pipeline_metadata_reports_latest_run(monkeypatch):
     monkeypatch.setattr(
         system_status.psycopg2,
         "connect",
-        lambda database_url: FakeConnection(cursor),
+        lambda database_url, **kwargs: FakeConnection(cursor),
     )
 
     status = system_status.get_pipeline_metadata_status(
@@ -73,7 +73,7 @@ def test_pipeline_metadata_handles_missing_table(monkeypatch):
     monkeypatch.setattr(
         system_status.psycopg2,
         "connect",
-        lambda database_url: FakeConnection(cursor),
+        lambda database_url, **kwargs: FakeConnection(cursor),
     )
 
     status = system_status.get_pipeline_metadata_status(
@@ -82,6 +82,28 @@ def test_pipeline_metadata_handles_missing_table(monkeypatch):
 
     assert status.latest_run is None
     assert status.reason == "pipeline_runs table does not exist"
+
+
+def test_pipeline_metadata_passes_probe_timeouts_to_postgres(monkeypatch):
+    cursor = FakeCursor([(None,)])
+    connect_arguments = {}
+
+    def connect(database_url, **kwargs):
+        connect_arguments.update(kwargs)
+        return FakeConnection(cursor)
+
+    monkeypatch.setattr(system_status.psycopg2, "connect", connect)
+
+    system_status.get_pipeline_metadata_status("postgresql://test")
+
+    pgvector_config = system_status.rag_config["pgvector"]
+    assert connect_arguments == {
+        "connect_timeout": pgvector_config["probe_connect_timeout_seconds"],
+        "options": (
+            "-c statement_timeout="
+            f"{pgvector_config['probe_statement_timeout_milliseconds']}"
+        ),
+    }
 
 
 def test_system_status_keeps_rag_readiness_separate_from_pipeline(

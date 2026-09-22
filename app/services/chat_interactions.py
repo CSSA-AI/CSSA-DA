@@ -156,10 +156,15 @@ def record_chat_interaction(
         # host that drops packets. This path runs on every answered request
         # and each stuck write holds an anyio threadpool slot, so an
         # unbounded connect here is worse than on a probe.
+        pgvector_config = rag_config["pgvector"]
         connection = psycopg2.connect(
             database_url,
-            connect_timeout=rag_config["pgvector"].get(
+            connect_timeout=pgvector_config.get(
                 "connect_timeout_seconds", 5
+            ),
+            options=(
+                "-c statement_timeout="
+                f"{pgvector_config.get('statement_timeout_milliseconds', 5000)}"
             ),
         )
         # psycopg2's `with conn:` ends the transaction but does NOT close the
