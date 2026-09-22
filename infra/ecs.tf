@@ -15,8 +15,10 @@ resource "aws_ecs_cluster" "main" {
 # Distinct from the execution role: this one belongs to the running container
 # rather than to ECS. The application still calls no AWS API -- OpenAI and
 # Postgres are neither -- so the only reason this exists is `ecs exec`, whose
-# agent inside the container opens a channel back to AWS. Migrations and the
-# first corpus import run through that channel instead of through a bastion.
+# agent inside the container opens a channel back to AWS -- an operator's way in
+# for inspection, without a bastion. Migrations and corpus imports no longer go
+# through it: the API now connects as a role that can do neither, so both run as
+# one-off tasks from the migrate task definition (docs/deployment.md).
 #
 # If exec is ever turned off, this role has no other purpose and should go.
 
@@ -82,25 +84,37 @@ resource "aws_ecs_task_definition" "api" {
         },
       ]
 
-      # Everything that is not a credential. DB_HOST/PORT/NAME are the parts
-      # the application assembles DATABASE_URL from, because a secret field can
-      # be injected but two of them cannot be concatenated.
-      environment = [
-        { name = "ENV", value = var.env },
-        { name = "LOG_LEVEL", value = "INFO" },
-        { name = "DB_HOST", value = aws_db_instance.main.address },
-        { name = "DB_PORT", value = tostring(aws_db_instance.main.port) },
-        { name = "DB_NAME", value = aws_db_instance.main.db_name },
-        # One of the four version coordinates on every chat_interactions row,
-        # and true by construction: the tag is the commit.
-        { name = "GIT_SHA", value = var.image_tag },
-      ]
+      # Everything that is not a credential. DB_HOST/PORT/NAME/USER are the
+      # parts the application assembles DATABASE_URL from, because a secret
+      # field can be injected but two of them cannot be concatenated.
+      environment = concat(
+        [
+          { name = "ENV", value = var.env },
+          { name = "LOG_LEVEL", value = "INFO" },
+          { name = "DB_HOST", value = aws_db_instance.main.address },
+          { name = "DB_PORT", value = tostring(aws_db_instance.main.port) },
+          { name = "DB_NAME", value = aws_db_instance.main.db_name },
+          # The least-privilege runtime role, not the RDS master: it can read
+          # the knowledge base and append interactions, and cannot change the
+          # schema or the corpus. The migrate task creates it and keeps its
+          # privileges exact (ops/provision_runtime_role.py).
+          { name = "DB_USER", value = var.runtime_db_user },
+          # One of the four version coordinates on every chat_interactions
+          # row, and true by construction: the tag is the commit.
+          { name = "GIT_SHA", value = var.image_tag },
+        ],
+        # "Which corpus": left out entirely while unknown, so the fingerprint
+        # records an honest null rather than an empty string.
+        var.corpus_sha256 == null ? [] : [
+          { name = "CORPUS_SHA256", value = var.corpus_sha256 },
+        ],
+      )
 
       # Fetched by ECS at start-up and injected as environment variables. The
       # container never holds a credential to read them with -- the execution
       # role does that before the container exists.
       #
-      # The ":field::" suffix picks one key out of the JSON document RDS keeps.
+      # No master-user secret here: only the migrate task gets that.
       secrets = [
         {
           name      = "OPENAI_API_KEY"
@@ -111,12 +125,8 @@ resource "aws_ecs_task_definition" "api" {
           valueFrom = aws_secretsmanager_secret.chat_api_key.arn
         },
         {
-          name      = "DB_USER"
-          valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:username::"
-        },
-        {
           name      = "DB_PASSWORD"
-          valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:password::"
+          valueFrom = aws_secretsmanager_secret.runtime_db_password.arn
         },
       ]
 
@@ -159,9 +169,10 @@ resource "aws_ecs_service" "api" {
   # failure, at twice the compute bill, which an internal beta does not need.
   desired_count = 1
 
-  # Lets `aws ecs execute-command` open a shell in the running container, which
-  # is how migrations and the first corpus import reach a database that has no
-  # public address.
+  # Lets `aws ecs execute-command` open a shell in the running container, for
+  # looking around. It was how the first migrations and corpus import reached a
+  # database with no public address; those now run as one-off migrate tasks,
+  # because this container's database role cannot do either.
   enable_execute_command = true
 
   network_configuration {
