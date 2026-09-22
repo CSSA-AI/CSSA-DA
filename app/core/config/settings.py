@@ -1,15 +1,18 @@
 from pathlib import Path
-from typing import Any
 
-import yaml
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.database_url import build_database_url
 
-
-CONFIG_DIR = Path(__file__).resolve().parent
-RAG_CONFIG_PATH = CONFIG_DIR / "rag-config.yaml"
+# Re-exported so `from app.core.config import rag_config` keeps working. The
+# loader lives outside this package because build-time callers need the YAML
+# without paying for the environment layer -- see app/core/rag_config.py.
+from app.core.rag_config import (  # noqa: F401
+    RAG_CONFIG_PATH,
+    load_yaml_config,
+    rag_config,
+)
 
 
 class Settings(BaseSettings):
@@ -107,13 +110,4 @@ class Settings(BaseSettings):
         return model_path
 
 
-def load_yaml_config(path: Path = RAG_CONFIG_PATH) -> dict[str, Any]:
-    if not path.exists():
-        raise FileNotFoundError(f"Config file not found: {path}")
-
-    with path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
-
-
 settings = Settings()
-rag_config = load_yaml_config()
