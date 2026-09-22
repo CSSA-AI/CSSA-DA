@@ -1298,6 +1298,25 @@ ALB target group 打 /ready → 一直 503 → target 永远 unhealthy
 `/ready` 返回 200 且 `knowledge_base_rows` > 0，且这个数与本地导入报告的条数**对得上**。
 对不上说明导了一半 —— 导入有 checkpoint，`--reset-checkpoint` 可以重来。
 
+#### 代码侧已落地（2026-09-22，#105）
+
+> 导入这个**动作**已由 #111 在 AWS 上做完（2312 行、`/ready` 200、RDS 全程无公网地址）。
+> 代码侧补上的是 #105 完成标准里它没覆盖的两条所需的机制：
+>
+> - **导入在那一刻记下 `corpus_sha256`**（即实际导入记录的指纹，与 checkpoint 的
+>   `dataset_fingerprint` 同一个函数），向数据库要行数（与 `/ready` 同一条 SQL），写
+>   `reports/pipelines/import_knowledge_base_<run_id>.json`。checkpoint 说「已完成」而库里
+>   缺行时（库被重建、或端口转发撞上同名的本地库）命令失败 —— 上面验收那句「对得上」从此有
+>   东西可对。
+> - **`ops/provision_runtime_role.py`**：以迁移身份建一个最小权限的运行时角色，并当场验证它
+>   做不了迁移做的事。集成测试顺带抓出一个坑：`INSERT … ON CONFLICT (request_id)` 需要冲突列
+>   的 `SELECT` 权限，只给 `INSERT` 的话生产上每一次 `chat_interactions` 写入都会被**静默**
+>   拒绝。
+>
+> **本项仍不勾**：Terraform 接线（新密钥、迁移任务注入、API 切到 `cssa_app` 并配上
+> `CORPUS_SHA256`）要等 #111 合入，之后还要在生产上执行一遍。顺序与核对方法见
+> [first-corpus-import.md](../design/implemented/first-corpus-import.md#上线步骤)。
+
 ---
 
 ## 当前已经具备的部署基础
