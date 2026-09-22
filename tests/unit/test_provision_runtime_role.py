@@ -18,9 +18,12 @@ def test_runtime_role_can_only_read_the_corpus():
 def test_runtime_role_cannot_read_the_interaction_log():
     # Only the conflict-target column, which ON CONFLICT (request_id) needs;
     # never the queries and answers themselves.
-    privileges = provision.RUNTIME_TABLE_PRIVILEGES["chat_interactions"]
-
-    assert set(privileges) == {"INSERT", "SELECT (request_id)"}
+    assert provision.RUNTIME_TABLE_PRIVILEGES["chat_interactions"] == (
+        "INSERT",
+    )
+    assert provision.RUNTIME_COLUMN_PRIVILEGES == {
+        "chat_interactions": {"SELECT": ("request_id",)}
+    }
 
 
 @patch("ops.provision_runtime_role.psycopg2.connect")
@@ -69,6 +72,7 @@ def test_success_prints_the_granted_privileges(monkeypatch, capsys):
         role="cssa_app",
         created=True,
         table_privileges={"knowledge_base": ("SELECT",)},
+        column_privileges={"chat_interactions": {"SELECT": ("request_id",)}},
     )
 
     with patch.object(
@@ -87,6 +91,7 @@ def test_success_prints_the_granted_privileges(monkeypatch, capsys):
     assert exit_code == 0
     assert "Runtime role cssa_app: created" in output
     assert "knowledge_base: SELECT" in output
+    assert "chat_interactions (request_id): SELECT" in output
     # The password arrives through the environment, never argv.
     mock_provision.assert_called_once_with(
         "postgresql://admin:pw@db:5432/rag_vectordb",
