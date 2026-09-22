@@ -177,7 +177,10 @@ def _run_command(
             batch_size=args.batch_size,
             checkpoint_key=args.checkpoint_file,
             reset_checkpoint=args.reset_checkpoint,
+            run_id=run_id,
         )
+        # corpus_sha256 goes into the ECS task definition as CORPUS_SHA256;
+        # knowledge_base_rows is what /ready must report afterwards.
         logger.info(
             "Knowledge-base import completed",
             extra={
@@ -185,6 +188,9 @@ def _run_command(
                 "stage": args.command,
                 "record_count": result.attempted_count,
                 "affected_count": result.affected_count,
+                "corpus_sha256": result.corpus_sha256,
+                "knowledge_base_rows": result.knowledge_base_rows,
+                "report_key": result.report_key,
             },
         )
     elif args.command == "run-wechat-pipeline":

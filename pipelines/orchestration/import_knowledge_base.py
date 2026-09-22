@@ -1,11 +1,16 @@
 import logging
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from typing import Any, Protocol
 from urllib.parse import urlparse
+from uuid import uuid4
+
+import psycopg2
 
 from app.core.config import rag_config
+from app.services.knowledge_base import count_active_rows
 from pipelines.embedding.knowledge_base_text import encode_records
 from pipelines.loaders.base import KnowledgeBaseLoader
 from pipelines.loaders.postgres_knowledge_base import (
@@ -24,7 +29,9 @@ from pipelines.shared.json_records import load_json_records
 from pipelines.shared.paths import (
     DEFAULT_KNOWLEDGE_BASE_INPUT_KEY,
     IMPORT_CHECKPOINT_KEY,
+    PIPELINE_REPORTS_PREFIX,
 )
+from pipelines.shared.reports import write_json_report
 from pipelines.shared.storage import Storage
 from pipelines.validation.knowledge_base_records import validate_records
 
@@ -49,10 +56,20 @@ class KnowledgeBaseValidationError(ValueError):
         )
 
 
+class KnowledgeBaseImportIncompleteError(RuntimeError):
+    """The import finished, but the table does not hold what it imported."""
+
+
 @dataclass(frozen=True)
 class ImportResult:
     attempted_count: int
     affected_count: int
+    # Filled in by run_local_import, which is the only caller that knows the
+    # target database and writes the import report. import_knowledge_base()
+    # leaves them unset.
+    corpus_sha256: str | None = None
+    knowledge_base_rows: int | None = None
+    report_key: str | None = None
 
 
 def import_knowledge_base(
@@ -246,12 +263,15 @@ def run_local_import(
     batch_size: int = 100,
     checkpoint_key: str | None = None,
     reset_checkpoint: bool = False,
+    run_id: str | None = None,
 ) -> ImportResult:
     if limit is not None and limit < 0:
         raise ValueError("limit cannot be negative")
     if batch_size <= 0:
         raise ValueError("batch_size must be greater than zero")
 
+    run_id = run_id or str(uuid4())
+    started_at = datetime.now(timezone.utc)
     records = load_json_records(storage, input_key)
     if limit is not None:
         records = records[:limit]
@@ -287,6 +307,43 @@ def run_local_import(
         checkpoint_identity,
         batch_count=math.ceil(len(records) / batch_size),
     )
+    result = _run_checkpointed_import(
+        records,
+        database_url,
+        model_name=model_name,
+        model_revision=model_revision,
+        table_name=table_name,
+        batch_size=batch_size,
+        checkpoint_manager=checkpoint_manager,
+    )
+    return _verify_and_report(
+        storage,
+        result,
+        records,
+        database_url,
+        run_id=run_id,
+        started_at=started_at,
+        input_key=input_key,
+        # The checkpoint already hashed exactly these records, after --limit.
+        # Reusing it means "which corpus" has one definition, and it is taken
+        # from what was imported rather than recomputed from a file later.
+        corpus_sha256=checkpoint_identity.dataset_fingerprint,
+        model_name=model_name,
+        model_revision=model_revision,
+        table_name=table_name,
+    )
+
+
+def _run_checkpointed_import(
+    records: list[dict[str, Any]],
+    database_url: str,
+    *,
+    model_name: str,
+    model_revision: str | None,
+    table_name: str,
+    batch_size: int,
+    checkpoint_manager: ImportCheckpointManager,
+) -> ImportResult:
     checkpoint = checkpoint_manager.prepare()
     if checkpoint is not None and checkpoint.status == "completed":
         return ImportResult(
@@ -323,6 +380,107 @@ def run_local_import(
             checkpoint_manager=checkpoint_manager,
             checkpoint=checkpoint,
         )
+
+
+def _verify_and_report(
+    storage: Storage,
+    result: ImportResult,
+    records: list[dict[str, Any]],
+    database_url: str,
+    *,
+    run_id: str,
+    started_at: datetime,
+    input_key: str,
+    corpus_sha256: str,
+    model_name: str,
+    model_revision: str | None,
+    table_name: str,
+) -> ImportResult:
+    # Asked of the database, not taken from the checkpoint. A checkpoint that
+    # says "completed" only proves some earlier run finished against a target
+    # with this id -- and a database rebuilt since, or a local one reached
+    # through a tunnel on the same host:port/name, has the same id and none of
+    # the rows. Counted by the query /ready uses, so this is the number /ready
+    # must show once the API points at the same database.
+    knowledge_base_rows = count_knowledge_base_rows(
+        database_url,
+        table_name,
+        embedding_model=model_name,
+        embedding_revision=model_revision,
+    )
+    # One row per (link, question_text): the table's unique key. After a
+    # complete import every one of those keys carries this model/revision, so
+    # fewer rows than keys means records are missing. More is fine -- the table
+    # may also hold another corpus embedded by the same model.
+    unique_record_count = len(
+        {(record["link"], record["question_text"]) for record in records}
+    )
+    complete = knowledge_base_rows >= unique_record_count
+    report_key = f"{PIPELINE_REPORTS_PREFIX}/import_knowledge_base_{run_id}.json"
+    write_json_report(
+        storage,
+        report_key,
+        {
+            "run_id": run_id,
+            "stage": "import_knowledge_base",
+            "status": "completed" if complete else "incomplete",
+            "started_at": started_at.isoformat(),
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "input_key": input_key,
+            "corpus_sha256": corpus_sha256,
+            "record_count": result.attempted_count,
+            "unique_record_count": unique_record_count,
+            "affected_count": result.affected_count,
+            "knowledge_base_rows": knowledge_base_rows,
+            "embedding_model": model_name,
+            "embedding_revision": model_revision,
+            "table_name": table_name,
+            # Host, port and database name only: a report is a file people
+            # copy around, and the URL it came from may carry a password.
+            "target_id": database_target_id(database_url),
+        },
+    )
+    if not complete:
+        raise KnowledgeBaseImportIncompleteError(
+            f"{table_name} holds {knowledge_base_rows} rows for "
+            f"{model_name} @ {model_revision}, fewer than the "
+            f"{unique_record_count} unique records this import covers. "
+            "The rows are not where the import checkpoint says they are; "
+            "rerun with --reset-checkpoint. Report: "
+            f"{report_key}"
+        )
+
+    return replace(
+        result,
+        corpus_sha256=corpus_sha256,
+        knowledge_base_rows=knowledge_base_rows,
+        report_key=report_key,
+    )
+
+
+def count_knowledge_base_rows(
+    database_url: str,
+    table_name: str,
+    *,
+    embedding_model: str,
+    embedding_revision: str | None,
+) -> int:
+    connection = psycopg2.connect(
+        database_url,
+        connect_timeout=rag_config["pgvector"].get(
+            "connect_timeout_seconds", 5
+        ),
+    )
+    try:
+        with connection.cursor() as cursor:
+            return count_active_rows(
+                cursor,
+                table_name,
+                embedding_model=embedding_model,
+                embedding_revision=embedding_revision,
+            )
+    finally:
+        connection.close()
 
 
 def database_target_id(database_url: str) -> str:
