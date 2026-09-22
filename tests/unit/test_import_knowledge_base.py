@@ -461,11 +461,15 @@ def test_local_import_records_corpus_sha256_and_verifies_by_key(
     assert result == ImportResult(
         attempted_count=3,
         affected_count=3,
+        status="completed",
         corpus_sha256=fingerprint_records(records),
         knowledge_base_rows=3,
         unique_record_count=3,
+        corpus_rows=3,
         rows_outside_corpus=0,
         skipped_by_checkpoint=False,
+        embedding_model="test-model",
+        embedding_revision="revision-123",
         report_key=report_key,
     )
     assert report["status"] == "completed"
@@ -717,25 +721,72 @@ def test_rows_outside_the_corpus_are_reported(
 @patch(
     "pipelines.orchestration.import_knowledge_base."
     "count_knowledge_base_rows",
-    return_value=KnowledgeBaseCounts(knowledge_base_rows=0, corpus_rows=0),
+    return_value=KnowledgeBaseCounts(
+        knowledge_base_rows=5, corpus_rows=2, corpus_key_rows=3
+    ),
+)
+@patch(
+    "pipelines.orchestration.import_knowledge_base."
+    "PostgresKnowledgeBaseLoader"
+)
+@patch("sentence_transformers.SentenceTransformer")
+def test_a_stale_corpus_record_is_incomplete_not_outside(
+    mock_sentence_transformer,
+    mock_loader_class,
+    _mock_count_rows,
+    tmp_path,
+):
+    # 3 corpus keys are in the table but one holds other content; 2 rows are
+    # not this corpus at all. The stale one makes the import incomplete -- it
+    # is not "outside the corpus".
+    storage = _write_records(tmp_path, _records(3))
+    _stub_embedding(mock_sentence_transformer, mock_loader_class)
+
+    with pytest.raises(KnowledgeBaseImportIncompleteError):
+        run_local_import(
+            storage,
+            DATABASE_URL,
+            input_key="knowledge_base.json",
+            model_name="test-model",
+            run_id="run-1",
+        )
+
+    report = json.loads(
+        storage.read("reports/pipelines/import_knowledge_base_run-1.json")
+    )
+    assert report["corpus_rows"] == 2
+    assert report["rows_outside_corpus"] == 2
+
+
+@patch(
+    "pipelines.orchestration.import_knowledge_base."
+    "count_knowledge_base_rows",
+    return_value=KnowledgeBaseCounts(knowledge_base_rows=7, corpus_rows=0),
 )
 def test_an_empty_import_names_no_corpus(_mock_count_rows, tmp_path):
     storage = _write_records(tmp_path, _records(3))
 
-    result = run_local_import(
-        storage,
-        DATABASE_URL,
-        input_key="knowledge_base.json",
-        model_name="test-model",
-        limit=0,
-        run_id="run-1",
-    )
+    with patch(
+        "pipelines.orchestration.import_knowledge_base.logger"
+    ) as import_logger:
+        result = run_local_import(
+            storage,
+            DATABASE_URL,
+            input_key="knowledge_base.json",
+            model_name="test-model",
+            limit=0,
+            run_id="run-1",
+        )
 
-    # A hash of an empty list must never become a deployment's CORPUS_SHA256.
+    # A hash of an empty list must never become a deployment's CORPUS_SHA256,
+    # and with no corpus, "rows outside it" means nothing.
     assert result.corpus_sha256 is None
+    assert result.status == "empty"
     report = json.loads(storage.read(result.report_key))
     assert report["status"] == "empty"
     assert report["corpus_sha256"] is None
+    assert report["rows_outside_corpus"] is None
+    import_logger.warning.assert_not_called()
 
 
 @patch("pipelines.orchestration.import_knowledge_base.psycopg2.connect")

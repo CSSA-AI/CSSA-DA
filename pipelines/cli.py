@@ -17,9 +17,10 @@ from pipelines.shared.storage import LocalStorage
 logger = logging.getLogger(__name__)
 
 DATABASE_URL_HELP = (
-    "PostgreSQL URL. Defaults to DATABASE_URL, or to the URL assembled from "
-    "DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD (how ECS tasks are "
-    "configured)."
+    "PostgreSQL URL. Defaults to DATABASE_URL (from the environment or "
+    "./.env), else the URL assembled from DB_HOST/DB_PORT/DB_NAME/DB_USER/"
+    "DB_PASSWORD (how ECS tasks are configured). The command_completed line "
+    "logs which database was used, as target_id."
 )
 
 
@@ -190,13 +191,18 @@ def _run_command(
             extra={
                 "event": "command_completed",
                 "stage": args.command,
+                "status": result.status,
+                "limit": args.limit,
                 "record_count": result.attempted_count,
                 "unique_record_count": result.unique_record_count,
+                "corpus_rows": result.corpus_rows,
                 "affected_count": result.affected_count,
                 "skipped_by_checkpoint": result.skipped_by_checkpoint,
                 "corpus_sha256": result.corpus_sha256,
                 "knowledge_base_rows": result.knowledge_base_rows,
                 "rows_outside_corpus": result.rows_outside_corpus,
+                "model_name": result.embedding_model,
+                "model_revision": result.embedding_revision,
                 "target_id": database_target_id(database_url),
                 "report_key": result.report_key,
             },
@@ -227,6 +233,7 @@ def _run_command(
                 "affected_count": result.affected_count,
                 "corpus_sha256": result.corpus_sha256,
                 "knowledge_base_rows": result.knowledge_base_rows,
+                "skipped_by_checkpoint": result.import_skipped_by_checkpoint,
                 "report_key": result.import_report_key,
             },
         )

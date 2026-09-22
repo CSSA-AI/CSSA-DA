@@ -163,9 +163,12 @@ record is missing or different, it exits non-zero and tells you to rerun with
 
 Every import that reaches this check writes
 `reports/pipelines/import_knowledge_base_<run_id>.json`, and the
-`import-knowledge-base` command logs the same numbers on its
-`command_completed` line. When the import runs in a container, the report file
-disappears with the task, and that log line is the report.
+`import-knowledge-base` command logs its key fields on the `command_completed`
+line: `status`, `corpus_sha256`, `limit`, the counts below, `model_name` /
+`model_revision`, `target_id` and `report_key` (not `input_key`, the timestamps
+or the table name; fields whose value is null are left out of the line). When
+the import runs in a container, the report file disappears with the task, and
+that line is what survives.
 
 | Field | Meaning |
 |---|---|
@@ -174,13 +177,19 @@ disappears with the task, and that log line is the report.
 | `record_count` / `unique_record_count` | Records read, and distinct `(link, question_text)` keys among them |
 | `corpus_rows` | Of those keys, how many the table holds with identical content and the active model/revision. Equals `unique_record_count` when complete |
 | `knowledge_base_rows` | All rows for the active model and revision, counted the way `/ready` counts them. After pointing the API at this database, `/ready` must report the same number |
-| `rows_outside_corpus` | Active-model rows that are not part of this corpus, for example articles dropped by a corpus refresh (the loader never deletes). Not a failure, but `/ready` counts them and retrieval can return them, so it is logged as a warning |
+| `rows_outside_corpus` | Active-model rows whose key is not in this corpus, for example articles dropped by a corpus refresh (the loader never deletes). A corpus key stored with other content makes the import `incomplete` instead. Not a failure, but `/ready` counts these rows and retrieval can return them, so it is logged as a warning. `null` when `status` is `empty` |
 | `skipped_by_checkpoint` | `true` when the checkpoint said the import was already done and this run only checked. `affected_count` is then the earlier run's number |
 | `limit`, `target_id` | The `--limit` used, and host, port and database name (never the credentials) |
 
-Both commands take the database URL from `--database-url`, else `DATABASE_URL`,
-else the URL assembled from `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/
-`DB_PASSWORD`, which is how ECS tasks are configured.
+Both commands take the database URL from `--database-url`, else `DATABASE_URL`
+(from the environment or a `./.env` file), else the URL assembled from
+`DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD`, which is how ECS tasks are
+configured. A `DATABASE_URL` in `./.env` therefore wins over `DB_*` variables in
+the environment; `target_id` on the log line shows which database was used.
+
+`question_text` and `content` must be strings. A number, boolean or list would
+be stored as its SQL text form and no longer match what was embedded, so
+validation rejects it.
 
 The embedding model revision is pinned in `app/core/config/rag-config.yaml` so
 imports and retrieval use the same immutable model files. If that revision is

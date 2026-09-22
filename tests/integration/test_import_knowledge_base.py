@@ -306,6 +306,25 @@ def test_import_report_matches_ready_and_catches_what_the_checkpoint_hides(
             == 3
         )
 
+        # One of the corpus's own rows was re-embedded by another model: its
+        # key and content still match, but /ready would not count it.
+        with psycopg2.connect(test_database_url) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE knowledge_base SET embedding_model = 'other-model' "
+                    "WHERE link = %s;",
+                    (records[0]["link"],),
+                )
+        with pytest.raises(KnowledgeBaseImportIncompleteError):
+            run("re-embedded")
+        with psycopg2.connect(test_database_url) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE knowledge_base SET embedding_model = %s "
+                    "WHERE link = %s;",
+                    (active_model, records[0]["link"]),
+                )
+
         # The database holds an older version of one record. Same keys, same
         # row count -- only the content differs, and the checkpoint would
         # skip straight past it.

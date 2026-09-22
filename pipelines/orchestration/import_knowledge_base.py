@@ -70,11 +70,15 @@ class ImportResult:
     # target database and writes the import report. import_knowledge_base()
     # leaves them unset. See pipelines/README.md "Import batching" for what
     # each one means.
+    status: str | None = None
     corpus_sha256: str | None = None
     knowledge_base_rows: int | None = None
     unique_record_count: int | None = None
+    corpus_rows: int | None = None
     rows_outside_corpus: int | None = None
     skipped_by_checkpoint: bool | None = None
+    embedding_model: str | None = None
+    embedding_revision: str | None = None
     report_key: str | None = None
 
 
@@ -401,6 +405,18 @@ class KnowledgeBaseCounts:
     knowledge_base_rows: int
     # Of those, the rows that are this corpus's records, key and content.
     corpus_rows: int
+    # Of the active rows, those whose key belongs to this corpus at all,
+    # whatever their content. None means "same as corpus_rows".
+    corpus_key_rows: int | None = None
+
+    @property
+    def rows_outside_corpus(self) -> int:
+        keyed = (
+            self.corpus_rows
+            if self.corpus_key_rows is None
+            else self.corpus_key_rows
+        )
+        return self.knowledge_base_rows - keyed
 
 
 def _verify_and_report(
@@ -442,7 +458,12 @@ def _verify_and_report(
         status = "completed"
     else:
         status = "incomplete"
-    rows_outside_corpus = counts.knowledge_base_rows - counts.corpus_rows
+    # Active rows whose key is not in the corpus. A corpus record stored with
+    # other content is "incomplete", not "outside". With no corpus the idea
+    # means nothing.
+    rows_outside_corpus = (
+        None if status == "empty" else counts.rows_outside_corpus
+    )
     recorded_sha256 = None if status == "empty" else corpus_sha256
     report_key = f"{PIPELINE_REPORTS_PREFIX}/import_knowledge_base_{run_id}.json"
     write_json_report(
@@ -501,11 +522,15 @@ def _verify_and_report(
 
     return replace(
         result,
+        status=status,
         corpus_sha256=recorded_sha256,
         knowledge_base_rows=counts.knowledge_base_rows,
         unique_record_count=unique_record_count,
+        corpus_rows=counts.corpus_rows,
         rows_outside_corpus=rows_outside_corpus,
         skipped_by_checkpoint=skipped_by_checkpoint,
+        embedding_model=model_name,
+        embedding_revision=model_revision,
         report_key=report_key,
     )
 
@@ -540,21 +565,24 @@ def count_knowledge_base_rows(
     )
     try:
         with connection.cursor() as cursor:
-            return KnowledgeBaseCounts(
-                knowledge_base_rows=count_active_rows(
-                    cursor,
-                    table_name,
-                    embedding_model=embedding_model,
-                    embedding_revision=embedding_revision,
-                ),
-                corpus_rows=count_corpus_rows(
-                    cursor,
-                    table_name,
-                    corpus,
-                    embedding_model=embedding_model,
-                    embedding_revision=embedding_revision,
-                ),
+            active_rows = count_active_rows(
+                cursor,
+                table_name,
+                embedding_model=embedding_model,
+                embedding_revision=embedding_revision,
             )
+            corpus_rows = count_corpus_rows(
+                cursor,
+                table_name,
+                corpus,
+                embedding_model=embedding_model,
+                embedding_revision=embedding_revision,
+            )
+        return KnowledgeBaseCounts(
+            knowledge_base_rows=active_rows,
+            corpus_rows=corpus_rows.matching,
+            corpus_key_rows=corpus_rows.keyed,
+        )
     except UndefinedTable as error:
         # Reached when a completed checkpoint skipped the import against a
         # database that has not even been migrated.
