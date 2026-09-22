@@ -48,7 +48,7 @@ variable "runtime_db_user" {
 # corpus change, and to what" is answered by git history.
 #
 # null until the first import that records it has run (docs/deployment.md,
-# "Loading or refreshing the corpus"). Never compute it from a file afterwards:
+# "导入或更新语料"). Never compute it from a file afterwards:
 # the value only means something because it came from the run that loaded the
 # data.
 variable "corpus_sha256" {
