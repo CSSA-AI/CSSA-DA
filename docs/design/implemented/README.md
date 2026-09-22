@@ -15,5 +15,6 @@ code, it is worse than no document.
 | [startup-and-readiness.md](startup-and-readiness.md) | What the app does before it accepts traffic: preload, model warm-up, liveness vs readiness, connection timeouts |
 | [database-migrations.md](database-migrations.md) | Why a rollback cannot undo a migration, the two-deploy expand/contract sequences, and the locking axis this rule does not cover |
 | [caller-identity.md](caller-identity.md) | How authentication decides who the caller is once, and how rate limiting reads that decision instead of re-reading the request |
+| [first-corpus-import.md](first-corpus-import.md) | Recording `CORPUS_SHA256` at import time, checking the import against the database rather than its checkpoint, and the least-privilege runtime role kept apart from the migration identity |
 | [deployment-packaging.md](deployment-packaging.md) | Dependency locking, slim multi-stage images |
 | [storage-abstraction.md](storage-abstraction.md) | Pipeline storage interface (`S3Storage` still pending — see [ROADMAP_platform](../../roadmap/ROADMAP_platform.md) Phase 3) |
