@@ -64,7 +64,8 @@ output "ecs_tasks_security_group_id" {
 # For checking that nothing was ever opened to the database (#105): list this
 # group's rules live, since a rule added by hand in the console would appear
 # neither in security_groups.tf nor as drift in `terraform plan`.
-#   aws ec2 describe-security-group-rules #     --filters Name=group-id,Values=$(terraform -chdir=infra output -raw rds_security_group_id)
+#   aws ec2 describe-security-group-rules \
+#     --filters Name=group-id,Values=$(terraform -chdir=infra output -raw rds_security_group_id)
 output "rds_security_group_id" {
   value = aws_security_group.rds.id
 }
