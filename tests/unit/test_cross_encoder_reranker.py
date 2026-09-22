@@ -23,10 +23,33 @@ class TestCrossEncoderRerankerUnit(unittest.TestCase):
         self.assertIs(reranker.model, self.shared_reranker_model)
         self.mock_get_reranker_model.assert_called_once_with()
 
+    def test_default_config_pins_max_length(self):
+        # Left unset, truncation follows the tokenizer default, which is 8192+
+        # for long-context rerankers; the shipped config must say it explicitly.
+        self.assertEqual(rag_config["reranker"]["max_length"], 256)
+
+    @patch("app.services.rag.reranker.cross_encoder_reranker.rag_config", {
+        "reranker": {
+            "model_name": "fake-cross-encoder",
+            "top_k": 2,
+            "max_length": 256,
+            "adapter_path": None,
+        }
+    })
+    @patch("app.services.rag.reranker.cross_encoder_reranker.CrossEncoder")
+    def test_manual_model_is_truncated_like_the_configured_one(self, mock_cross_encoder):
+        CrossEncoderReranker(model_name="manual-cross-encoder", model_revision="manual-revision")
+
+        mock_cross_encoder.assert_called_once_with(
+            "manual-cross-encoder",
+            revision="manual-revision",
+            max_length=256,
+        )
+
     def test_default_config_pins_model_revision(self):
         self.assertEqual(
             rag_config["reranker"]["model_revision"],
-            "7b0235231ca2674cb8ca8f022859a6eba2b1c968",
+            "1427fd652930e4ba29e8149678df786c240d8825",
         )
 
     def setUp(self):
