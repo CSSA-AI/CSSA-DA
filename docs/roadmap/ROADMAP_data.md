@@ -409,6 +409,9 @@ wx_vGqp2DXA34OE8iHxaSaUFg      微信文章
 产出 `manifest.json`,含版本、git sha、分源行数、**语料 sha256**。
 
 - **验收**:sha256 记录在案;后续任何指标报告必须带上它
+- ⚠️ 用 `pipelines.shared.import_checkpoint.fingerprint_records` 算,不要对文件 `sha256sum`:
+  线上的 `CORPUS_SHA256` 是导入时用这个函数算的,见
+  [first-corpus-import.md](../design/implemented/first-corpus-import.md#三corpus_sha256-是什么的-hash)
 
 > **有利的先验**:小助手是专门对接新生的号,问题高度集中(每年新生问的就是那批事
 > —— 语言班、注册、选课、租房、开卡),同一问题被几十人问过的概率很高,对聚簇有利。
