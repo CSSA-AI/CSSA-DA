@@ -40,6 +40,14 @@ class WechatPipelineRunResult:
     raw_output_location: str
     processed_output_key: str
     report_key: str | None = None
+    # From the import stage's own report (import_report_key), so a full
+    # pipeline run carries the corpus coordinate as far as a single import.
+    corpus_sha256: str | None = None
+    knowledge_base_rows: int | None = None
+    import_report_key: str | None = None
+    # True when the import stage's checkpoint said it was already done, so
+    # affected_count is an earlier run's number, not this one's.
+    import_skipped_by_checkpoint: bool | None = None
 
     @property
     def rejected_count(self) -> int:
@@ -119,6 +127,7 @@ def run_local_wechat_pipeline(
                     batch_size=batch_size,
                     checkpoint_key=import_checkpoint_key,
                     reset_checkpoint=reset_import_checkpoint,
+                    run_id=run_id,
                 ),
                 lambda result: {
                     "record_count": result.attempted_count,
@@ -162,6 +171,10 @@ def run_local_wechat_pipeline(
             affected_count=import_result.affected_count,
             raw_output_location=harvest_result.output_location,
             processed_output_key=processed_output_key,
+            corpus_sha256=import_result.corpus_sha256,
+            knowledge_base_rows=import_result.knowledge_base_rows,
+            import_report_key=import_result.report_key,
+            import_skipped_by_checkpoint=import_result.skipped_by_checkpoint,
         )
         finished_at = datetime.now(timezone.utc)
         report_key = _write_wechat_pipeline_report(
@@ -242,6 +255,12 @@ def _write_wechat_pipeline_report(
                 "rejected_count": result.rejected_count,
                 "attempted_import_count": result.attempted_import_count,
                 "affected_count": result.affected_count,
+                "corpus_sha256": result.corpus_sha256,
+                "knowledge_base_rows": result.knowledge_base_rows,
+                "import_report_key": result.import_report_key,
+                "import_skipped_by_checkpoint": (
+                    result.import_skipped_by_checkpoint
+                ),
             }
         )
     if error is not None:

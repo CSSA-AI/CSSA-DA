@@ -61,6 +61,24 @@ output "ecs_tasks_security_group_id" {
   value = aws_security_group.ecs_tasks.id
 }
 
+# For checking that nothing was ever opened to the database (#105): list this
+# group's rules live, since a rule added by hand in the console would appear
+# neither in security_groups.tf nor as drift in `terraform plan`.
+#   aws ec2 describe-security-group-rules \
+#     --filters Name=group-id,Values=$(terraform -chdir=infra output -raw rds_security_group_id)
+output "rds_security_group_id" {
+  value = aws_security_group.rds.id
+}
+
+# The role the API connects as, and where its password lives.
+output "runtime_db_user" {
+  value = var.runtime_db_user
+}
+
+output "runtime_db_password_secret_name" {
+  value = aws_secretsmanager_secret.runtime_db_password.name
+}
+
 output "ecs_migrate_task_family" {
   value = aws_ecs_task_definition.migrate.family
 }

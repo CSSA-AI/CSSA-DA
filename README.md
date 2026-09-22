@@ -87,6 +87,7 @@ CSSA-DA/
 │   ├── check_config.py                       # Validate runtime config per profile
 │   ├── db_status.py                          # Inspect knowledge_base rows / embeddings
 │   ├── download_models.py                    # Pre-download pinned models
+│   ├── provision_runtime_role.py             # Least-privilege DB role the API runs as
 │   ├── rehearse_local_stack.py               # End-to-end local rehearsal
 │   └── smoke_test_api.py                     # Hit /health, /ready, /v1/chat
 │
@@ -368,8 +369,12 @@ generated answers back into `knowledge_base`. Recording is best-effort: a failed
 logged by `request_id` and never reaches the user. The payload is deliberately not logged —
 user content lives in Postgres only, see
 [retrieval-logging.md](docs/design/implemented/retrieval-logging.md). Set `GIT_SHA` and
-`CORPUS_SHA256` in production, or those fingerprint coordinates are recorded as null. See
-[ROADMAP_rag.md](docs/roadmap/ROADMAP_rag.md) Phase 4.5.
+`CORPUS_SHA256` in production, or those fingerprint coordinates are recorded as null. Take
+`CORPUS_SHA256` from the output of the import that loaded the corpus (its `corpus_sha256`
+field, see [pipelines/README.md](pipelines/README.md#import-batching)); do not recompute it
+from a file afterwards. In production it is the `corpus_sha256` variable in
+[infra/variables.tf](infra/variables.tf), committed, and
+[docs/deployment.md](docs/deployment.md#导入或更新语料) walks through it. See [ROADMAP_rag.md](docs/roadmap/ROADMAP_rag.md) Phase 4.5.
 
 `retrieved.doc_id` is the stable, source-prefixed id derived from the article link
 (`wx_<slug>` for WeChat) since CSS-7, so these rows join back to `knowledge_base` and match

@@ -73,11 +73,15 @@ Complete pipeline runs also write JSON reports:
 
 ```text
 data/reports/pipelines/wechat_pipeline_<run_id>.json
+data/reports/pipelines/import_knowledge_base_<run_id>.json
 ```
 
 Reports include the run status, start/end timestamps, source/output paths,
 record counts and failure details when a stage raises an error. They are local
-audit files today and map cleanly to future object-storage reports.
+audit files today and map cleanly to future object-storage reports. The import
+report is described under [Import batching](#import-batching); the complete
+workflow's report also carries the import's `corpus_sha256`,
+`knowledge_base_rows` and `import_report_key`.
 
 PostgreSQL also has a `pipeline_runs` table for durable run metadata. This table
 is managed by Alembic and stores run status, data freshness signals and report
@@ -146,6 +150,46 @@ automatically. To deliberately rerun an unchanged completed import:
 ```
 
 For the complete workflow, use `--reset-import-checkpoint`.
+
+A completed checkpoint only says that an earlier run finished against a target
+with the same host, port and database name. A database rebuilt since, a
+different one reached through a tunnel on the same local port, or one holding
+another version of the corpus has the same id and not these records. So after
+every import, including one skipped as already complete, the command looks up
+each record by its `(link, question_text)` key and checks that the stored
+content is identical and was embedded by the active model and revision. If any
+record is missing or different, it exits non-zero and tells you to rerun with
+`--reset-checkpoint` (`--reset-import-checkpoint` for `run-wechat-pipeline`).
+
+Every import that reaches this check writes
+`reports/pipelines/import_knowledge_base_<run_id>.json`, and the
+`import-knowledge-base` command logs its key fields on the `command_completed`
+line: `status`, `corpus_sha256`, `limit`, the counts below, `model_name` /
+`model_revision`, `target_id` and `report_key` (not `input_key`, the timestamps
+or the table name; fields whose value is null are left out of the line). When
+the import runs in a container, the report file disappears with the task, and
+that line is what survives.
+
+| Field | Meaning |
+|---|---|
+| `status` | `completed`, `incomplete` (the command then fails), or `empty` (no records, so no corpus to name) |
+| `corpus_sha256` | SHA-256 of exactly the records imported (after `--limit`), canonical JSON, identical to the checkpoint's dataset fingerprint (`fingerprint_records`). This is the value for `CORPUS_SHA256` in the deployment. It is not `sha256sum` of the file: reformatting the file does not change it, but reordering records does. `null` when `status` is `empty` |
+| `record_count` / `unique_record_count` | Records read, and distinct `(link, question_text)` keys among them |
+| `corpus_rows` | Of those keys, how many the table holds with identical content and the active model/revision. Equals `unique_record_count` when complete |
+| `knowledge_base_rows` | All rows for the active model and revision, counted the way `/ready` counts them. After pointing the API at this database, `/ready` must report the same number |
+| `rows_outside_corpus` | Active-model rows whose key is not in this corpus, for example articles dropped by a corpus refresh (the loader never deletes). A corpus key stored with other content makes the import `incomplete` instead. Not a failure, but `/ready` counts these rows and retrieval can return them, so it is logged as a warning. `null` when `status` is `empty` |
+| `skipped_by_checkpoint` | `true` when the checkpoint said the import was already done and this run only checked. `affected_count` is then the earlier run's number |
+| `limit`, `target_id` | The `--limit` used, and host, port and database name (never the credentials) |
+
+Both commands take the database URL from `--database-url`, else `DATABASE_URL`
+(from the environment or a `./.env` file), else the URL assembled from
+`DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD`, which is how ECS tasks are
+configured. A `DATABASE_URL` in `./.env` therefore wins over `DB_*` variables in
+the environment; `target_id` on the log line shows which database was used.
+
+`question_text` and `content` must be strings. A number, boolean or list would
+be stored as its SQL text form and no longer match what was embedded, so
+validation rejects it.
 
 The embedding model revision is pinned in `app/core/config/rag-config.yaml` so
 imports and retrieval use the same immutable model files. If that revision is

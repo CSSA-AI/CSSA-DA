@@ -337,6 +337,10 @@ token 数),且可以靠伪造对话历史引导模型。
 - **交付**:每次运行输出 JSON + Markdown 报告到 `data/reports/eval/`,记录配置、
   **语料 sha256**、git sha
 - **验收**:任何一份历史报告都能凭 sha256 判断是否可与新结果比较
+- ⚠️ **语料 sha256 用 `pipelines.shared.import_checkpoint.fingerprint_records` 算**(记录的
+  规范化 JSON),不要对文件 `sha256sum` —— 线上 `chat_interactions` 里的 `corpus_sha256`
+  就是这个函数算的,两边不是同一个函数就不是同一把尺子。见
+  [first-corpus-import.md](../design/implemented/first-corpus-import.md#三corpus_sha256-是什么的-hash)
 
 ---
 
@@ -637,7 +641,8 @@ CREATE TABLE chat_interactions (
 五行代码的事,但**没有它,半年后你分不清哪条记录是换 reranker 之前还是之后产生
 的**,整批数据的比较价值就没了。
 
-`corpus_sha256` 把线上日志和离线评估数据集**统一到同一把尺子上**。
+`corpus_sha256` 把线上日志和离线评估数据集**统一到同一把尺子上** —— 前提是两边用同一个
+函数算:线上的值来自导入时的 `fingerprint_records`,离线也必须用它(见 1.3)。
 
 ### 依赖
 

@@ -16,5 +16,6 @@ code, it is worse than no document.
 | [database-migrations.md](database-migrations.md) | Why a rollback cannot undo a migration, the two-deploy expand/contract sequences, and the locking axis this rule does not cover |
 | [caller-identity.md](caller-identity.md) | How authentication decides who the caller is once, and how rate limiting reads that decision instead of re-reading the request |
 | [aws-foundation.md](aws-foundation.md) | Everything standing on AWS, from `terraform init` to a public URL: the VPC and its routing, NAT, remote state, ECR and image architecture, RDS, how secrets and config reach a container, the Fargate service, the load balancer, the data bucket, and how the schema and the corpus got into a database that has no public address — with the beginner-level networking, IAM and container-runtime background |
+| [first-corpus-import.md](first-corpus-import.md) | Recording `CORPUS_SHA256` at import time, checking the import against the database rather than its checkpoint, and the least-privilege runtime role kept apart from the migration identity |
 | [deployment-packaging.md](deployment-packaging.md) | Dependency locking, slim multi-stage images |
 | [storage-abstraction.md](storage-abstraction.md) | Pipeline storage interface (`S3Storage` still pending — see [ROADMAP_platform](../../roadmap/ROADMAP_platform.md) Phase 3) |

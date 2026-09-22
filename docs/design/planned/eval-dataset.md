@@ -834,7 +834,9 @@ rank 10–50 区间,每个正例配 8 个难负例。
 
 产出 `manifest.json`,记录版本、构造时的 git sha、分源行数,以及**语料 sha256**。
 最后一项是关键:模型指标只有在同一份语料上才可比。DS team 报告结果时必须带上这个
-hash。
+hash。它要用 `pipelines.shared.import_checkpoint.fingerprint_records` 对记录算(不是对文件
+`sha256sum`),线上 `chat_interactions` 的 `corpus_sha256` 就是这么来的,见
+[first-corpus-import.md](../implemented/first-corpus-import.md#三corpus_sha256-是什么的-hash)。
 
 ---
 

@@ -1074,6 +1074,11 @@ current/wechat_articles_processed.json                                  ← 稳�
 loader 的 `ON CONFLICT (link, question_text) DO UPDATE` 让重跑是幂等的——真被 OOM 杀了,
 再来一遍就是。
 
+> **之后不再这么做(2026-09-22,#105)。** API 现在以低权限角色 `cssa_app` 连库,写不了
+> 语料;导入改为以迁移身份、用迁移任务定义起一次性任务来跑,步骤见
+> [deployment.md「导入或更新语料」](../../deployment.md#导入或更新语料),理由见
+> [first-corpus-import.md](first-corpus-import.md)。
+
 #### ⭐ 一个故意不省的 500MB
 
 导入会**重新从 Hugging Face 下载一次嵌入模型**,尽管镜像里 `/models` 已经有一份。
@@ -1163,6 +1168,12 @@ POST /v1/chat   200   answer + 5 条 sources
 所以这一步做的是一份**独立的任务定义**:同一个镜像,命令换成 `alembic upgrade head`,
 跑完就退出。
 
+> **2026-09-22(#105)之后,命令多了一句**:
+> `sh -c "alembic upgrade head && python -m ops.provision_runtime_role"`——迁移之后把 API
+> 的低权限角色 `cssa_app` 对齐到授权清单,仍然只有一个退出码;注入的密钥也多了运行时角色的
+> 密码那一个。语料导入也用这份任务定义,以一次性任务、覆盖命令和规格的方式跑。见
+> [first-corpus-import.md](first-corpus-import.md)。
+
 #### 为什么是任务定义,不是服务
 
 服务的定义是「保持某个东西一直活着,停了就拉起来」。**迁移跑完就该死,被重启反而是
@@ -1177,7 +1188,7 @@ POST /v1/chat   200   answer + 5 条 sources
 |---|---|---|
 | 规格 | 256 / 512 | API 那 4GB 是给两个模型的,alembic 一个都不加载 |
 | task role | **没有** | API 那个 role 唯一作用是 `ecs exec`;这个容器不调 AWS API,也不该被钻进去 |
-| 注入的密钥 | 只有数据库那两个 | OpenAI 和 chat 的密钥 alembic 用不着,**没注入的凭据不会从日志或崩溃里漏出去** |
+| 注入的密钥 | 只有数据库那两个(#105 之后加上运行时角色的密码) | OpenAI 和 chat 的密钥 alembic 用不着,**没注入的凭据不会从日志或崩溃里漏出去** |
 | 日志组 | 单独一个,存 90 天 | 比 API 的 30 天长:这种流一年没几条,而每条回答的是「数据库什么时候变成这样的」,这问题往往很久以后才被问 |
 
 **架构必须显式写 ARM64。** 不写默认是 X86_64,容器会因为镜像清单不匹配而起不来,而那个
@@ -1314,7 +1325,15 @@ provider 建的每个资源自动带上**,所以单个资源里只写 `Name`。�
 
 **没有一步需要重新思考或重新写代码。**
 
-> ⚠️ **一个会卡住重建的坑**:两个应用密钥设了 `recovery_window_in_days = 7`,删除后进入
+> **2026-09-22(#105)之后,这张表多了几行,少了 `exec` 那一行。** API 现在以低权限角色
+> `cssa_app` 连库,它不能建表,在新建的库里也还不存在;语料也必须先导进去,API 才过得了
+> `/ready`。所以重建是:`terraform apply` → 推镜像 → 灌**三个**密钥(多了运行时数据库密码)
+> → 跑迁移任务(建表,并建出 `cssa_app`,不再用 `exec`)→ 跑一次导入任务 →
+> `update-service --force-new-deployment`。命令见
+> [deployment.md「从零重建之后」](../../deployment.md#从零重建之后)。
+
+> ⚠️ **一个会卡住重建的坑**:三个应用密钥(OpenAI、chat key、运行时数据库密码)都设了
+> `recovery_window_in_days = 7`,删除后进入
 > 七天恢复期,**期间名字被占着**,于是重建时 Terraform 建同名密钥会失败。要么先
 > `delete-secret --force-delete-without-recovery` 彻底删掉,要么 `restore-secret` 把旧的
 > 捞回来(那样连值都不用重新灌)。
@@ -1336,7 +1355,7 @@ provider 建的每个资源自动带上**,所以单个资源里只写 `Name`。�
 | **域名 + ACM 证书** | 没有它就只能 HTTP,而**浏览器会硬拦截 HTTPS 页面发往 HTTP 的请求**;`ALLOWED_ORIGINS` 也等它 | 接前端之前 |
 | **确认账号计划** | 免费计划的额度耗尽时是**暂停资源**而不是出账单 | 给内测用户之前 |
 | **砍 Fargate 规格** | 现在超预算 $16,而 4GB 是故意开大的 | 量过内存之后 |
-| **应用不该用主用户连库** | 见下 | v1 期间 |
+| **应用不该用主用户连库** | 见下 —— 代码与配置已由 #105 补上,待上线执行 | v1 期间 |
 | root MFA | 账号最高权限目前只靠一个密码 | 越早越好 |
 | 收窄 Terraform 身份的权限 | 目前是 `AdministratorAccess` 的长期密钥,正路是 IAM Identity Center 的临时凭据 | Phase 4 做 CI 时一并处理 |
 
@@ -1347,6 +1366,11 @@ provider 建的每个资源自动带上**,所以单个资源里只写 `Name`。�
 ——[ROADMAP_platform 第 20 项](../../roadmap/ROADMAP_platform.md)说「跑 migration 的身份和
 跑应用的身份不该是同一个」。正确的形状是:迁移用主用户,应用用一个只有读写权限的普通
 用户。
+
+> **已还(代码与配置,2026-09-22,#105;待上线执行)。** 迁移任务每次部署在迁移之后跑
+> `ops/provision_runtime_role.py`,把运行时角色 `cssa_app` 的权限对齐到清单并验证;API
+> 任务改用 `cssa_app` 连库,不再注入主用户密钥。见
+> [first-corpus-import.md](first-corpus-import.md)。
 
 > 这里原本记着三笔。另外两笔在第 15 步一并还了,因为它们挡着同一件事:
 >
