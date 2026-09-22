@@ -26,9 +26,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-default-groups --group pipeline
 
 # Only the embedding model — the pipeline never reranks.
+#
+# Named files rather than the config directory, for the same reason as
+# Dockerfile.api: these lines are the cache key for the model layer, and
+# copying app/core/config wholesale made every settings.py edit re-download it.
 COPY ops/__init__.py ops/download_models.py ./ops/
-COPY app/core/__init__.py ./app/core/
-COPY app/core/config ./app/core/config
+COPY app/core/__init__.py app/core/rag_config.py ./app/core/
+COPY app/core/config/rag-config.yaml ./app/core/config/
 RUN --mount=type=cache,target=/root/.cache/huggingface \
     /app/.venv/bin/python ops/download_models.py --target-dir /models --models embedding
 
