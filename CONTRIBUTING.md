@@ -377,7 +377,7 @@ recorded on every `chat_interactions` row (see
 | Code | Git tag `v0.1.0` | Immutable once pushed |
 | Artifact | Image tag = Git SHA | Never deploy `latest` |
 | API contract | `/v1/chat` | Tells the frontend which schema applies |
-| Data | Corpus `sha256` | Metrics only compare within one corpus |
+| Data | Corpus `sha256` | Metrics only compare within one corpus. Computed by `fingerprint_records` over the records, never `sha256sum` of a file ([why](docs/design/implemented/first-corpus-import.md)) |
 
 ### Version numbers
 

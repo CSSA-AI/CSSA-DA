@@ -1070,6 +1070,11 @@ current/wechat_articles_processed.json                                  ← 稳�
 loader 的 `ON CONFLICT (link, question_text) DO UPDATE` 让重跑是幂等的——真被 OOM 杀了,
 再来一遍就是。
 
+> **之后不再这么做(2026-09-22,#105)。** API 现在以低权限角色 `cssa_app` 连库,写不了
+> 语料;导入改为以迁移身份、用迁移任务定义起一次性任务来跑,步骤见
+> [deployment.md「导入或更新语料」](../../deployment.md#导入或更新语料),理由见
+> [first-corpus-import.md](first-corpus-import.md)。
+
 #### ⭐ 一个故意不省的 500MB
 
 导入会**重新从 Hugging Face 下载一次嵌入模型**,尽管镜像里 `/models` 已经有一份。
@@ -1237,7 +1242,7 @@ provider 建的每个资源自动带上**,所以单个资源里只写 `Name`。�
 | **域名 + ACM 证书** | 没有它就只能 HTTP,而**浏览器会硬拦截 HTTPS 页面发往 HTTP 的请求**;`ALLOWED_ORIGINS` 也等它 | 接前端之前 |
 | **确认账号计划** | 免费计划的额度耗尽时是**暂停资源**而不是出账单 | 给内测用户之前 |
 | **砍 Fargate 规格** | 现在超预算 $16,而 4GB 是故意开大的 | 量过内存之后 |
-| **应用不该用主用户连库** | 见下 | v1 期间 |
+| **应用不该用主用户连库** | 见下 —— 代码与配置已由 #105 补上,待上线执行 | v1 期间 |
 | root MFA | 账号最高权限目前只靠一个密码 | 越早越好 |
 | 收窄 Terraform 身份的权限 | 目前是 `AdministratorAccess` 的长期密钥,正路是 IAM Identity Center 的临时凭据 | Phase 4 做 CI 时一并处理 |
 
@@ -1248,6 +1253,11 @@ provider 建的每个资源自动带上**,所以单个资源里只写 `Name`。�
 ——[ROADMAP_platform 第 20 项](../../roadmap/ROADMAP_platform.md)说「跑 migration 的身份和
 跑应用的身份不该是同一个」。正确的形状是:迁移用主用户,应用用一个只有读写权限的普通
 用户。
+
+> **已还(代码与配置,2026-09-22,#105;待上线执行)。** 迁移任务每次部署在迁移之后跑
+> `ops/provision_runtime_role.py`,把运行时角色 `cssa_app` 的权限对齐到清单并验证;API
+> 任务改用 `cssa_app` 连库,不再注入主用户密钥。见
+> [first-corpus-import.md](first-corpus-import.md)。
 
 **Dockerfile 的模型下载层依赖过宽。** builder 阶段为了拿到模型清单 `COPY` 了整个
 `app/core/config/`,于是**任何对 `settings.py` 的改动都会让 600MB 的模型层失效**、重新
