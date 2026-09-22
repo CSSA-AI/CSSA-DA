@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.core.config import rag_config, settings
+from app.services.knowledge_base import count_active_rows
 
 
 @dataclass(frozen=True)
@@ -98,16 +99,12 @@ def get_knowledge_base_status(
                 )
                 total_rows = cursor.fetchone()[0]
 
-                cursor.execute(
-                    sql.SQL("""
-                        SELECT COUNT(*)
-                        FROM {table}
-                        WHERE embedding_model = %s
-                          AND embedding_revision IS NOT DISTINCT FROM %s;
-                    """).format(table=table),
-                    (active_model, active_revision),
+                active_rows = count_active_rows(
+                    cursor,
+                    table_name,
+                    embedding_model=active_model,
+                    embedding_revision=active_revision,
                 )
-                active_rows = cursor.fetchone()[0]
 
                 cursor.execute(
                     sql.SQL("""
