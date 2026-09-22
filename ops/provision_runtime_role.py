@@ -16,14 +16,19 @@ This script is run *as the migration identity*, right after the migrations
 
     RUNTIME_DB_PASSWORD=... python -m ops.provision_runtime_role
 
-It is declarative and idempotent. ``RUNTIME_TABLE_PRIVILEGES`` and
-``RUNTIME_COLUMN_PRIVILEGES`` below are the complete privilege set: each run
-revokes what the migration identity granted and grants exactly the lists, in
-one transaction, then checks the role's *effective* privileges against them --
-which also catches anything that reaches the role another way, such as a grant
-to PUBLIC. Re-running with the same password changes nothing; with a new one it
-rotates the password (see docs/deployment.md for the order that avoids an
-outage).
+It is declarative and idempotent for privileges. ``RUNTIME_TABLE_PRIVILEGES``
+and ``RUNTIME_COLUMN_PRIVILEGES`` below are the complete set: each run revokes
+what the migration identity granted and grants exactly the lists, in one
+transaction, then checks the role's *effective* privileges on every table,
+column and sequence in every schema the role can reach -- which also catches
+anything that arrives another way, such as a grant to PUBLIC. Re-running with
+the same password changes nothing; with a new one it rotates the password (see
+docs/deployment.md for the order that avoids an outage).
+
+Deliberately left alone: per-role settings (ALTER ROLE ... SET) and the
+connection limit, which an operator may set on purpose (a statement_timeout, a
+connection budget). The password is always set to never expire, so the API
+cannot be locked out on a date nobody remembers choosing.
 
 It works as the RDS master user, which is *not* a superuser: on PostgreSQL 16
 such a role may create a role with NOSUPERUSER/NOREPLICATION/NOBYPASSRLS but
@@ -206,7 +211,8 @@ def _apply(connection: Any, cursor: Any, role: str, password: str) -> bool:
         cursor.execute(
             sql.SQL(
                 "CREATE ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB "
-                "NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD {};"
+                "NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD {} "
+                "VALID UNTIL 'infinity';"
             ).format(role_id, verifier)
         )
     else:
@@ -215,9 +221,9 @@ def _apply(connection: Any, cursor: Any, role: str, password: str) -> bool:
         # not even to turn them off -- and the check above already refused a
         # role that has any of them.
         cursor.execute(
-            sql.SQL("ALTER ROLE {} WITH LOGIN PASSWORD {};").format(
-                role_id, verifier
-            )
+            sql.SQL(
+                "ALTER ROLE {} WITH LOGIN PASSWORD {} VALID UNTIL 'infinity';"
+            ).format(role_id, verifier)
         )
 
     schema_id = sql.Identifier(SCHEMA)
@@ -347,21 +353,32 @@ def _ownership_problems(cursor: Any, role: str) -> list[str]:
 def _privilege_problems(cursor: Any, role: str) -> list[str]:
     # has_*_privilege answers for the role as it would actually be checked:
     # direct grants, grants from any grantor, and grants to PUBLIC alike.
+    # Every schema the role can reach, not only public: a table another
+    # schema grants to PUBLIC is as readable as one in public.
+    reachable = """
+        n.nspname NOT LIKE 'pg\\_%%'
+        AND n.nspname <> 'information_schema'
+        AND has_schema_privilege(%(role)s, n.oid, 'USAGE')
+    """
     cursor.execute(
         """
-        SELECT c.relname, p.privilege
+        SELECT n.nspname || '.' || c.relname, p.privilege
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
-        CROSS JOIN unnest(%s::text[]) AS p(privilege)
-        WHERE n.nspname = %s
-          AND c.relkind = ANY(%s::"char"[])
-          AND has_table_privilege(%s, c.oid, p.privilege);
+        CROSS JOIN unnest(%(privileges)s::text[]) AS p(privilege)
+        WHERE """ + reachable + """
+          AND c.relkind = ANY(%(relkinds)s::"char"[])
+          AND has_table_privilege(%(role)s, c.oid, p.privilege);
         """,
-        (list(TABLE_PRIVILEGE_TYPES), SCHEMA, list(TABLE_LIKE_RELKINDS), role),
+        {
+            "privileges": list(TABLE_PRIVILEGE_TYPES),
+            "relkinds": list(TABLE_LIKE_RELKINDS),
+            "role": role,
+        },
     )
     actual_table = set(cursor.fetchall())
     expected_table = {
-        (table, privilege)
+        (f"{SCHEMA}.{table}", privilege)
         for table, privileges in RUNTIME_TABLE_PRIVILEGES.items()
         for privilege in privileges
     }
@@ -370,28 +387,26 @@ def _privilege_problems(cursor: Any, role: str) -> list[str]:
     # not on the whole table -- whole-table privileges are compared above.
     cursor.execute(
         """
-        SELECT c.relname, a.attname, p.privilege
+        SELECT n.nspname || '.' || c.relname, a.attname, p.privilege
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
         JOIN pg_attribute a
           ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
-        CROSS JOIN unnest(%s::text[]) AS p(privilege)
-        WHERE n.nspname = %s
-          AND c.relkind = ANY(%s::"char"[])
-          AND has_column_privilege(%s, c.oid, a.attnum, p.privilege)
-          AND NOT has_table_privilege(%s, c.oid, p.privilege);
+        CROSS JOIN unnest(%(privileges)s::text[]) AS p(privilege)
+        WHERE """ + reachable + """
+          AND c.relkind = ANY(%(relkinds)s::"char"[])
+          AND has_column_privilege(%(role)s, c.oid, a.attnum, p.privilege)
+          AND NOT has_table_privilege(%(role)s, c.oid, p.privilege);
         """,
-        (
-            list(COLUMN_PRIVILEGE_TYPES),
-            SCHEMA,
-            list(TABLE_LIKE_RELKINDS),
-            role,
-            role,
-        ),
+        {
+            "privileges": list(COLUMN_PRIVILEGE_TYPES),
+            "relkinds": list(TABLE_LIKE_RELKINDS),
+            "role": role,
+        },
     )
     actual_column = set(cursor.fetchall())
     expected_column = {
-        (table, column, privilege)
+        (f"{SCHEMA}.{table}", column, privilege)
         for table, by_privilege in RUNTIME_COLUMN_PRIVILEGES.items()
         for privilege, columns in by_privilege.items()
         for column in columns
@@ -399,15 +414,15 @@ def _privilege_problems(cursor: Any, role: str) -> list[str]:
 
     cursor.execute(
         """
-        SELECT c.relname, p.privilege
+        SELECT n.nspname || '.' || c.relname, p.privilege
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
-        CROSS JOIN unnest(%s::text[]) AS p(privilege)
-        WHERE n.nspname = %s
+        CROSS JOIN unnest(%(privileges)s::text[]) AS p(privilege)
+        WHERE """ + reachable + """
           AND c.relkind = 'S'
-          AND has_sequence_privilege(%s, c.oid, p.privilege);
+          AND has_sequence_privilege(%(role)s, c.oid, p.privilege);
         """,
-        (list(SEQUENCE_PRIVILEGE_TYPES), SCHEMA, role),
+        {"privileges": list(SEQUENCE_PRIVILEGE_TYPES), "role": role},
     )
     sequence_grants = sorted(cursor.fetchall())
 
