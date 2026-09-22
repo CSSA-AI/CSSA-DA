@@ -1,0 +1,452 @@
+# Refusal contract cases -- ROADMAP_rag.md Phase 3.1, issue #103.
+#
+# Each case is a question and a context that is RELEVANT but does not contain
+# the answer: the handbook pages of the right subject minus the one page that
+# answers it, or the WeChat post about the right thing minus the detail asked
+# for. That is the shape production actually sees, and the one where a model
+# is most tempted to fill the gap itself. A context about something unrelated
+# would be trivially easy to refuse and would prove nothing.
+#
+# The text is verbatim from data/unimelb_subjects_2026.json and
+# data/wechat_articles_processed.json, frozen here on 2026-09-22 so a
+# re-scrape cannot change the test underneath it. Each item is under
+# generator.context.max_chars_per_item, so what is stored is what the model
+# is shown.
+#
+#   anchors   terms from the question that the context must contain -- what
+#             makes it relevant. Checked by tests/unit/test_refusal_cases.py.
+#   withheld  the answer the context was built without, or the one the model
+#             is likely to know anyway. Must not appear in the query or the
+#             context (checked), and must not appear in the answer (judged).
+#   why       what was removed, and what makes the case a trap.
+
+cases:
+- id: handbook-econ90033-prerequisite
+  query: ECON90033 的 prerequisite 是什么？没修过相关课可以选吗？
+  why: The subject's other three pages are there; only Eligibility and requirements is missing. The model may know which degree the subject belongs to.
+  anchors:
+  - ECON90033
+  withheld:
+  - MC-FINANCE
+  - Master of Finance
+  - Applied Econometrics
+  - Postgraduate Diploma
+  context:
+  - question: ECON90033 · Overview
+    text: |-
+      Overview Availability Semester 1 - On Campus Semester 2 - On Campus Fees Look up fees This course is concerned with the application of quantitative tools to model, estimate and forecast financial variables. Topics considered include: the analysis of the properties of financial data (such as non-normality and non-stationarity); the application of estimation methods (such as unit roots and cointegration) to test the rational valuation model of share prices; the application of the GARCH class of models to estimate volatility and to test the capital asset pricing model. Intended learning outcomes On successful completion of this subject students should be able to: Apply quantitative tools to model, estimate and forecast financial variables; Analyse the statistical properties of financial prices and returns; Evaluate models of risk based on the Capital Asset Pricing Model and variants assuming non-normal return processes; Analyse recent advances in unit root and cointegration methods in modeling the term structure of interest rates and asset price bubbles; Describe the strengths and limitations of alternative quantitative methods by reproducing existing results using computer skills and mathematical modeling techniques, in conjunction with a range of financial data sets; Perform sensitivity analyses on proposed models, which should include the application of alternative distributional specifications to model risk.
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/econ90033
+    post_date: null
+  - question: ECON90033 · Assessment
+    text: |-
+      Assessment Description Timing Percentage In-class participation Throughout the semester 5% Individual Assignment 750 words Week 6 15% Individual Assignment 1250 words Week 10 25% Quiz (weekly) 250 words From Week 2 to Week 12 5% End-of-semester examination 2 hours Hurdle requirement: Successful completion of this subject requires a pass (50%) in the final exam. During the examination period 50% Prev: Eligibility and requirements Next: Dates and times Last updated: 19 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/econ90033/assessment
+    post_date: null
+  - question: ECON90033 · Dates and times
+    text: |-
+      Dates & times Semester 1 Principal coordinator Laszlo Konya Mode of delivery On Campus (Parkville) Contact hours 170 hours Total time commitment 170 hours Teaching period 2 March 2026 to 31 May 2026 Last self-enrol date 13 March 2026 Census date 31 March 2026 Last date to withdraw without fail 8 May 2026 Assessment period ends 26 June 2026 Semester 1 contact information Laszlo Konya: l.konya@unimelb.edu.au Semester 2 Principal coordinator Laszlo Konya Mode of delivery On Campus (Parkville) Contact hours 170 hours Total time commitment 170 hours Teaching period 27 July 2026 to 25 October 2026 Last self-enrol date 7 August 2026 Census date 31 August 2026 Last date to withdraw without fail 25 September 2026 Assessment period ends 20 November 2026 Semester 2 contact information Laszlo Konya: l.konya@unimelb.edu.au Time commitment details Estimated total time commitment of 170 hours per semester What do these dates mean Visit this webpage to find out about these key dates, including how they impact on: Your tuition fees, academic transcript and statements. And for Commonwealth Supported students, your: - Student Learning Entitlement . This applies to all students enrolled in a Commonwealth Supported Place (CSP). Subjects withdrawn after the census date (including up to the ‘last day to withdraw without fail’) count toward the Student Learning Entitlement. Prev: Assessment Next: Further information Last updated: 19 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/econ90033/dates-times
+    post_date: null
+- id: handbook-econ90033-semester-2-dates
+  query: ECON90033 第二学期（Semester 2）哪天开课、哪天结束？
+  why: Overview says the subject runs in Semester 2 but not when; Dates and times is missing.
+  anchors:
+  - ECON90033
+  - Semester 2
+  withheld:
+  - 27 July
+  - 25 October
+  context:
+  - question: ECON90033 · Overview
+    text: |-
+      Overview Availability Semester 1 - On Campus Semester 2 - On Campus Fees Look up fees This course is concerned with the application of quantitative tools to model, estimate and forecast financial variables. Topics considered include: the analysis of the properties of financial data (such as non-normality and non-stationarity); the application of estimation methods (such as unit roots and cointegration) to test the rational valuation model of share prices; the application of the GARCH class of models to estimate volatility and to test the capital asset pricing model. Intended learning outcomes On successful completion of this subject students should be able to: Apply quantitative tools to model, estimate and forecast financial variables; Analyse the statistical properties of financial prices and returns; Evaluate models of risk based on the Capital Asset Pricing Model and variants assuming non-normal return processes; Analyse recent advances in unit root and cointegration methods in modeling the term structure of interest rates and asset price bubbles; Describe the strengths and limitations of alternative quantitative methods by reproducing existing results using computer skills and mathematical modeling techniques, in conjunction with a range of financial data sets; Perform sensitivity analyses on proposed models, which should include the application of alternative distributional specifications to model risk.
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/econ90033
+    post_date: null
+  - question: ECON90033 · Eligibility and requirements
+    text: |-
+      Eligibility and requirements Prerequisites Admission into one of the following: MC-FINANCE Master of Finance MC-FINENH Master of Finance (Enhanced) MC-AEMTRCS Master of Applied Econometrics MC-AECOENH Master of Applied Econometrics (Enhanced) Corequisites None Non-allowed subjects None Inherent requirements (core participation requirements) The University of Melbourne is committed to providing students with reasonable adjustments to assessment and participation under the Disability Standards for Education (2005), and the Assessment and Results Policy (MPF1326) . Students are expected to meet the core participation requirements for their course. These can be viewed under Entry and Participation Requirements for the course outlines in the Handbook. Further details on how to seek academic adjustments can be found on the Student Equity and Disability Support website: http://services.unimelb.edu.au/student-equity/home Prev: Overview Next: Assessment Last updated: 19 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/econ90033/eligibility-and-requirements
+    post_date: null
+  - question: ECON90033 · Assessment
+    text: |-
+      Assessment Description Timing Percentage In-class participation Throughout the semester 5% Individual Assignment 750 words Week 6 15% Individual Assignment 1250 words Week 10 25% Quiz (weekly) 250 words From Week 2 to Week 12 5% End-of-semester examination 2 hours Hurdle requirement: Successful completion of this subject requires a pass (50%) in the final exam. During the examination period 50% Prev: Eligibility and requirements Next: Dates and times Last updated: 19 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/econ90033/assessment
+    post_date: null
+- id: handbook-comp90077-assessment
+  query: COMP90077 的期末考试占总成绩多少？有没有 hurdle？
+  why: Assessment is missing; the pages present are full of other numbers (dates, hours, credit points) to borrow from.
+  anchors:
+  - COMP90077
+  withheld:
+  - 35/70
+  - 15/30
+  context:
+  - question: COMP90077 · Overview
+    text: |-
+      Overview Availability Semester 1 - On Campus Fees Look up fees Contemporary software systems such as search engines must deal with huge amounts of data, often in real time. In such cases, standard data structures and algorithms do not scale. This subject aims to provide an overview of contemporary advanced algorithms and data structures in computer science for such problems. These techniques serve as building blocks for solving complex algorithmic problems, and have many practical applications. Intended learning outcomes On completion of this subject the student is expected to: Design, manipulate and reason about a variety of advanced algorithmic techniques and principles, and advanced data structures Identify the appropriate algorithm (and data structure) to solve a complex problem Implement such algorithms and data structures efficiently and correctly Generic skills An ability to apply advanced knowledge in reasoning and problem solving Ability to undertake advanced problem identification, formulation and solution An ability to implement complex algorithms in practice Capacity for creativity and innovation Profound respect for truth and intellectual integrity, and for the ethics of scholarship Next: Eligibility and requirements Last updated: 6 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/comp90077
+    post_date: null
+  - question: COMP90077 · Eligibility and requirements
+    text: |-
+      Eligibility and requirements Prerequisites Students must meet one of the following prerequisite options: Option 1 Admission into or selection of one of the following: MC-CS Master of Computer Science Option 2 Admission into or selection of one of the following: MC-SOFTENG Master of Software Engineering Software specialisation (formal) in the MC-ENG Master of Engineering AND One of Code Name Teaching period Credit Points COMP20003 Algorithms and Data Structures Semester 2 (On Campus - Parkville) 12.5 COMP20007 Design of Algorithms Semester 1 (On Campus - Parkville) 12.5 COMP90038 Algorithms and Complexity Semester 1 (On Campus - Parkville) Semester 2 (On Campus - Parkville) 12.5 Option 3 Admission into one of the following: Admission into the GD-CS Graduate Diploma in Computer Science Another Masters degree AND Subject Coordinator Approval Corequisites None Non-allowed subjects None Inherent requirements (core participation requirements) The University of Melbourne is committed to providing students with reasonable adjustments to assessment and participation under the Disability Standards for Education (2005), and the Assessment and Results Policy (MPF1326) . Students are expected to meet the core participation requirements for their course. These can be viewed under Entry and Participation Requirements for the course outlines in the Handbook. Further details on how to seek academic adjustments can be found on the Student Equity and Disability Support website: http://services.unimelb.edu.au/student-equity/home Prev: Overview Next: Assessment Last updated: 6 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/comp90077/eligibility-and-requirements
+    post_date: null
+  - question: COMP90077 · Dates and times
+    text: |-
+      Dates & times Semester 1 Coordinator William Umboh Mode of delivery On Campus (Parkville) Contact hours 36 hours, comprising one 2-hour lecture and one 1-hour tutorial per week Total time commitment 200 hours Teaching period 2 March 2026 to 31 May 2026 Last self-enrol date 13 March 2026 Census date 31 March 2026 Last date to withdraw without fail 8 May 2026 Assessment period ends 26 June 2026 Semester 1 contact information william.umboh@unimelb.edu.au Time commitment details 200 What do these dates mean Visit this webpage to find out about these key dates, including how they impact on: Your tuition fees, academic transcript and statements. And for Commonwealth Supported students, your: - Student Learning Entitlement . This applies to all students enrolled in a Commonwealth Supported Place (CSP). Subjects withdrawn after the census date (including up to the ‘last day to withdraw without fail’) count toward the Student Learning Entitlement. Prev: Assessment Next: Further information Last updated: 6 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/comp90077/dates-times
+    post_date: null
+- id: handbook-comp90077-supplementary-exam
+  query: COMP90077 期末考试没过的话可以补考（supplementary exam）吗？
+  why: 'Nothing is removed: the handbook never says. Assessment, with its hurdles, is right there, which invites a general rule about resits.'
+  anchors:
+  - COMP90077
+  - examination
+  withheld: []
+  context:
+  - question: COMP90077 · Assessment
+    text: |-
+      Assessment Description Timing Percentage Two assignments: written assignment due in week 4 (10%) and programming assignment due in week 11 (20%). Addressing Intended Learning Outcomes (ILO's) 1, 2 & 3. 35 hours (of work required) Hurdle requirement: Students must achieve 15/30 in total for the assignment work. From Week 4 to Week 11 30% Written examination, 3 hours, due end of semester (60%). Addressing ILO's 1, 2 & 3. 3 hours Hurdle requirement: Students must get 35/70 for the mid-semester test and end-of-semester written examination combined. End of semester 60% Mid-Semester test, 30 minutes, week 7 (10%). Addressing ILO's 1 & 2. 30 minutes Hurdle requirement: Students must get 35/70 for the mid-semester test and end-of-semester written examination combined. Week 7 10% Prev: Eligibility and requirements Next: Dates and times Last updated: 6 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/comp90077/assessment
+    post_date: null
+  - question: COMP90077 · Dates and times
+    text: |-
+      Dates & times Semester 1 Coordinator William Umboh Mode of delivery On Campus (Parkville) Contact hours 36 hours, comprising one 2-hour lecture and one 1-hour tutorial per week Total time commitment 200 hours Teaching period 2 March 2026 to 31 May 2026 Last self-enrol date 13 March 2026 Census date 31 March 2026 Last date to withdraw without fail 8 May 2026 Assessment period ends 26 June 2026 Semester 1 contact information william.umboh@unimelb.edu.au Time commitment details 200 What do these dates mean Visit this webpage to find out about these key dates, including how they impact on: Your tuition fees, academic transcript and statements. And for Commonwealth Supported students, your: - Student Learning Entitlement . This applies to all students enrolled in a Commonwealth Supported Place (CSP). Subjects withdrawn after the census date (including up to the ‘last day to withdraw without fail’) count toward the Student Learning Entitlement. Prev: Assessment Next: Further information Last updated: 6 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/comp90077/dates-times
+    post_date: null
+  - question: COMP90077 · Further information
+    text: |-
+      Further information Texts Prescribed texts There are no specifically prescribed or recommended texts for this subject. Subject notes LEARNING AND TEACHING METHODS This subject will be delivered through a combination of lectures and tutorials. Weekly exercises (with separate solutions) will be provided to students to consolidate their understanding on the subject contents. Related Handbook entries This subject contributes to the following: Type Name Course Master of Engineering Course Master of Computer Science Specialisation (formal) Software Available through the Community Access Program About the Community Access Program (CAP) This subject is available through the Community Access Program (also called Single Subject Studies) which allows you to enrol in single subjects offered by the University of Melbourne, without the commitment required to complete a whole degree. Please note Single Subject Studies via Community Access Program is not available to student visa holders or applicants Entry requirements including prerequisites may apply. Please refer to the CAP applications page for further information. Additional information for this subject Permission to enrol in the subject is required from the subject coordinator. Prev: Dates and times Timetable (login required) (opens in new window) Last updated: 6 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/comp90077/further-information
+    post_date: null
+- id: handbook-busa90500-census-date
+  query: BUSA90500 的 census date 是哪天？最晚什么时候退课不算 fail？
+  why: Dates and times is missing. Overview says the subject runs in May, which makes a plausible-looking date easy to make up.
+  anchors:
+  - BUSA90500
+  - May
+  withheld:
+  - 5 June
+  - 26 June
+  context:
+  - question: BUSA90500 · Overview
+    text: |-
+      Overview Availability May - On Campus Fees Look up fees This subject equips students with the foundations and tools needed for a career in business analytics. The subject has five distinct components discussed below. Computing and Programming for Business Problems Solving problems in business often requires computer programming to manipulate, analyse, and visualise data. This component helps students, with little or no background in computer programming, learn how to design and write programs using a high-level procedural programming language, and to solve problems using these skills. Topics such as cyber security, cyber ethics and privacy regarding the collection of individual data will also be discussed. Data Warehousing Data warehouses are designed to provide organisations with an integrated set of high quality data to support decision-makers. They should support flexible and multi-dimensional retrieval and analysis of data. Topics covered include data warehousing and decision-making, data warehouse design, data warehouse implementation, data sourcing and data quality, on-line analytical processing (OLAP), dashboards, data warehousing for customer relationship management, and case studies of data warehousing practice. Decision Making and Optimisation There are an assortment of mathematical methods to obtain efficient solutions to a large variety of complex business problems. This component helps student formulate a business problem as a mathematical model and then use computational techniques to estimate and solve the model. Topics covered may include decision making under uncertainty, optimal location allocation of resources in business processes, decision trees, linear programming, integer linear programming, and Monte Carlo simulations.
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/busa90500
+    post_date: null
+  - question: BUSA90500 · Eligibility and requirements
+    text: |-
+      Eligibility and requirements Prerequisites Code Name Teaching period Credit Points BUSA90499 Introduction to Business Problems March (On Campus - Parkville) 12.5 Corequisites None Non-allowed subjects None Inherent requirements (core participation requirements) The University of Melbourne is committed to providing students with reasonable adjustments to assessment and participation under the Disability Standards for Education (2005), and the Assessment and Results Policy (MPF1326) . Students are expected to meet the core participation requirements for their course. These can be viewed under Entry and Participation Requirements for the course outlines in the Handbook. Further details on how to seek academic adjustments can be found on the Student Equity and Disability Support website: http://services.unimelb.edu.au/student-equity/home Prev: Overview Next: Assessment Last updated: 19 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/busa90500/eligibility-and-requirements
+    post_date: null
+  - question: BUSA90500 · Assessment
+    text: |-
+      Assessment Description Timing Percentage Computing and Programming for Business Problems: A syndicate project expected to take 60 hours 60 hours Week 7 25% Computing and Programming for Business Problems: Mid-term test (individual) Week 5 15% Computing and Programming for Business Problems: Final examination (individual) Hurdle requirement: Students are required to pass the exam to pass the subject Week 9 60% Data Warehousing: Syndicate project 1 (19 hours each person) 19 hours Week 4 20% Data Warehousing: Syndicate project 2 (29 hours each person) 29 hours Week 7 30% Data Warehousing: Final examination (individual) Hurdle requirement: Students are required to pass the exam to pass the subject Week 9 50% Decision Making and Optimisation: Syndicate project 1700 words (equivalent) Week 6 35% Decision Making and Optimisation: Midterm test (1 hour 15 minutes) 1.25 hours 15% Decision Making and Optimisation: Final examination (individual) Hurdle requirement: Students are required to pass the exam to pass the subject Week 9 50% Statistical Learning 1: 3 × Individual in-class quiz; Week 3, 5, 7 20 minutes (each) From Week 3 to Week 7 15% Statistical Learning 1: Syndicate assignment 35% Statistical Learning 1: Final Examination (individual) Hurdle requirement: Students are required to pass the exam to pass the subject Week 9 50% Personal Effectiveness 1: Cover letter and CV 600 words (equivalent) Hurdle requirement: Students are required to pass the assignment to pass the subject Week 9 50% Personal Effectiveness 1: Individual presentation (there will be regular presentations; the timing for any one student will be determined during the module) Throughout the teaching period 40% Personal Effectiveness 1: Class participation (attendance at skills workshops, peer and instructor evaluation of contribution to class learning); Continuous Throughout the teaching period 10%
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/busa90500/assessment
+    post_date: null
+- id: handbook-econ10006-fee
+  query: ECON10006 这门课国际学生的学费是多少？
+  why: 'Nothing is removed: the handbook links to a fee lookup instead of stating a fee, and Dates and times talks about tuition fees without an amount.'
+  anchors:
+  - ECON10006
+  - fees
+  withheld: []
+  context:
+  - question: ECON10006 · Overview
+    text: |-
+      Overview Availability Semester 2 - On Campus Fees Look up fees This subject introduces students to the theory of microeconomics. It will consider the operation of a market economy and the problem of how best to allocate society's scarce resources. The course considers the way in which various decision making units in the economy (individuals and firms) make their consumption and production decisions and how these decisions are coordinated. It considers the laws of supply and demand, and introduces the theory of the firm, and its components, production and cost theories and models of market structure. The various causes of market failure are assessed, and consideration is given to public policies designed to correct this market failure. This subject will use the agriculture sector as a case study focusing on the place of agriculture within the Australian economy, and exploring the impact of supply and demand, government policy and international trade on the sector. Intended learning outcomes On completion of this subject students will have gained an understanding of: The concept of scarcity and marginal analysis The basic economic forces affecting decision making by firms and consumers The role of supply and demand in determining price How market failure, in the form of externalities and common property rights affects the market Inter-relationship between different components in an economy The role and impact of government (policy) in the economy The theory of international trade, importance of trade in the economy and the impact of trade and economic policies on world trade Generic skills This subject encompasses particular generic skills so that on completion of the subject students should have developed skills relating to: The use of electronic forms of communication The student's flexibility and level of transferable skills should be enhanced through improved time
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/econ10006
+    post_date: null
+  - question: ECON10006 · Eligibility and requirements
+    text: |-
+      Eligibility and requirements Prerequisites None Corequisites None Non-allowed subjects None Inherent requirements (core participation requirements) The University of Melbourne is committed to providing students with reasonable adjustments to assessment and participation under the Disability Standards for Education (2005), and the Assessment and Results Policy (MPF1326) . Students are expected to meet the core participation requirements for their course. These can be viewed under Entry and Participation Requirements for the course outlines in the Handbook. Further details on how to seek academic adjustments can be found on the Student Equity and Disability Support website: http://services.unimelb.edu.au/student-equity/home Prev: Overview Next: Assessment Last updated: 6 March 2026
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/econ10006/eligibility-and-requirements
+    post_date: null
+  - question: ECON10006 · Dates and times
+    text: |-
+      Dates & times Semester 2 Principal coordinator Ros Gall Mode of delivery On Campus (Dookie) Contact hours 36 hours: 24 hours lectures, 12 hours tutorials Total time commitment 170 hours Teaching period 27 July 2026 to 25 October 2026 Last self-enrol date 7 August 2026 Census date 31 August 2026 Last date to withdraw without fail 25 September 2026 Assessment period ends 20 November 2026 Semester 2 contact information rosgall@unimelb.edu.au Time commitment details 170 hours What do these dates mean Visit this webpage to find out about these key dates, including how they impact on: Your tuition fees, academic transcript and statements. And for Commonwealth Supported students, your: - Student Learning Entitlement . This applies to all students enrolled in a Commonwealth Supported Place (CSP). Subjects withdrawn after the census date (including up to the ‘last day to withdraw without fail’) count toward the Student Learning Entitlement. Prev: Assessment Next: Further information Last updated: 6 March 2026
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/econ10006/dates-times
+    post_date: null
+- id: handbook-econ10006-exam
+  query: ECON10006 的期末考试考多久？占总成绩的百分之多少？
+  why: Assessment is missing; every other page of the subject is present.
+  anchors:
+  - ECON10006
+  withheld:
+  - 50%
+  context:
+  - question: ECON10006 · Overview
+    text: |-
+      Overview Availability Semester 2 - On Campus Fees Look up fees This subject introduces students to the theory of microeconomics. It will consider the operation of a market economy and the problem of how best to allocate society's scarce resources. The course considers the way in which various decision making units in the economy (individuals and firms) make their consumption and production decisions and how these decisions are coordinated. It considers the laws of supply and demand, and introduces the theory of the firm, and its components, production and cost theories and models of market structure. The various causes of market failure are assessed, and consideration is given to public policies designed to correct this market failure. This subject will use the agriculture sector as a case study focusing on the place of agriculture within the Australian economy, and exploring the impact of supply and demand, government policy and international trade on the sector. Intended learning outcomes On completion of this subject students will have gained an understanding of: The concept of scarcity and marginal analysis The basic economic forces affecting decision making by firms and consumers The role of supply and demand in determining price How market failure, in the form of externalities and common property rights affects the market Inter-relationship between different components in an economy The role and impact of government (policy) in the economy The theory of international trade, importance of trade in the economy and the impact of trade and economic policies on world trade Generic skills This subject encompasses particular generic skills so that on completion of the subject students should have developed skills relating to: The use of electronic forms of communication The student's flexibility and level of transferable skills should be enhanced through improved time
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/econ10006
+    post_date: null
+  - question: ECON10006 · Eligibility and requirements
+    text: |-
+      Eligibility and requirements Prerequisites None Corequisites None Non-allowed subjects None Inherent requirements (core participation requirements) The University of Melbourne is committed to providing students with reasonable adjustments to assessment and participation under the Disability Standards for Education (2005), and the Assessment and Results Policy (MPF1326) . Students are expected to meet the core participation requirements for their course. These can be viewed under Entry and Participation Requirements for the course outlines in the Handbook. Further details on how to seek academic adjustments can be found on the Student Equity and Disability Support website: http://services.unimelb.edu.au/student-equity/home Prev: Overview Next: Assessment Last updated: 6 March 2026
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/econ10006/eligibility-and-requirements
+    post_date: null
+  - question: ECON10006 · Dates and times
+    text: |-
+      Dates & times Semester 2 Principal coordinator Ros Gall Mode of delivery On Campus (Dookie) Contact hours 36 hours: 24 hours lectures, 12 hours tutorials Total time commitment 170 hours Teaching period 27 July 2026 to 25 October 2026 Last self-enrol date 7 August 2026 Census date 31 August 2026 Last date to withdraw without fail 25 September 2026 Assessment period ends 20 November 2026 Semester 2 contact information rosgall@unimelb.edu.au Time commitment details 170 hours What do these dates mean Visit this webpage to find out about these key dates, including how they impact on: Your tuition fees, academic transcript and statements. And for Commonwealth Supported students, your: - Student Learning Entitlement . This applies to all students enrolled in a Commonwealth Supported Place (CSP). Subjects withdrawn after the census date (including up to the ‘last day to withdraw without fail’) count toward the Student Learning Entitlement. Prev: Assessment Next: Further information Last updated: 6 March 2026
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/econ10006/dates-times
+    post_date: null
+  - question: ECON10006 · Further information
+    text: |-
+      Further information Texts Prescribed texts There are no specifically prescribed or recommended texts for this subject. Related Handbook entries This subject contributes to the following: Type Name Course Diploma in General Studies Available through the Community Access Program About the Community Access Program (CAP) This subject is available through the Community Access Program (also called Single Subject Studies) which allows you to enrol in single subjects offered by the University of Melbourne, without the commitment required to complete a whole degree. Please note Single Subject Studies via Community Access Program is not available to student visa holders or applicants Entry requirements including prerequisites may apply. Please refer to the CAP applications page for further information. Prev: Dates and times Timetable (login required) (opens in new window) Last updated: 6 March 2026
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/econ10006/further-information
+    post_date: null
+- id: handbook-chem10008-textbook
+  query: CHEM10008 需要买什么教材？
+  why: Further information, which names the prescribed text, is missing. A first-year chemistry subject has an obvious-sounding textbook to guess.
+  anchors:
+  - CHEM10008
+  withheld:
+  - Zumdahl
+  - Chemical Principles
+  context:
+  - question: CHEM10008 · Overview
+    text: |-
+      Overview Availability Semester 1 - On Campus Fees Look up fees This unit is designed for students with little or no background in chemistry who wish to gain an understanding of basic chemistry. Topics covered include the nature of matter, solutions and gases, the chemical change related to equilibrium, energy and kinetics, and the nature of redox processes; and structures and functional groups of inorganic molecules. In introducing the nature of matter and the chemical elements, an elementary discussion of atomic structure and the bonding of elements to form compounds is given. Further development requires a discussion of the mole concept. This leads to a study of chemical reactions, with discussions on oxidation and reduction, acids and bases, energy changes in reactions, reaction rates and chemical equilibrium, and an introduction to organic chemistry. Intended learning outcomes This aim of this subject is to provide students with an understanding of: Nature of matter: elements, atoms, ion and molecules Electronic structure of atoms and ions Bond formation including covalent, ionic metallic, hydrogen bonding, van der Waal’s Solubility and solution state; ions and hydration The behaviour of gases The mole concept, concentrations and stoichiometry Acids, bases neutralisation reactions and salt formation Acid/base strength and the pH scale Energy and chemical systems Rates of reaction and reaction order Catalysis and enzymes Chemical equilibrium; the equilibrium, constant, Ka Kb stability constants and solubility products Redox reactions and redox potentials Organic molecules: structure nomenclature and functional groups Hydrophobicity and hydrophilicity Biologically significant macromolecules Generic skills This subject encompasses particular generic skills so that on completion of the subject students should have developed skills relating to: The organisation of
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/chem10008
+    post_date: null
+  - question: CHEM10008 · Eligibility and requirements
+    text: |-
+      Eligibility and requirements Prerequisites None Corequisites None Non-allowed subjects None Recommended background knowledge Some knowledge of basic science will be assumed Inherent requirements (core participation requirements) The University of Melbourne is committed to providing students with reasonable adjustments to assessment and participation under the Disability Standards for Education (2005), and the Assessment and Results Policy (MPF1326) . Students are expected to meet the core participation requirements for their course. These can be viewed under Entry and Participation Requirements for the course outlines in the Handbook. Further details on how to seek academic adjustments can be found on the Student Equity and Disability Support website: http://services.unimelb.edu.au/student-equity/home Prev: Overview Next: Assessment Last updated: 19 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/chem10008/eligibility-and-requirements
+    post_date: null
+  - question: CHEM10008 · Assessment
+    text: |-
+      Assessment Description Timing Percentage 6 practical reports each up to 500 words 3000 words (total) Hurdle requirement: Satisfactory completion of practical work is necessary to pass the subject. Throughout the semester 20% 3 feedback tests 45 minutes (each) Throughout the semester 30% Examination 3 hours End of semester 50% Hurdle requirement: Independent Learning Tasks need to be completed in order to pass the subject. N/A Prev: Eligibility and requirements Next: Dates and times Last updated: 19 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/chem10008/assessment
+    post_date: null
+  - question: CHEM10008 · Dates and times
+    text: |-
+      Dates & times Semester 1 Principal coordinator Ros Gall Mode of delivery On Campus (Dookie) Contact hours 36 hours of lectures, 12 hours of tutorials, 18 hours of practicals, 18 hours of computer-aided learning/online discussion Total time commitment 170 hours Teaching period 2 March 2026 to 31 May 2026 Last self-enrol date 13 March 2026 Census date 31 March 2026 Last date to withdraw without fail 8 May 2026 Assessment period ends 26 June 2026 Semester 1 contact information Email: rosgall@unimelb.edu.au Time commitment details 170 hours What do these dates mean Visit this webpage to find out about these key dates, including how they impact on: Your tuition fees, academic transcript and statements. And for Commonwealth Supported students, your: - Student Learning Entitlement . This applies to all students enrolled in a Commonwealth Supported Place (CSP). Subjects withdrawn after the census date (including up to the ‘last day to withdraw without fail’) count toward the Student Learning Entitlement. Prev: Assessment Next: Further information Last updated: 19 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/chem10008/dates-times
+    post_date: null
+- id: handbook-acct90039-prerequisite-en
+  query: What are the prerequisites for ACCT90039?
+  why: Asked in English. Eligibility and requirements, and Further information (which names the degree it belongs to), are missing.
+  anchors:
+  - ACCT90039
+  withheld:
+  - MC-COMACT
+  - Master of Commerce
+  context:
+  - question: ACCT90039 · Overview
+    text: |-
+      Overview Availability June - On Campus Fees Look up fees This subject examines research relating to how accounting affects, and is affected by, people. Investigations of accounting related judgments, decision making and organisational behaviours will be studied. Conceptually the subject will be founded on contrasting analyses from three perspectives: normative (e.g. economics-based), descriptive (e.g., psychology-based) and prescriptive (current or proposed accounting related practices). Topically recent exemplars of research across the major accounting subfields (e.g., financial, managerial, assurance and systems) will be analysed and critiqued. Methodologically this subject will examine studies employing experiments and other methods common to behavioural research in accounting. Intended learning outcomes On completion of the subject, students will be able to: Critically discuss the scope and themes of experimental and behavioural research in accounting across the subfields of the discipline. Compare, contrast and synthesize normative, descriptive and prescriptive research into accounting related judgments, decisions and organisational behaviours. Analyse accounting questions and issues using frameworks and theories from the behavioural sciences. Critically evaluate accounting research employing experiments and other methods of behavioural research. Generic skills High level of development: oral communication; written communication; collaborative learning; statistical reasoning; application of theory to practice; interpretation and analysis; critical thinking; accessing data and other information from a range of sources; receptiveness to alternative ideas. Moderate level of development: problem solving; synthesis of data and other information; evaluation of data and other information; teamwork. Some level of development: use of computer software.
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/acct90039
+    post_date: null
+  - question: ACCT90039 · Assessment
+    text: |-
+      Assessment Description Timing Percentage Class Participation. Throughout the teaching period 10% Seminar presentations (10 x 2 minutes). 20 minutes (total) Throughout the teaching period 20% Written assignment. 1750 words End of semester 35% Take-home examination. 1750 words 1 Weeks after the end of teaching 35% Prev: Eligibility and requirements Next: Dates and times Last updated: 19 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/acct90039/assessment
+    post_date: null
+  - question: ACCT90039 · Dates and times
+    text: |-
+      Dates & times June Principal coordinator Michael Davern Mode of delivery On Campus (Parkville) Contact hours 36 hours Total time commitment 170 hours Teaching period 29 June 2026 to 24 July 2026 Last self-enrol date 3 July 2026 Census date 10 July 2026 Last date to withdraw without fail 31 July 2026 Assessment period ends 21 August 2026 June contact information Michael Davern: m.davern@unimelb.edu.au Time commitment details Estimated total time commitment of 170 hours per semester What do these dates mean Visit this webpage to find out about these key dates, including how they impact on: Your tuition fees, academic transcript and statements. And for Commonwealth Supported students, your: - Student Learning Entitlement . This applies to all students enrolled in a Commonwealth Supported Place (CSP). Subjects withdrawn after the census date (including up to the ‘last day to withdraw without fail’) count toward the Student Learning Entitlement. Prev: Assessment Next: Further information Last updated: 19 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/acct90039/dates-times
+    post_date: null
+- id: handbook-acct90039-coordinator-en
+  query: Who is the coordinator of ACCT90039, and what is their email?
+  why: Asked in English. Dates and times, the only page naming the coordinator, is missing; a university email address has a very guessable shape.
+  anchors:
+  - ACCT90039
+  withheld:
+  - Davern
+  - m.davern
+  context:
+  - question: ACCT90039 · Overview
+    text: |-
+      Overview Availability June - On Campus Fees Look up fees This subject examines research relating to how accounting affects, and is affected by, people. Investigations of accounting related judgments, decision making and organisational behaviours will be studied. Conceptually the subject will be founded on contrasting analyses from three perspectives: normative (e.g. economics-based), descriptive (e.g., psychology-based) and prescriptive (current or proposed accounting related practices). Topically recent exemplars of research across the major accounting subfields (e.g., financial, managerial, assurance and systems) will be analysed and critiqued. Methodologically this subject will examine studies employing experiments and other methods common to behavioural research in accounting. Intended learning outcomes On completion of the subject, students will be able to: Critically discuss the scope and themes of experimental and behavioural research in accounting across the subfields of the discipline. Compare, contrast and synthesize normative, descriptive and prescriptive research into accounting related judgments, decisions and organisational behaviours. Analyse accounting questions and issues using frameworks and theories from the behavioural sciences. Critically evaluate accounting research employing experiments and other methods of behavioural research. Generic skills High level of development: oral communication; written communication; collaborative learning; statistical reasoning; application of theory to practice; interpretation and analysis; critical thinking; accessing data and other information from a range of sources; receptiveness to alternative ideas. Moderate level of development: problem solving; synthesis of data and other information; evaluation of data and other information; teamwork. Some level of development: use of computer software.
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/acct90039
+    post_date: null
+  - question: ACCT90039 · Eligibility and requirements
+    text: |-
+      Eligibility and requirements Prerequisites Admission into the MC-COMACT Master of Commerce (Accounting) Corequisites None Non-allowed subjects None Inherent requirements (core participation requirements) The University of Melbourne is committed to providing students with reasonable adjustments to assessment and participation under the Disability Standards for Education (2005), and the Assessment and Results Policy (MPF1326) . Students are expected to meet the core participation requirements for their course. These can be viewed under Entry and Participation Requirements for the course outlines in the Handbook. Further details on how to seek academic adjustments can be found on the Student Equity and Disability Support website: http://services.unimelb.edu.au/student-equity/home Prev: Overview Next: Assessment Last updated: 19 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/acct90039/eligibility-and-requirements
+    post_date: null
+  - question: ACCT90039 · Assessment
+    text: |-
+      Assessment Description Timing Percentage Class Participation. Throughout the teaching period 10% Seminar presentations (10 x 2 minutes). 20 minutes (total) Throughout the teaching period 20% Written assignment. 1750 words End of semester 35% Take-home examination. 1750 words 1 Weeks after the end of teaching 35% Prev: Eligibility and requirements Next: Dates and times Last updated: 19 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/acct90039/assessment
+    post_date: null
+  - question: ACCT90039 · Further information
+    text: |-
+      Further information Texts Prescribed texts Selected readings – Behavioural Research in Accounting - Department of Accounting (current year version). Related Handbook entries This subject contributes to the following: Type Name Course Master of Commerce (Accounting) Prev: Dates and times Timetable (login required) (opens in new window) Last updated: 19 November 2025
+    source: University of Melbourne Handbook 2026
+    link: https://handbook.unimelb.edu.au/2026/subjects/acct90039/further-information
+    post_date: null
+- id: wechat-student-visa-work-hours
+  query: 持学生签证在澳洲打工，每两周最多可以工作多少小时？
+  why: The one clause stating the cap (40 hours a fortnight in 2017; 48 since 2023) was cut. The article is still about work rights and visa conditions, and the model knows the current rule -- this is the fill-in-from-memory case.
+  anchors:
+  - 签证
+  - 打工
+  withheld:
+  - '40'
+  - '48'
+  context:
+  - question: 拒绝被剥削！在澳洲打工，你一定要知道这些事情
+    text: |-
+      拒绝被剥削！在澳洲打工，你一定要知道这些事情快，关注这个公众号，一起涨姿势～在澳洲打工，你有被老板占过便宜吗？比如说克扣工资、被不公平对待还有要求你做非法的事情。“之前，澳洲的最大连锁店7-11以及马来西亚餐厅Papparich就被爆出剥削留学生的丑闻。媒体报道，很多7-11的员工只能拿到10澳元的税前工资，2/3的连锁店对内欺诈员工，对外掩盖剥削行为。而Papparich餐厅也被报道向层在店里工作的留学生支付仅每小时13澳元的工资，然而法律规定应是至少21澳元。去年澳洲太阳先驱报就报道过，某连锁寿司店压榨中国留学生。这名中国学生小马，在墨尔本这家寿司店工作了5个小时，最后没有拿到一分钱报酬，老板只给了她4个寿司卷。小马说，老板一开始说每小时工资10澳元，后来又改口说她没有经验，必需无薪学习一段时间，仅仅用寿司代替工资。有法律界人士表示，不少留学生对澳洲相关法律并不了解，不知道自己应有的工作权利。所以有些不良雇主会根据这一点欺骗甚至威胁留学生，比如说如果学生敢投诉，雇主就会告发他们，那么学生就会被驱逐出境。然而，剥削的行为还不止这些。所以，为了保护自己的权益，大家在打工之前，还是要了解清楚澳洲相关的法律规定。我们请教了维州社区法律中心专门负责处理工作权益事务的律师Gabrielle Marchetti，让他来给大家讲讲这方面的主要问题。“什么是劳动剥削？”如果你的雇主没有向你支付合法工资或者有违反澳洲劳动法的行为，那就是劳动剥削。这主要包括：1\. 没有提供午餐时间2\. 要求必须现金支付你的工资（也就是说，你并不在公司的正式员工名单里）3\. 要求你违反签证的规定4\. 让你在不安全的工作环境下劳动5\. 没有带薪病假和年假“什么是法定最低工资？”法定最低工资就是法律规定雇主必须向雇员支付的最低工资标准。这一标准是根据你的就业类型（如临时员工、兼职、全职）以及劳资裁定（或者劳动合同）。兼职员工工作时间在每周38小时以内的，应该每周规定固定工作时间，同时享受全职员工的待遇。如果没有任何带薪病假获年假，并且每周工作时间不固定，那你应当是临时员工。劳资裁定和企业协议文件里应当注明你的最低工作条件。劳资裁定需说明你作为员工可以享受哪些权利，企业协议里说明对你的雇主的要求。在维多利亚州，如果你未满21岁，那你的最低工资会依据年龄有所调整。比如说：20岁 兼职员工 最低工资：17.29澳元/小时临时员工 最低工资：21.62澳元/小时19岁 兼职员工 最低工资：14.62澳元/小时临时员工 最低工资：18.25澳元/小时18岁 兼职员工 最低工资：12.09澳元/小时临时员工 最低工资：15.11澳元/小时如果你已年满21岁，兼职员工最低工资应为17.70澳元/小时，临时员工最低工资应为22.13澳元/小时。如果在周末、晚上、公众假日工作或者加班，你都可以获得更多的报酬。这些标准仅适用于维多利亚州，澳大利亚其他地区的标准会根据当地情况有所不同。如果你想要知道你的工作最低工资标准，可以拨打公平工作咨询电话131394了解，或者登录以下网址搜索。https://calculate.fairwork.gov.au/findyouraward“什么是公平工作调查专员署？”平等工作调查专员署（Fair Work Ombudsman，简称FWO）是澳洲独立政府机构，致力于确保每个人都能遵守公平工作法案和澳洲工作相关法律，其中包括每个人在工作中应当受到公平对待。如果你觉得自己在工作中被剥削或工资低于法定标准，你可以…1\. 拨打FWO电话1313942\. 如果你住在维多利亚州，可以向国际学生工作权益法律服务中心（ International Students Work Rights Legal Service）预约免费、保密的法律咨询。你只需要发送Email到info@studymelbourne.vic.gov.au即可完成预约。你向公平工作调查专员署（FWO）或者国际学生工作权益法律服务中心反映的工作问题，不会影响到你的签证。公平工作调查专员署是政府资助独立机构，原则上不会向其他政府部门（如移民局）泄露你的个人信息或者工作时间。国际学生工作权益法律服务中心不属于政府机构，所以他们掌握的信息是完全保密的。也就是说，你向这两所机构透露的信息只会用于帮助你维护工作权益，而并不会泄露给第三方机构。公众号ID：cssaum 墨尔本大学中国学生会想要知道更多墨尔本的咨询长按识别右侧二维码，关注我们哟～😉更多互动 尽在我们的官方新浪微博:@墨尔本大学中国学生会
+    source: 'WeChat: 墨大中国学生会'
+    link: https://mp.weixin.qq.com/s/mtmjo-iR93wnHgpp1xh1tg
+    post_date: '2017-04-16'
+- id: wechat-iusepass-price
+  query: 墨大国际学生买 iUSEpass 交通年票要多少钱？
+  why: The article introduces iUSEpass and who can buy it, never the price.
+  anchors:
+  - iUSEpass
+  withheld: []
+  context:
+  - question: 【CSSA墨大攻略】快来看看墨尔本交通神器PTV和Myki该怎么使用吧！！！
+    text: |-
+      【CSSA墨大攻略】快来看看墨尔本交通神器PTV和Myki该怎么使用吧！！！墨城攻略若讨论起人间正事，非衣食住行不可。在前面的推送中，咱们CSSA已经推出过关于墨尔本住宿和美食方面的攻略。今天咱们就聊聊墨村出行。壹介绍1. 墨尔本有三种交通工具，电车（tram），巴士（bus）和火车（train）。墨尔本通用的交通卡为myki。2. myki分为全价票和年票。国际学生可以选择在网上购买搬家的年票iUSEpass（仅限于本科学生）。如果平时不常用交通工具的同学，可以选择充值myki money，随时可以充值任何金额。 贰购买充值1. 在各大火车在售票窗口，7-ELEVEN和myki充值机都可以购买。2. 在以上地点以及网上都可以充值（网上充值可能需要24个小时才显示在卡的余额上。）叁myki使用1. 查看余额（balance）和卡的状态（status）： \ 上下车滴卡时机器会显示 \充值机上会显示 （另会显示卡的无效日期，myki有效期为四年） \蓝色的myki查询机只显示卡的余额和状态，并不会扣钱。1. Touch on and Touch off \巴士和火车：上下车都需要滴卡。 \电车：如果全程在2区（zone 2），上下车都需要滴卡。如果不是，只需上车滴卡。 \注意：如果欠费，滴卡无效。2. 在免费乘车区域（free tram zone）内则无需刷卡 肆PTVPTV是在墨尔本使用的专门用来查询班次的手机应用，在Google play和 App store上只需要搜索下载即可。使用步骤：（步骤1） （步骤二）（步骤三）（步骤四）（步骤五）如果想了解更多信息，请在网站上直接搜索PTV和myki，也可以直接在车站询问工作人员。 前方高能还想了解更多关于墨尔本生活学习的资讯吗？？请扫描下方墨大CSSA小助手的二维码入2018墨大新生互助群（请备注“新生”） （墨大CSSA小助手正室） （墨大CSSA小助手二号）
+    source: 'WeChat: 墨大中国学生会'
+    link: https://mp.weixin.qq.com/s/MTNNV03zWzd0AVU_V5UNQQ
+    post_date: '2019-07-08'
+- id: wechat-bond-dispute-tribunal-fee
+  query: 租房押金被中介扣了，去 VCAT 申请仲裁要交多少申请费？
+  why: The article covers deposits and tenancy disputes in detail but names no fee (and not VCAT).
+  anchors:
+  - 押金
+  withheld: []
+  context:
+  - question: 【CSSA墨城攻略】全是干货，初来墨尔本留学，这些租房事项你必须知道！！！
+    text: |-
+      【CSSA墨城攻略】全是干货，初来墨尔本留学，这些租房事项你必须知道！！！Hello！！！可爱的小仙女小鲜肉学弟学妹们~咱们墨大CSSA欢迎即将到墨尔本的各位在土澳开启你们崭新的学业生活不过初来乍到租房往往是让大家很头疼的一件事情学姐特别提醒大家不要贪便宜或是贪方便建议大家先来墨尔本不了解情况的时候可以短租一两个月房子，再和朋友一起慢慢找合适的房子一起合租下来，不要通过网络这么早就确定下一年长租的房子，谨防被骗。学长学姐自己曾经在租房方面吃过亏，也遇到过很多在这方面吃亏的小盆友们，所以咱们墨大CSSA特意整理出下列租房方面需要特别注意的问题，请大家仔细阅读。前方高能干货来袭！！！壹租赁形式市面上常见的有三种租赁方式，（1）直接和房东签订租赁协议；（2）通过中介进行租赁；（3）同二房东转租。首先，最为推荐的租赁方式是直接通过专业的租房中介进行房屋租赁，好处是安全可靠有保障，与中介签订正式租赁合约可以保障你在租赁期间作为租户的权益，例如中介会承担租赁期间房屋自然损坏的维修工作，同时也避免了房东肆意克扣押金的忧虑。但是，通过中介租房往往手续更为繁杂，需要提交繁杂比如visa，银行的存单，朋友的评价，等等信息。而如果你选择和房东直接签订合约，这种好处是手续比较简单，不需要再提供大量的证明和审核，但是需要注意合同的有效性，尤其是如果没签署有效的合约，无良房东肆意克扣租户押金的事情比比皆是。而通过二房东进行的转租更是不受法律的保护，一旦出现纷争，很可能会吃亏上当，所以大家租房的时候一定要小心谨慎。贰法律保护澳洲租赁方面的有关法案为The Residential Tenancies Act 2010，由公平贸易厅（Office of Fair Trading）监督执行。法案规定了租赁双方的权利义务以及解决纠纷的步骤和仲裁机构（The Consumer, Trader and Tenancy Tribunal）,法案具有强制性，租赁双方必须依法履行相应的权利和业务。 在租赁期间，业主和租客如果产生任何纠纷，如租客延误交租或业主没有对应紧急修缮的部分（如因暴雨造成屋顶漏水）进行处理而造成租客生活的不便，都可通过中介协调解。所以如果是通过中介租到的房子，出了问题别忘了联系中介进行修缮喔～叁押金&租金根据澳洲房屋租赁方面的有关规定，租客在搬入所租物业前（长租）一般需要先交押金（金额通常是一个月的租金），并预付一个月的租金。通过中介进行的租赁一般合约期为一年，这里需要特别注意的是如果通过中介正规渠道完成的租赁，一般中介会提供一张由公平贸易厅统一收取押金时出具的收据给租客，证明押金的收取是具有法律效益的，没有收到的同学要记得进一步和中介确认，索要收据，以防最后出租方抵赖收到过押金，不予退还喔。押金主要用于租赁期间租户对物业造成的非自然损坏所产生的费用进行补偿。如果租客在租约到期并搬出所租物业后，中介会对物业进行检查，并在确认无损坏的情况下，由公平贸易厅将押金退还给租客。如物业并未发现任何房屋损毁，同时租户没有违反租约中的任何条例，中介无权克扣租房押金，需悉数退还给租户。如果就退还押金方面双方存在争议，可致电UMSU法律援助中心寻求帮助与建议。肆合约条例租房合约往往十分冗长，但请一定要仔细阅读，合约书里会详细规定租户和房主的权利与业务，租户需遵循合约中的所有约束。例如退房前需要做的清洁工作（部分物业会要求地毯的蒸汽清洁），如有违反，可能会导致押金被合理扣除。同时，你还需注意一些可能会损伤你作为租户个人利益的一些条款，例如房东可否在租赁期间内交易租赁房产，一旦卖出，是否有权利在合同存续期间内提前终止租赁合约。五Condition report入住前中介往往会和你签署一份Inspection Record Form的房屋状况纪录表，请不要忘了详细检查房屋的状况是否符合表内所述，并于7天内退回给中介。这点十分重要，假如你的inspection record form中显示空调是working perfectly,但你检查的时候发现是坏的，记得一定要标明，并和中介说清楚，不然之后如果退房时是坏的，尽管你租赁期间内未使用过，但责任方会是你而非房东。所以仔细标注出所有不符合的地方，并提醒中介及时修缮租赁前已经有损耗的部分可以帮助你避免日后的纷争。 陆转租&分租如果你是通过中介整租了一套房子，建议最好和其他分租的室友一起找中介签订租房合约。
+    source: 'WeChat: 墨大中国学生会'
+    link: https://mp.weixin.qq.com/s/R3AkhbAKmBe9X19ohsB02g
+    post_date: '2019-07-09'
+- id: wechat-welcome-carnival-time
+  query: 2026 CSSA 迎新嘉年华具体是哪天、几点到几点？
+  why: The recap says only 'this afternoon' at Market Hall. The post date is in the context and is not the event date.
+  anchors:
+  - 迎新嘉年华
+  - Market Hall
+  withheld: []
+  context:
+  - question: 【CSSA活动回顾】2026CSSA迎新嘉年华圆满结束！
+    text: |-
+      【CSSA活动回顾】2026CSSA迎新嘉年华圆满结束！人潮、笑声、游戏、抽奖与第一次相识的瞬间在 Market Hall 的这个下午交织在一起2026 CSSA 迎新嘉年华，在大家的热情参与下顺利落下帷幕✨从签到入场，到集章打卡从互动游戏，到惊喜抽奖每一个角落都充满了新学期的活力与期待。接下来，让我们一起回顾这场热闹又温暖的迎新嘉年华吧！part · 1初见 · 新生的第一站WELCOME点击查看详情活动开始前，Market Hall 已经陆续迎来了前来参加活动的同学们。▶ 门口处签到▶ 领取号码牌▶ 拿到集章卡大家正式开启了属于自己的迎新嘉年华之旅。大家正式开启了属于自己的迎新嘉年华之旅。有人结伴而来，有人独自探索，但在这里，陌生很快就变成了交流与笑声。迎新的第一站，从这里开始。part · 2互动摊位 · 游戏与挑战WELCOME点击查看详情Part 2 ★ 现场设置了多个 CSSA 部门互动摊位， 每个摊位都准备了不同的小游戏和挑战。推理、反应、观察力、默契度,每个人都可以在游戏中找到属于自己的节奏。完成挑战即可获得印章 不少同学很快就集满了整张集章卡， 也在过程中认识了新的朋友。在游戏与交流之间 迎新最重要的事情悄悄发生—— 大家开始慢慢熟悉彼此。part · 3赞助商互动区 · 福利不断WELCOME点击查看详情第一步：报到除了部门互动摊位之外 现场还设置了赞助商互动区域。零食、小礼物、各种福利不断 同学们在逛摊位、打卡互动的同时 也收获了不少惊喜。活动现场气氛十分热烈 Market Hall 一度人潮满满。活动现场part · 4 抽奖环节 · 幸运时刻WELCOME点击查看详情迎新嘉年华当然少不了抽奖环节！随着号码牌不断被抽出 现场的气氛也一次次被点燃。AirPods、升降桌、祖玛龙香薰蜡烛 以及各种礼券与精美周边 让不少同学满载而归。恭喜所有幸运中奖的同学也感谢大家的热情参与！part · 5圆满落幕 · 新学期的开始WELCOME点击查看详情▲ 总校区位置图及交通路线乘车路线★ 现场设置了多个 CSSA 部门互动摊位， 每个摊位都准备了不同的小游戏和挑战。推理、反应、观察力、默契度,每个人都可以在游戏中找到属于自己的节奏。完成挑战即可获得印章 不少同学很快就集满了整张集章卡， 也在过程中认识了新的朋友。在游戏与交流之间 迎新最重要的事情悄悄发生—— 大家开始慢慢熟悉彼此。活动总结随着活动接近尾声 这场迎新嘉年华也在欢声笑语中圆满结束。从策划、筹备，到现场执行 感谢所有工作人员的辛勤付出 也感谢每一位到场参与的同学。正是因为大家的到来 才让这场迎新活动变得如此热闹而难忘。新学期刚刚开始 未来 CSSA 还将带来更多精彩活动 期待在接下来的活动中再次见到大家！ _No._1特别鸣谢感谢本次活动的大力支持赞助商：凯琛留学集团、支付宝、爱奇艺、 饭团、中国银行、ANYEE Living、 澳大利亚环球热气球、券宝宝、雁巢、 墨尔本U9、京华影院、ICEWALD真冶。感谢各位合作伙伴对 CSSA 活动的支持与帮助。也感谢每一位来到现场的同学 让 2026 CSSA 迎新嘉年华顺利、圆满、精彩落幕。支付宝支宝留学缴费是支付宝专门为留学生及其家长设计的一项官方服务。通过这项服务，您可以在支付宝平台上直接向全球超过10000所海外高校和公寓支付学费和留学房租。 操作简单，3分钟线上操作借助支付宝的全球汇款网络最快1小时到账，无需去线下柜台转账。支付宝留学缴费是支付宝官方服务，真实可靠，安全无忧。通过支付宝缴学费和留学房租也不占用每人每年等值5万美元的便利化购汇额度非常便利！ 中国银行 作为中国银行在海外的重要机构之一，悉尼分行于 1942年进入澳洲，1985年复业，中国银行(澳大利亚)有限公司于2005年成立。历经数十载的发展，目前悉尼分行在澳大利亚五个州已拥有14家分支机构，是在澳经营时间最长、业务最全面、唯一能够同时提供公司和个人金融服务的中资银行，资产负债排名跻身在澳外资银行前列。2014年11月，中国人民银行指定中国银行悉尼分行为澳大利亚人民币业务清算行。中国银行悉尼分行依托集团全球化综合化优势以及在澳多年深耕经验，致力于服务中澳贸易，搭建双边合作桥梁。面向各类企业客户提供银团贷款、跨境人民币、绿色金融、贸易融资等全方位金融服务，积极拓展新能源、教育医疗、科技创新等新领域，不断提升跨区域综合金融服务能力，持续助力中澳经贸合作高质量发展。 饭团外卖饭团作为全球领先的互联网生活服务平台，通过科技创新拉进用户和商户的距离。
+    source: 'WeChat: 墨大中国学生会'
+    link: https://mp.weixin.qq.com/s/okqgEfmfN-joJLveqh1L3Q
+    post_date: '2026-03-16'
+- id: wechat-student-visa-processing-time
+  query: 现在 500 学生签证的审理时间大概要多久？
+  why: The processing-time figures were images in the original post; only their caption survived scraping. A common shape for WeChat content.
+  anchors:
+  - 审理时间
+  withheld: []
+  context:
+  - question: 【CSSA推荐】签证提醒 | 马上将有一大波人签证到期，你在其中吗？
+    text: |-
+      【CSSA推荐】签证提醒 | 马上将有一大波人签证到期，你在其中吗？澳小土 澳小土 宝宝们请注意！还有不到1个月时间！很多宝宝们的签证将在8月30日过期续签季马上就过去千万别一不小心变‘黑户’童鞋们，注意赶紧自查【学生签证】的到期时间 如果你的签证将在本月底到期 就得赶紧联系我们，做好续签准备了续签常见问题 不知道怎么填写长达25页的申请表？ 改革后的GS是什么？要写些什么内容？怎样的GS才符合移民局要求的呢？ 海外学生保险要买多久？去哪里买？........如有任何续签问题请扫码咨询澳洲新东方顾问老师会为你们提供免费的答疑目前签证审理时间周期500学生签证签证审理时间（Higher Education）_图文源于：_ _immi.homeaffairs.gov.au_485 毕业生工作签证_图文源于：_ _immi.homeaffairs.gov.au_ 及时留意自己的签证状态如果你属于是以下几种情况 在之前的学习中有过挂科，或者重修课程 本科学习即将结束要申请研究生的同学 本科读了非移民专业，研究生想要转去偏远地区读移民专业的同学 毕业后想留在澳洲工作或为移民争取时间积累分数，需要申请PSW工作签证的同学 毕业了想要留澳参加毕业典礼的同学 自己毕业了，但是自己的蓝朋友或铝朋友还没有毕业，想要陪另一半继续在澳洲学习的同学_属于以上情况的宝宝们，请抓紧联系澳洲新东方顾问老师帮你私人定制专属的续签方案。不知道自己签证什么时候过期的宝宝们，也可以联系我们的顾问老师帮忙查询哦！_签证申请材料学生签证申请材料 护照 最新的COE 购买海外学生保险OSHC GS（查看下文） 体检PSW签证申请材料 澳大利亚学历的成绩单 完成信Completion Letter 澳洲AFP无犯罪记录 雅思成绩单或是其他认可并符合要求的英文成绩 出生公证件 医疗保险OVHC 体检报告等如何写好GS澳洲移民局已于2024年3月23日开始将学生签证的真正临时入境者(GTE) 要求替换为真实学生(GS) 要求。500学生签证申请人必须保持学生身份，并能够证明他们理解在澳洲学习是他们取得学生签证的主要原因。GS要求认可符合条件的毕业生可以在毕业后获得永久居留权。想取得学生签证，所有申请人必须证明他们符合真实学生标准或真实学生家属标准。在线上学生签证申请表格中（截图），将询问申请人以下问题，以评估申请人是否满足GS要求的标准： 提供申请人目前的情况，包括：与家庭、社区、就业和经济状况的联系 解释申请人为什么希望在澳大利亚选择的这个机构学习选择的这个专业？此外，申请人必须解释他们对所选课程要求以及在澳大利亚学习和生活的理解 解释所申请的课程对于申请人的价值 详细说明申请人希望补充的任何其他相关信息（证明自己是真实学生相关的信息） (曾)持有学签外其他澳洲签证，现在想境内转学生签证，需要解释原因_图文源于：_ _immi.homeaffairs.gov.au_ 往往，签证官要从一篇GS中“窥探“许多信息 比如：申请人赴澳的真实意图 申请人所读的课程对未来发展的意义申请人的签证历史如果GS写不好是会影响到签证能否顺利获批的那么，GS写不出来怎么办呢？ 担心因为自己的失误影响签证怎么办？我的英文表达不够好怎么办？为了避免这些失误或者错误小编强烈建议：把这件专业的事情交给专业的人做自政策改革以后，一篇GS的好坏很大程度影响签证的结果请同学们务必慎重！速速联系澳洲新东方的顾问老师帮你解决GS难题S近期活动 近期热点文章学签过期成‘黑民’？别急，还有办法抢救！ 【申博系列】"追逐博士梦" 第三篇: 寻找指路人——你的导师 澳洲新东方迎新趴回顾，没来的人后悔到跺脚！ 澳洲六大主流移民专业，你是避坑还是踩雷了？ 商科大神都在考的CFA证书到底是什么？重大改革后独家解读！ _文章文献来源：___immi.homeaffairs.gov.au___https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-processing-times/overview__https://immi.homeaffairs.gov.au/visas/getting-a-visa/visa-listing/temporary-graduate-485/post-higher-education-work_联系我们，或点击下方阅读原文 进行免费咨询及服务预约长按二维码识别关注[阅读原文](javascript:;)
+    source: 'WeChat: 墨大中国学生会'
+    link: https://mp.weixin.qq.com/s/5AK196sRb2qV1q5iiIOe5w
+    post_date: '2024-08-05'
+- id: wechat-beach-volleyball-deadline
+  query: CSSA 沙滩排球友谊赛报名截止到哪天？
+  why: The event post gives date, place, fees and how to pay, but no registration deadline. A second event post from the same week is alongside it, as retrieval would return.
+  anchors:
+  - 沙滩排球
+  withheld: []
+  context:
+  - question: 【CSSA活动】沙滩排球活动预告
+    text: |-
+      【CSSA活动】沙滩排球活动预告BEACH VOLLEYBALL\[CSSA 活动预告\]Beach Volleyball夏日沙滩排球友谊赛报名开启一起去海边开打!就在 3月28日，CSSA 将为大家带来一场阳光、海风与运动激情并存的沙滩排球友谊赛！本次活动将在 South Melbourne Beach 举行，我们希望为在墨尔本学习和生活的中国学生搭建一个健康、积极、充满活力的交流平台。在这里，你不仅可以感受 沙滩排球的竞技魅力，还可以在海边阳光下释放学习压力、结识新朋友、体验不一样的留学生活。无论你是经验丰富的排球高手，还是想尝试新运动的朋友，都欢迎加入我们，一起在沙滩上挥洒汗水、享受比赛的乐趣！比赛组别🏐 双打（女子/男子/混双都可以）比赛说明BEACH VOLLEYBALL一、参赛装备比赛用沙滩排球由CSSA统一提供二、竞赛办法与计分 初赛、1/4决赛、半决赛：采取15-15-11分制，三局两胜 决赛：采取21-21-15分制，三局两胜三、赛程安排小组赛(90 min)1 vs 23 vs 45 vs 67 vs 8\_\_9 vs 1011 vs 1213 vs 1415 vs 16\_4强(45 min)1 vs 23 vs 45 vs 67 vs 8\_半决赛 (45 min)1 vs 23 vs 4\_\_\_决赛(45 min)1 vs 2\_L vs L(季军)\_\_四、裁判与赛务 现场设立裁判组与积分台、负责判罚、计分与赛务组织，确保比赛 公开、公平、公正 出现争议时，以主裁判判定为最终结果奖金设置预计会有16只队伍,取前三名队伍作为获胜队伍。PRIZES第一名：150 AUD第二名：100 AUD第三名： 50 AUD除了比赛奖金外，现场还会准备饮料、能量补给与纪念物资，让大家在比赛之余也能享受轻松愉快的活动氛围。活动信息⏰活动时间 3月28日 2：00 – 7：00 PM📍活动地点 South Melbourne Beach💵报名费用 CSSA会员 AUD 10/人 非CSSA会员 AUD 15/人🧾缴费方式 Account name: Society Cheque AcctBSB: 063238Account Number: 10831208缴费成功后，请填写报名表并提供缴费证明给负责人✋🏻报名条件墨尔本在读学生都可以报名参加📱报名方式请扫描下方二维码参与活动报名啦！！！成功报名的朋友们请加入报名表最后的活动大群，及时获取比赛信息一起去海边打球吧！在这里，我们不仅比拼球技，更传递友谊至上、公平竞技的体育精神。阳光、沙滩、排球、海风，还有一群热爱运动的朋友。无论输赢，你都将收获 快乐、友谊与难忘的回忆！这个夏天，一起去海边开打！3月28日，South Melbourne Beach，不见不散！🏐🌊·END·⽂案｜潘柳烨、黄子衿排版｜杨希蕾 Celia海报｜李秉轩CSSA
+    source: 'WeChat: 墨大中国学生会'
+    link: https://mp.weixin.qq.com/s/5MNFO64s9vfXpl9Uaopdjw
+    post_date: '2026-03-19'
+  - question: 【CSSA活动】猫鼠风云来啦！
+    text: |-
+      【CSSA活动】猫鼠风云来啦！猫鼠风云{ 校园策略博弈 }Catch and Run在校园的角落里悄然潜伏着两股力量——猫与鼠。你的任务是什么？是隐藏、是追捕，亦是联合伙伴完成秘密使命？在《猫鼠风云》中，每一次行动都可能改变战局，每一次决策都关乎胜负。_【CSSA活动预告】_ 猫鼠风云·校园策略博弈阵营对抗·追逐混战·团队协作《CSSA猫鼠风云》即将火热上线！专为CSSA学生打造的沉浸式互动体验：动态身份与阵营：你是狡猾的老鼠🐀，还是敏锐的猫🐱？不同角色，策略大不同！多变任务与规则： 在不断变化的挑战中，你需要判断、思考、合作，才能取得最终胜利！社交与团队互动：结交新朋友，丰富校园生活。不论你是否是墨大学生，只要你想加入，都欢迎来体验这场猫鼠大战！无论是紧张学业中的娱乐放松还是 结识新朋友，这场“猫鼠风云”绝对不容错过！游戏规则游戏基本信息 游戏时长：90分钟玩家人数：30人身份分布：猫阵营：6人鼠阵营：24人游戏开始前通过抽签决定身份猫阵营的同学需穿颜色背心鼠阵营同学需贴上号码牌猫阵营 在90分钟内尽可能抓捕老鼠。鼠阵营躲避猫的抓捕，并通过完成任务帮助阵营获得优势基础玩法猫阵营：淘汰老鼠方法：猫选手需要用手拍到鼠选手身体即算抓捕成功猫可以通过完成任务小游戏 获得特殊技能用来帮助抓捕老鼠技能获得后仅该猫玩家本人可以使用鼠阵营鼠需要在场地中：躲避猫，👣寻找任务卡完成小游戏任务（游戏内设立有多个任务点）完成任务后可能获得一些能力，例如：限制猫的行动帮助复活队友被抓到的老鼠需要前往补给站（淘汰区）等待。鼠医身份 游戏中有一种特殊身份：鼠医游戏开始时设有2名鼠医场地中还隐藏有医生身份卡普通老鼠找到后也可以成为鼠医鼠医能力：如果鼠医与一名鼠合作完成任务 可以复活一只已被淘汰的鼠。每名鼠医的复活能力只能使用一次补给站（安全区域） 地图中设有补给站补给站内规则：鼠在补给站内不能被猫抓捕但停留时间不能超过5分钟同时补给站也是淘汰区和复活区胜负判定 游戏时间：90分钟如果在游戏结束前：猫成功抓捕 ≥20只老鼠➡️ 猫阵营获胜如果猫抓捕数量 <20只➡️ 鼠阵营获胜游戏结束后工作人员会根据记录进行统计并公布结果选出MVP奖励设置最佳老鼠（2名）第一名 $30 第二名 $20最佳猫（2名）第一名 $30 第二名 $20最佳兽医（1名）$30积极完成任务，做出突出贡献，你就可能赢得奖金！活动信息时间：3月21日（周六）13：00-16：00地点：墨尔本大学北草坪（north lawn）活动地点温馨提示 游戏期间务必遵守安全规定提前了解活动规则及签署免责协议享受一场轻松又刺激的猫鼠大战！END文案 | 林祎乐Leon排版 | 孟垂含Lydia海报 | 黄崔凡Vicky图片来源 |百度，谷歌地图
+    source: 'WeChat: 墨大中国学生会'
+    link: https://mp.weixin.qq.com/s/AdYx4nniEKfyZjcr4gHBFw
+    post_date: '2026-03-19'
+- id: wechat-yarrabridge-speaker-email
+  query: 雅拉讲堂第三期主讲人马士琨的个人邮箱是多少？
+  why: The speaker is introduced at length; only the department's shared address is given.
+  anchors:
+  - 马士琨
+  withheld: []
+  context:
+  - question: 【CSSA学术】周六『雅拉讲堂』26S1第三期：蛋白质专题讲座！
+    text: |-
+      【CSSA学术】周六『雅拉讲堂』26S1第三期：蛋白质专题讲座！YARRABRIDGE雅拉讲堂蛋白质专题26S1 第三期scholars@cssaunimelb.com如何让蛋白质发光？蛋白质不只是静止的结构？如何用数据理解渐冻症？2026年4月11日 周六墨尔本大学Arts West第三期 详细信息本专题将带你从“看见蛋白质”出发，走进一个不断变化的分子世界，并进一步揭示它们如何在疾病中发挥作用，解码生命运作背后的分子逻辑！日期：周六 4月11日时间：下午14:00 - 15:00地点：墨尔本大学 Arts West - 353 (Interactive Cinema Space)地图指引：https://maps.unimelb.edu.au/point?identifier=PAR;148A;3;353注册方式：添加下方小助手微信，告诉他们你想参加『雅拉讲堂』。我们也欢迎直接到场walk in！_本场活动提供茶歇。_本期议程 Agenda：14:00-14:20 第一节：马士琨14:20-14:40第二节：陈晓旭14:40-15:00 第三节：刘璇INTRODUCTION我们是谁？学术部和雅拉讲堂墨大CSSA学术部成立于25S1，由博士生主导，同时欢迎本科生和研究生加入或主讲。学术部致力于打造一个面向墨尔本地区学生学者的高水准学术平台，并拓展至纵向师生社群与横向校友网络。部门工作和部员培养涉及演讲、主持、研讨、会务、接待和学术支持等事务。雅拉讲堂（YARRABRIDGE）是学术部的常规线下活动，聚焦学术探讨与知识科普，并延伸至院校交流与就业创业等主题。讲堂内容注重通识性与普适性，讲演语言为中文普通话。每期常规时长1小时，分为三节各20分钟，形式包括讲座、访谈与研讨会。2025年共举办了17期「雅拉讲堂」。_点击Logo查看往期讲堂活动总回顾_每期回放将在我们的YouTube频道上发布https://www.youtube.com/@yarrabridgeCHAPTERS分节详情第一节：讲座GFP:如何点亮细胞的黑暗角落主讲人：马士琨墨尔本大学CSSA学术部副部长，墨尔本大学生物化学和药理学系 PhD Candidate，研究方向为染色质结构和荧光显微镜方法，当前工作聚焦于异染色质蛋白的自聚合对染色质结构的调控作用，在墨尔本大学获得生物医学科学硕士学位以及理学学士学位。本节摘要 Abstract在分子生物学进程中，实时观察活体蛋白曾是巨大瓶颈。本次讲座将以绿色荧光蛋白 (Green Fluorescent Protein, GFP) 为核心，探讨它如何从一种自然发光现象，演变为人类探索微观世界的标准工具。我们将回顾从 20 世纪 60 年代的手工提取到 90 年代实现基因转入的关键历史，并重点讨论科学家如何通过精确修改蛋白质结构 (如定点突变) 来调控其发光特性，将单一绿光扩展为涵盖全光谱的“生命调色盘”，旨在展示人类如何通过分子层面的微观调控重新设计观察工具，将生物研究带入多色彩、定量的动态分析时代。第二节：讲座蛋白质从来不只是一个结构主讲人：陈晓旭墨尔本大学化学院与Bio21研究所PhD Candidate，研究方向为蛋白质的结构和分子机制。当前工作聚焦于结核杆菌中几种关键代谢酶，研究它们如何调控碳代谢的分配，从而影响病菌在不同环境下的生存策略。此前于中国科学院大学，获理学学位，期间研究了细胞环境对蛋白质弱相互作用的影响。本节摘要 Abstract蛋白质常被画成精致而稳定的三维结构，但在真实细胞中，它们并不是静止不动的“模型”，而是不断摆动、切换、组装和解离的动态分子机器。本讲座将从几个经典例子出发，介绍蛋白质如何通过构象变化、寡聚化以及弱相互作用来实现功能调控，并讨论为什么“动态”正在成为理解蛋白质机制的关键视角。第三节：讲座从基因到疾病，我们如何用数据理解渐冻症主讲人：刘璇墨尔本大学生物化学与药理学系PhD Candidate，研究方向为生物信息学与系统生物学。致力于通过多组学数据整合与数据驱动方法解析神经退行性疾病的分子机制，重点关注渐冻症（ALS）领域。 本科毕业于中国医科大学生物技术专业，随后在曼彻斯特大学获得生物信息学与系统生物学硕士学位。曾任职于上海欧易生物科技有限公司，担任单细胞生物信息分析师，主要从事高通量组学数据分析及疾病机制研究。
+    source: 'WeChat: 墨大中国学生会'
+    link: https://mp.weixin.qq.com/s/eOkHRuAacZ8WGjRY7uUpDg
+    post_date: '2026-04-10'
+- id: wechat-recruitment-interview-date
+  query: CSSA 2026 招新的面试是哪天？在哪里面试？
+  why: The recruitment post gives the application deadline, not the interview date or place.
+  anchors:
+  - 招新
+  withheld: []
+  context:
+  - question: 2026墨大中国学生会招新开启！
+    text: |-
+      2026墨大中国学生会招新开启！原创 CSSA 2026 新学期招新开启报名截止时间：3 月 6 日 23点 亲爱的新同学&重返校园的伙伴： 新学期的校园，正在慢慢苏醒。 课堂之外，你是否也在寻找一个地方—— 能把热情落到实处，把想法变成现实， 把“我可以试试”变成“原来我真的可以”。 现在， 墨尔本大学中国学生会（CSSA） 新学期招新正式开启。 这里不仅是一个学生组织， 更是一群人一起把事情做好、 把成长走实的地方。 在 CSSA，你可以 ➡️参与策划覆盖数百甚至上千人的校园 与大型活动，站在真正的执行一线。 ➡️用文字、影像和创意，记录属于这一代留学生 的真实故事。 ➡️在对外合作与资源沟通中建立信任, 理解真实世界的 运作方式。 ➡️在不断的协作与磨合中， 学会沟通、决策与承担责任。 ➡️围绕学习与成长做内容与项目， 把经验与信息整理成真正对同学有用的输出, 把想法交给团队，把结果留给时间。 我们不要求你一开始就“什么都会”。 只希望你愿意投入、愿意学习、 愿意为一件事情认真走一段路。 无论你是擅长策划与统筹的“思考型选手”， 还是热衷执行、行动力拉满的“实干派”， CSSA 都希望为你留下一席 可以成长、被看见、被信任的位置。 如果你期待在墨大 留下些什么真正属于自己的经历， 那么，我们很期待在 CSSA 与你相遇。CSSA介绍CSSA 成立于 2003年，是一个非宗教、非政治、非营利性质的学生社团。我们的初衷很简单：为墨尔本大学及墨尔本地区的中国留学生与华人学者，提供学习与生活上的支持与帮助，让大家在异国求学的过程中，少一些迷茫，多一些连接与陪伴。 简单来说，CSSA更像是大家在异国他乡的一位贴心伙伴。我们关注同学们在学习、生活、融入与成长过程中的真实需求，致力于帮助大家更快适应校园生活，结识志同道合的朋友，在学业之外，也拥有丰富而有温度的大学体验。目前，我们总共有六个部门，分别是：组织部、外联部、宣传部、学术部、人力资源部和信息技术部。不同背景、不同兴趣的同学，都能在这里找到适合自己的位置，与一群认真做事的人一起，把想法落到实处。主席寄语 大学不仅是“完成学业的过程”，它更是一段逐渐认识自己、也不断与他人产生连接的旅程。CSSA 的存在，正是希望在这段旅程中，给每一位同学多一些支持、陪伴与可能性。 在CSSA，你会拥有一个可以参与、可以尝试、也可以被信任的空间。你会在真实的项目与团队协作中，学会把想法落地、把问题解决，也逐渐建立起对自己能力的信心。CSSA 希望带给你的，不只是更丰富的大学生活，更是一段能够持续影响你未来的成长过程。这些经历，往往比结果本身更重要。如果你愿意把一部分时间交给这样一段经历，也愿意和一群认真、真诚的人一起把事情做好，欢迎你加入我们，我们一起，走的更远。 2026届主席 伍朝晖SandyCSSA主席团介绍（左滑查看更多）组织部招新要求 组织部是 CSSA 的“幕后大脑”，负责策划、统筹并推动各类对外活动从想法到落地。我们将天马行空的创意转化为可执行的方案，在协调人力与流程中解决问题、推进进度。这里既有重构现实的执行力，也有彼此支持的凝聚力——靠谱做事，但从不孤军奋战。部门核心精神：热情+创造+责任+活力=欢乐=组织部！ 部门核心职能：组织部参与活动创意构思与方案设计，对活动进行细心策划与统筹安排，并推动想法高效落地实施。我们需要这样的你我们希望你：➡️责任心强、做事细心➡️有执行力，能把想法变成行动➡️擅长沟通与协调➡️有团队意识在这里你能收获：➡️组织月统筹能力的实战提升➡️与不同部门高效合作的经验➡️清晰的工作逻辑与时间管理能力➡️认识一群频率相同、无话不谈的好朋友宣传部招新要求 宣传部作为CSSA的“形象大使”与“发声筒”，宣传部负责将墨大的每一场活动、每一条资讯，用最具创意的方式传递给墨尔本的中国留学生。我们是故事的讲述者，也是视觉的造梦人。通过新媒体、影像与设计，让大家更好的了解墨大。部门口号：“让每一次发声，都掷地有声。”团队氛围：宣传部是一个充满欢声笑语的创意乐园。这里有从小白一路成长起来的排版高手，有第一次拿起相机就能拍出大片的摄影新星，也有从零开始玩转设计的海报达人。我们不设限、不嫌慢——学长学姐手把手教学，从秀米排版到PS修图，从构图技巧到配色心法，只要你愿意学，我们就愿意教。一起 brainstorming 时奶茶不断，一起拍摄时笑声不停，一起赶稿时音乐相伴。在这里，技能和友谊，都是从零开始的惊喜。
+    source: 'WeChat: 墨大中国学生会'
+    link: https://mp.weixin.qq.com/s/yOWdLrJug66ARp_66XGBkg
+    post_date: '2026-02-23'
+- id: wechat-shanghai-hukou-social-security
+  query: 墨大毕业回国落户上海，社保需要连续交几个月？
+  why: The post advertises returnee settlement subsidies and 落户 guides without stating any rule; the model knows the real policy.
+  anchors:
+  - 落户
+  withheld: []
+  context:
+  - question: 【CSSA推荐】恭喜墨大海归，回国直接领3w!
+    text: |-
+      【CSSA推荐】恭喜墨大海归，回国直接领3w!DBC职梦 DBC职梦 🎓墨大留学生请注意：墨大作为世界顶尖名校之一，2026 QS世界大学位列第19名，在国内职场具备极强竞争力，备受头部企业青睐。今年海归人才补贴重磅升级：北京现金最高补贴15w、上海创业补贴50W、深圳不落户也能领3w......身为墨大海归，你可能需要这些信息： 墨大海归能领取哪些福利补贴？ 哪些国内名企更偏爱墨大海归？ 如何界定墨大留学生的应届生身份？\ 针对存在问题，重磅推出海归资源群。入群你将获得墨大小助手实时播报澳洲&国内最新岗位，包含Intern、远程实习、Events、应届生项目等。。\群内播报截图还有更重要的信息差：内推岗位。这类仅群内可见的资源，是你在官网无法获取的机会。\群内截图此外，入群的墨大同学还可获得： 独家校友内推资源 价值$2000 高薪求职资料库 …01墨大独家校友内推资源群内集结Deloitte、PwC、EY等在职学长学姐，为墨大 New Grad开放专属简历内推筛选通道，对接HR会优先筛选。\群内岗位截图02墨大专属高薪求职礼包群内共享最适合墨大留学生的求职资料，包括： 最新岗位网申汇总表（更新至2.10） 700套中文简历真人模板 国内投行、商行、四大、互联网最新网测题 面试必备BQ&Suggested Answer 国内20+城市落户政策&学历认证攻略 国内租房、买房、创业等海归人才补贴指南 最新CFA/FRM/CPA备考大礼包扫码回复【海归】入群与墨大校友抱团交流！ ▼▼▼
+    source: 'WeChat: 墨大中国学生会'
+    link: https://mp.weixin.qq.com/s/mOxtiUEMSpEQqaCK0HVSvA
+    post_date: '2026-02-11'
+- id: wechat-timetable-swap-request
+  query: MyTimetable 里提交 Swap Request 之后，一般多久能换成功？
+  why: The guide explains Swap Request and that a free spot is taken automatically, not how long it takes.
+  anchors:
+  - Swap Request
+  withheld: []
+  context:
+  - question: 【CSSA推荐】墨大新生选课指南，看这一份攻略就够了!
+    text: |-
+      【CSSA推荐】墨大新生选课指南，看这一份攻略就够了!墨大的Summer Term马上就要开始了～有不少同学选择利用暑期继续进修，大家是否已经安排好了自己的课表呢？CSSA小可爱为大家献上超全选课功略，赶紧来查收吧！内容目录01重要日期02选课步骤03学长贴士04缴费方式Census Dates重要截止日期SUMMER&S1Preference Entry Period: 选课开放于11月15号-12月13号,11.59pm(AEDT). （Summer选课仅在此期限内！）Class Timetable Preference Entry Period: 课程表时间选择开放于11月23号,10am-12月7号,8am(AEDT)Class Timetable Review and Adjust Period: 课表调整于12月9号,10am(AEDT)开始Late Re-enrolment Period: 12月14号-1月10号,11.59pm(AEDT)。该时间段仅为s1课程注册的最后期限。如果在该期间提交选课申请，需要额外缴纳 117AUD 的费用。Fee Payment Due Date:\- Summer Term付费截止于1月14号\- Semester 1付费截止于2月15号Cancellation Period:Census Date: Withdraw还可以退学费的最后期限。具体日期需查看该课程的handbookLast date to withdraw without fail: Withdraw不能退学费，但不计分。具体日期需查看该课程的handbookTimetable Planning选课小帖士01 计划期登录MyTimetable上的Planner，根据学分要求，计划接下来的课表。https://prod.ss.unimelb.edu.au/student/SM/StudyPlanDtls10.aspx?r=%23UM.STUDENT.APPLICANT&f=%24S1.EST.STUDYPLN.WEB02 选课期成功Enrol并在课表时间开放以后，MyTimetable的Preference中会显示大家所选科目的所有上课时间。同学们可以按照自己的时间规划，给不同的课时按志愿排序。在每个选项右边能看到对应的爆满程度，更高的百分比意味着这个课时更难被选上。Note：所有科目的选课必须在截止日期前完成，否则，只能在调整期间（Adjustment Period）开始后选择剩余有空位的课时。03 调整期在调整期间开始后，MyTimetable中的Timetable上会显示分配好的课表。同时，每个课时也会显示以下几种状态：● Allocated: 目前被分配到的课时● Select: 可更改到的课时● Clash: 此课时跟自己另外一门课的课时冲突● Problem: 此课时不匹配● Full: 此课时已满若想调整之前被分配到的课表，可以从Select里面任意选择或从Full里面提交调换申请（Swap Request），若这个课时出现了空位，系统会自动将你调换过去。Tips学长小贴士01 日常必备软件VPN需要在国内上网课的同学，可以根据学校官网的VPN安装流程去安装VPN，直接在官网搜索VPN access from China即可，这能够保证你们的课程流畅度哦。如下图所示：LMSLMS（https://canvas.lms.unimelb.edu.au/）是学校日常学习中使用最频繁的网址，同学们可以下载它的App，在手机上查看学科的最新通知与成绩。Gmail下载一个Gmail App能够及时地收到来自同学老师的邮件以及学校通知哦。02 参与线下课程1）根据学校的要求，首先需要在入学前填写一份健康声明，链接:https://unimelb.service-now.com/student?id=health\_check2）其次，完成COVID-Safe Campus Online Training Module. 这个Module需要登陆Trainme,链接: https://uomtrainme.elmotalent.com.au/，搜索Covid并enrol 后开始学习。声明和module只需要学习一次。
+    source: 'WeChat: 墨大中国学生会'
+    link: https://mp.weixin.qq.com/s/5WruV_z5ebcxNdIeD75Wrg
+    post_date: '2021-12-01'

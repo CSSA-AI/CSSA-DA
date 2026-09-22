@@ -444,6 +444,20 @@ instruction 开关**;索引层不共用(harness 用 numpy,生产用 pgvector),�
   generator,**不经过检索** —— 测的是生成器的行为契约,不受当前检索质量影响
 - **验收**:20 条负样本上,零编造
 
+#### ✅ 已落地(2026-09-22,#116)
+
+`tests/generator_contract/`,marker `generator_contract`,`RUN_GENERATOR_CONTRACT=1`
+才跑。20 条用例(handbook 10、微信 10),上下文都是「同一门课 / 同一件事,唯独缺被问
+的那一项」;判据在 [refusal.py](../../app/services/rag/eval/refusal.py),两条都是代码里
+的断言,并有自己的单测。
+
+**首跑就抓到了真问题**:删掉写打工时长上限的那半句后,问「每两周最多打工几小时」,
+原 prompt 采样 10 次、10 次都凭记忆答了已过时的「40 小时」。改了 prompt 第三行后
+10/10 拒答,连续三次完整运行 20/20,正向对照(资料里有答案时要答)14/14 未退化。
+过程、判据设计与已知边界见
+[refusal-contract.md](../design/implemented/refusal-contract.md);什么时候必须跑见
+[CONTRIBUTING.md](../../CONTRIBUTING.md#the-generator-contract-suite)。
+
 #### 它是发布关卡,不是 CI 测试(2026-08-10 定)
 
 真跑要调 OpenAI。**钱不是问题** —— 20 条 × gpt-4o-mini 一次全跑是一美分量级。
@@ -764,7 +778,7 @@ RAG       ←  Data(仅 Phase 5 起)
 | **0.8** 输入体积无上限 | ❌ | 🔴 未开始 —— **v1 必做**,两行 |
 | **Phase 1** 评估工具 | ❌ | ⬜ 未开始 |
 | **Phase 2** 可插拔方案 | ❌ | ⬜ 未开始 —— **价值最高** |
-| **Phase 3** 生成器行为 | ❌ | ⬜ 未开始 |
+| **Phase 3** 生成器行为 | ❌ | 🟡 部分完成 —— 3.1 拒答测试已落地(#116);3.2 其他契约未开始 |
 | **Phase 4** 可观测性 | ❌ | 🟡 部分完成 —— 检索日志已落(CSS-15);分阶段延迟、token / 成本未做 |
 | **Phase 4.5** 交互记录 | ❌ | ⬜ 未开始 —— **上线即开始产生真实 query** |
 | **Phase 5** 跑实验 | ✅ | ⛔ 卡数据线 Phase 2 |

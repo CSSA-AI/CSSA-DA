@@ -151,7 +151,10 @@ v1,**应该现在就派人去做**。但它已经不是 v2 的唯一入口 —�
 - [x] 0.8 `/chat` 输入体积上限 —— **已落地(2026-09-13,#98)**:body 上限在路由、
       解析和鉴权之前就执行,拒绝路径不碰下游。见
       [chat-api-hardening.md](../design/implemented/chat-api-hardening.md)
-- [ ] 3.1 拒答测试
+- [x] 3.1 拒答测试 —— **已落地(2026-09-22,#116)**:20 条「相关但无答案」的负样本,
+      直接喂生产配置的 generator;发布关卡,不进 CI。首跑抓到一题稳定编造(打工时长,
+      10 次 10 次凭记忆答),已改 prompt 第三行。见
+      [refusal-contract.md](../design/implemented/refusal-contract.md)
 - [x] 4.1 检索结果落结构化日志 —— **已落地(2026-08-25,#83)**:每段记
       doc_id / score / rank,query 原文不出仓。见
       [retrieval-logging.md](../design/implemented/retrieval-logging.md)

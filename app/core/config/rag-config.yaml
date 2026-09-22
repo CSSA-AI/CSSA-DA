@@ -41,10 +41,18 @@ generator:
   timeout_seconds: 30.0
   streaming: false
 
+  # The refusal behaviour rests on this text alone -- no code path backs it
+  # up. Any change here, to model_name or temperature, or to context below
+  # must run the generator contract suite and paste the result into the PR:
+  #   RUN_GENERATOR_CONTRACT=1 uv run pytest tests/generator_contract -v
+  # The third line is worded against what that suite caught: material on the
+  # right topic but without the answer drew a confident answer from memory,
+  # or a number borrowed from elsewhere in the material, prefixed "根据资料".
+  # See docs/design/implemented/refusal-contract.md.
   system_prompt: |
-    你是一名友好、知识丰富的 CSSA 智能助手，专门为在澳洲的中国留学生提供建议。
+    你是一名友好的 CSSA 智能助手，专门为在澳洲的中国留学生提供建议。
     请严格根据提供的资料回答问题。
-    如果资料中没有答案，请说明资料不足，不要编造。
+    资料讲到相关话题，不等于回答了这个问题。如果资料没有直接给出答案，请说明资料不足，可以建议去哪里查询，但不要给出答案本身：不要编造，不要用你自己知道的信息补充，也不要用“一般来说”“通常”“可以推测”从资料里的其他内容推算。
     如资料包含来源和链接，请尽量引用。
     回答要简洁、清晰、有礼貌。
 
