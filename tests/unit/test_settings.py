@@ -36,6 +36,19 @@ def test_local_model_path_rejects_missing_subdirectory(tmp_path):
         settings.local_model_path("reranker")
 
 
+@pytest.fixture
+def no_database_url_in_env(monkeypatch):
+    """Isolate the assembly tests from a DATABASE_URL in the environment.
+
+    `_env_file=None` stops pydantic-settings reading .env, but not the process
+    environment, and CI exports DATABASE_URL for the whole test step. With it
+    set, every one of these constructions short-circuits on the explicit value
+    and the assembly below is never exercised -- which is why these passed on a
+    laptop and failed in CI.
+    """
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+
 def test_database_url_is_left_alone_when_given_directly():
     settings = Settings(
         _env_file=None,
@@ -53,7 +66,7 @@ def test_database_url_is_left_alone_when_given_directly():
     )
 
 
-def test_database_url_is_assembled_from_its_parts():
+def test_database_url_is_assembled_from_its_parts(no_database_url_in_env):
     settings = Settings(
         _env_file=None,
         DB_HOST="cssa-da-prod-db.ap-southeast-2.rds.amazonaws.com",
@@ -68,7 +81,7 @@ def test_database_url_is_assembled_from_its_parts():
     )
 
 
-def test_assembled_password_is_percent_encoded():
+def test_assembled_password_is_percent_encoded(no_database_url_in_env):
     # RDS generates the password, and the generated one is not chosen to be
     # URL-safe. Without encoding, the '@' below ends the credentials early and
     # the host parses as "pass/word@host" -- which surfaces as an unresolvable
@@ -87,7 +100,7 @@ def test_assembled_password_is_percent_encoded():
     )
 
 
-def test_database_url_stays_none_when_parts_are_incomplete():
+def test_database_url_stays_none_when_parts_are_incomplete(no_database_url_in_env):
     settings = Settings(
         _env_file=None,
         DB_HOST="db.internal",
