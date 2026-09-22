@@ -61,8 +61,9 @@ docker push "$ECR:$SHA"
 ECR 仓库是 `IMMUTABLE` 的:**同一个 tag 不能推第二次**。如果要重推同一个 commit(比如
 上次构建坏了),得先把旧镜像删掉。
 
-改了 `settings.py` 的话这一步会慢很多——模型层会失效重传 600MB,这是已知的债
-(见 aws-foundation.md「还没做的」)。
+改了 `app/core/config/rag-config.yaml` 里的模型选择,这一步会慢很多——600MB 的模型层
+失效、重新下载、全量重传。**只有换模型时才该这样**;改别的代码(包括 `settings.py`)
+用的是缓存层,推送只传变化的那几 MB。
 
 ### 2. ⭐ 先改库:跑迁移任务
 
@@ -102,11 +103,23 @@ aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" --region ap-southeas
 **`exitCode` 必须是 `0`。** 不是 0 就停下,不要做第 4 步——此刻服务还没被碰过,线上跑的
 仍然是好的旧版本,你有时间慢慢查。
 
+成功长这样(2026-09-22 实测,当时无待执行的迁移):
+
+```
+{ "exitCode": 0, "reason": null }
+```
+
+从 `run-task` 到任务停止约一到两分钟,**其中大部分时间在拉 982MB 的镜像**,不是在跑
+迁移。`aws ecs wait` 期间终端没有任何输出,那是正常的。
+
 日志在这里:
 
 ```bash
 aws logs tail /ecs/cssa-da-prod-migrate --region ap-southeast-2 --since 10m
 ```
+
+没有待执行的迁移时,日志只有 alembic 的两行连接信息——**看着像什么都没发生,那就是对的**。
+有迁移要跑时,每一条会打出 `Running upgrade <from> -> <to>`。
 
 > `exitCode` 是 `null` 而不是数字,通常意味着容器压根没起来(拉镜像失败、架构不对、
 > 密钥取不到)。这种情况 `reason` 字段会说明原因。
