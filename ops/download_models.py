@@ -11,7 +11,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.core.config import rag_config
+# Deliberately not `from app.core.config import rag_config`. That would
+# construct Settings and read .env, and this script runs in the builder
+# stage of Dockerfile.api where the application does not exist yet. Same
+# loader, same dict -- just reached without the environment layer.
+from app.core.rag_config import rag_config
 
 
 IGNORED_MODEL_FILES = [
