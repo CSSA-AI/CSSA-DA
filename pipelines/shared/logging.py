@@ -31,6 +31,9 @@ STRUCTURED_FIELDS = (
     "target_id",
     "corpus_sha256",
     "knowledge_base_rows",
+    "unique_record_count",
+    "rows_outside_corpus",
+    "skipped_by_checkpoint",
     "report_key",
 )
 

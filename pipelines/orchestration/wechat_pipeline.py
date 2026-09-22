@@ -40,6 +40,11 @@ class WechatPipelineRunResult:
     raw_output_location: str
     processed_output_key: str
     report_key: str | None = None
+    # From the import stage's own report (import_report_key), so a full
+    # pipeline run carries the corpus coordinate as far as a single import.
+    corpus_sha256: str | None = None
+    knowledge_base_rows: int | None = None
+    import_report_key: str | None = None
 
     @property
     def rejected_count(self) -> int:
@@ -163,6 +168,9 @@ def run_local_wechat_pipeline(
             affected_count=import_result.affected_count,
             raw_output_location=harvest_result.output_location,
             processed_output_key=processed_output_key,
+            corpus_sha256=import_result.corpus_sha256,
+            knowledge_base_rows=import_result.knowledge_base_rows,
+            import_report_key=import_result.report_key,
         )
         finished_at = datetime.now(timezone.utc)
         report_key = _write_wechat_pipeline_report(
@@ -243,6 +251,9 @@ def _write_wechat_pipeline_report(
                 "rejected_count": result.rejected_count,
                 "attempted_import_count": result.attempted_import_count,
                 "affected_count": result.affected_count,
+                "corpus_sha256": result.corpus_sha256,
+                "knowledge_base_rows": result.knowledge_base_rows,
+                "import_report_key": result.import_report_key,
             }
         )
     if error is not None:

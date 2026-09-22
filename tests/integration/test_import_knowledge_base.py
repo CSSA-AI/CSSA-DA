@@ -207,13 +207,25 @@ class _FailOnSecondBatchLoader:
         return self.loader.load_batch(records, embeddings)
 
 
-def test_import_report_matches_ready_and_catches_a_stale_checkpoint(
+def _seed_row(database_url, record, *, embedding_model, embedding_revision):
+    with PostgresKnowledgeBaseLoader(
+        database_url,
+        "knowledge_base",
+        embedding_model=embedding_model,
+        embedding_revision=embedding_revision,
+        expected_embedding_dim=384,
+    ) as loader:
+        loader.load_batch([record], [[0.1] * 384])
+
+
+def test_import_report_matches_ready_and_catches_what_the_checkpoint_hides(
     test_database_url,
     tmp_path,
     monkeypatch,
 ):
     from unittest.mock import patch
 
+    from app.core.config import rag_config
     from app.services.rag.model_registry import (
         ModelRegistryStatus,
         model_registry,
@@ -225,12 +237,17 @@ def test_import_report_matches_ready_and_catches_a_stale_checkpoint(
     )
     from pipelines.shared.storage import LocalStorage
 
+    active_model = rag_config["retriever"]["embedding_model"]
+    active_revision = rag_config["retriever"].get("embedding_revision")
     records = [_record(1), _record(2)]
+    # Non-ASCII content: the content check compares Python's md5 of the UTF-8
+    # bytes with Postgres's md5() of the stored text, and must agree.
+    records[1]["content"] = "通过学生门户网站申请特殊考虑。"
     for record in records:
         record["post_date"] = record["post_date"].isoformat()
         record["created_at"] = record["created_at"].isoformat()
     (tmp_path / "knowledge_base.json").write_text(
-        json.dumps(records),
+        json.dumps(records, ensure_ascii=False),
         encoding="utf-8",
     )
     storage = LocalStorage(tmp_path)
@@ -239,46 +256,79 @@ def test_import_report_matches_ready_and_catches_a_stale_checkpoint(
         "status",
         lambda: ModelRegistryStatus(embedding="ready", reranker="ready"),
     )
+    # A row embedded by another model: /ready does not count it, and neither
+    # may the report.
+    _seed_row(
+        test_database_url,
+        _record(90),
+        embedding_model="other-model",
+        embedding_revision=None,
+    )
+
+    def run(run_id, **kwargs):
+        return run_local_import(
+            storage,
+            test_database_url,
+            input_key="knowledge_base.json",
+            run_id=run_id,
+            **kwargs,
+        )
 
     with patch(
         "sentence_transformers.SentenceTransformer",
         return_value=FakeEmbedder(),
     ):
-        result = run_local_import(
-            storage,
-            test_database_url,
-            input_key="knowledge_base.json",
-            run_id="first",
-        )
+        result = run("first")
 
         # The number an operator compares after an import: the report's
         # count and /ready's come from the same query.
         assert result.knowledge_base_rows == 2
+        assert result.rows_outside_corpus == 0
         assert (
             check_readiness(test_database_url).knowledge_base_rows
             == result.knowledge_base_rows
         )
 
+        # An active-model row that is not part of this corpus is served and
+        # counted by /ready, so the report says so.
+        _seed_row(
+            test_database_url,
+            _record(91),
+            embedding_model=active_model,
+            embedding_revision=active_revision,
+        )
+        with_extra = run("second")
+        assert with_extra.skipped_by_checkpoint is True
+        assert with_extra.rows_outside_corpus == 1
+        assert (
+            check_readiness(test_database_url).knowledge_base_rows
+            == with_extra.knowledge_base_rows
+            == 3
+        )
+
+        # The database holds an older version of one record. Same keys, same
+        # row count -- only the content differs, and the checkpoint would
+        # skip straight past it.
+        with psycopg2.connect(test_database_url) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE knowledge_base SET content = 'an older answer' "
+                    "WHERE link = %s;",
+                    (records[1]["link"],),
+                )
+        with pytest.raises(KnowledgeBaseImportIncompleteError):
+            run("third")
+
         # The database is rebuilt; the checkpoint still says "completed".
         with psycopg2.connect(test_database_url) as conn:
             with conn.cursor() as cursor:
                 cursor.execute("DELETE FROM knowledge_base;")
-
         with pytest.raises(KnowledgeBaseImportIncompleteError):
-            run_local_import(
-                storage,
-                test_database_url,
-                input_key="knowledge_base.json",
-                run_id="second",
-            )
+            run("fourth")
 
-        rerun = run_local_import(
-            storage,
-            test_database_url,
-            input_key="knowledge_base.json",
-            reset_checkpoint=True,
-            run_id="third",
-        )
+        rerun = run("fifth", reset_checkpoint=True)
 
+    assert rerun.skipped_by_checkpoint is False
     assert rerun.knowledge_base_rows == 2
+    assert rerun.rows_outside_corpus == 0
     assert rerun.corpus_sha256 == result.corpus_sha256
