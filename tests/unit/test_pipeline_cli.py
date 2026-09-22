@@ -1,4 +1,7 @@
+import json
 from unittest.mock import ANY, patch
+
+import pytest
 
 from pipelines.cli import main
 from pipelines.ingestion.wechat import HarvestResult
@@ -124,3 +127,101 @@ def test_run_wechat_pipeline_command(
         ),
         run_id=ANY,
     )
+
+
+@patch(
+    "pipelines.orchestration.import_knowledge_base.run_local_import"
+)
+def test_import_completion_line_carries_the_corpus_coordinates(
+    mock_run_local_import,
+    capsys,
+):
+    # In an ECS container the report file dies with the task; this JSON line
+    # is the record that survives, so it has to carry every number the
+    # operator copies out of it.
+    mock_run_local_import.return_value = ImportResult(
+        attempted_count=3,
+        affected_count=0,
+        corpus_sha256="ab" * 32,
+        knowledge_base_rows=3,
+        unique_record_count=3,
+        rows_outside_corpus=0,
+        skipped_by_checkpoint=False,
+        report_key="reports/pipelines/import_knowledge_base_x.json",
+    )
+
+    exit_code = main(
+        [
+            "import-knowledge-base",
+            "--database-url",
+            "postgresql://importer:s3cret@db.internal:5432/rag_vectordb",
+        ]
+    )
+
+    lines = [
+        json.loads(line)
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("{")
+    ]
+    completed = next(
+        line for line in lines if line.get("event") == "command_completed"
+    )
+    assert exit_code == 0
+    assert completed["corpus_sha256"] == "ab" * 32
+    assert completed["knowledge_base_rows"] == 3
+    assert completed["unique_record_count"] == 3
+    assert completed["rows_outside_corpus"] == 0
+    assert completed["skipped_by_checkpoint"] is False
+    assert completed["report_key"] == (
+        "reports/pipelines/import_knowledge_base_x.json"
+    )
+    assert completed["target_id"] == (
+        "postgresql://db.internal:5432/rag_vectordb"
+    )
+    assert "s3cret" not in json.dumps(lines)
+    # The report is named after the same run_id the log lines carry.
+    assert (
+        mock_run_local_import.call_args.kwargs["run_id"]
+        == completed["run_id"]
+    )
+
+
+@patch(
+    "pipelines.orchestration.import_knowledge_base.run_local_import"
+)
+def test_import_uses_the_url_settings_assembles(
+    mock_run_local_import,
+    monkeypatch,
+):
+    # An ECS task has no DATABASE_URL, only the DB_* parts Settings joins.
+    from app.core.config import settings
+
+    mock_run_local_import.return_value = ImportResult(
+        attempted_count=0,
+        affected_count=0,
+    )
+    monkeypatch.setattr(
+        settings,
+        "DATABASE_URL",
+        "postgresql://migrator:pw@db.internal:5432/rag_vectordb",
+    )
+
+    assert main(["import-knowledge-base"]) == 0
+    assert mock_run_local_import.call_args.kwargs["database_url"] == (
+        "postgresql://migrator:pw@db.internal:5432/rag_vectordb"
+    )
+
+
+def test_import_without_any_database_url_is_a_usage_error(
+    monkeypatch,
+    capsys,
+):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "DATABASE_URL", None)
+
+    with pytest.raises(SystemExit) as error:
+        main(["import-knowledge-base"])
+
+    assert error.value.code == 2
+    assert "DB_HOST" in capsys.readouterr().err

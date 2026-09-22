@@ -1,6 +1,5 @@
 import argparse
 import logging
-import os
 from collections.abc import Sequence
 from uuid import uuid4
 
@@ -16,6 +15,12 @@ from pipelines.shared.storage import LocalStorage
 
 
 logger = logging.getLogger(__name__)
+
+DATABASE_URL_HELP = (
+    "PostgreSQL URL. Defaults to DATABASE_URL, or to the URL assembled from "
+    "DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD (how ECS tasks are "
+    "configured)."
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,8 +49,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     import_command.add_argument(
         "--database-url",
-        default=os.getenv("DATABASE_URL"),
-        help="PostgreSQL URL. Defaults to DATABASE_URL.",
+        default=None,
+        help=DATABASE_URL_HELP,
     )
     import_command.add_argument(
         "--limit",
@@ -80,8 +85,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pipeline_command.add_argument(
         "--database-url",
-        default=os.getenv("DATABASE_URL"),
-        help="PostgreSQL URL. Defaults to DATABASE_URL.",
+        default=None,
+        help=DATABASE_URL_HELP,
     )
     pipeline_command.add_argument(
         "--batch-size",
@@ -161,17 +166,14 @@ def _run_command(
         )
     elif args.command == "import-knowledge-base":
         from pipelines.orchestration.import_knowledge_base import (
+            database_target_id,
             run_local_import,
         )
 
-        if not args.database_url:
-            parser.error(
-                "--database-url or DATABASE_URL is required"
-            )
-
+        database_url = _database_url(parser, args)
         result = run_local_import(
             LocalStorage(DEFAULT_DATA_DIR),
-            database_url=args.database_url,
+            database_url=database_url,
             input_key=args.input,
             limit=args.limit,
             batch_size=args.batch_size,
@@ -179,17 +181,23 @@ def _run_command(
             reset_checkpoint=args.reset_checkpoint,
             run_id=run_id,
         )
-        # corpus_sha256 goes into the ECS task definition as CORPUS_SHA256;
-        # knowledge_base_rows is what /ready must report afterwards.
+        # When the import runs in a container, the report file dies with it
+        # and this line is the record that survives: corpus_sha256 goes into
+        # the deployment as CORPUS_SHA256, and knowledge_base_rows is what
+        # /ready must report afterwards.
         logger.info(
             "Knowledge-base import completed",
             extra={
                 "event": "command_completed",
                 "stage": args.command,
                 "record_count": result.attempted_count,
+                "unique_record_count": result.unique_record_count,
                 "affected_count": result.affected_count,
+                "skipped_by_checkpoint": result.skipped_by_checkpoint,
                 "corpus_sha256": result.corpus_sha256,
                 "knowledge_base_rows": result.knowledge_base_rows,
+                "rows_outside_corpus": result.rows_outside_corpus,
+                "target_id": database_target_id(database_url),
                 "report_key": result.report_key,
             },
         )
@@ -201,19 +209,13 @@ def _run_command(
             run_local_wechat_pipeline,
         )
 
-        if not args.database_url:
-            parser.error(
-                "--database-url or DATABASE_URL is required"
-            )
-
+        database_url = _database_url(parser, args)
         result = run_local_wechat_pipeline(
             LocalStorage(DEFAULT_DATA_DIR),
-            database_url=args.database_url,
+            database_url=database_url,
             batch_size=args.batch_size,
             reset_import_checkpoint=args.reset_import_checkpoint,
-            pipeline_run_loader=PostgresPipelineRunLoader(
-                args.database_url
-            ),
+            pipeline_run_loader=PostgresPipelineRunLoader(database_url),
             run_id=run_id,
         )
         logger.info(
@@ -223,7 +225,30 @@ def _run_command(
                 "stage": args.command,
                 "record_count": result.transformed_count,
                 "affected_count": result.affected_count,
+                "corpus_sha256": result.corpus_sha256,
+                "knowledge_base_rows": result.knowledge_base_rows,
+                "report_key": result.import_report_key,
             },
         )
 
     return 0
+
+
+def _database_url(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+) -> str:
+    # Settings, not os.getenv: in an ECS task there is no DATABASE_URL, only
+    # the DB_* parts Settings assembles it from (with the password
+    # percent-encoded). Reading the environment directly here left the
+    # import unable to find the database the migrations had just used.
+    if args.database_url:
+        return args.database_url
+    from app.core.config import settings
+
+    if not settings.DATABASE_URL:
+        parser.error(
+            "--database-url, DATABASE_URL, or DB_HOST/DB_NAME/DB_USER/"
+            "DB_PASSWORD is required"
+        )
+    return settings.DATABASE_URL

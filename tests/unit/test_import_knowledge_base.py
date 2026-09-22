@@ -1,3 +1,4 @@
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -5,13 +6,16 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+from psycopg2.errors import UndefinedTable
 
 from pipelines.embedding.knowledge_base_text import build_embedding_text
 from pipelines.orchestration.import_knowledge_base import (
     ImportResult,
+    KnowledgeBaseCounts,
     KnowledgeBaseImportIncompleteError,
     KnowledgeBaseValidationError,
     build_import_checkpoint_identity,
+    count_knowledge_base_rows,
     database_target_id,
     import_knowledge_base,
     run_local_import,
@@ -309,10 +313,19 @@ def test_import_rejects_non_positive_batch_size():
         )
 
 
+def _counts(knowledge_base_rows, corpus_rows=None):
+    return KnowledgeBaseCounts(
+        knowledge_base_rows=knowledge_base_rows,
+        corpus_rows=(
+            knowledge_base_rows if corpus_rows is None else corpus_rows
+        ),
+    )
+
+
 @patch(
     "pipelines.orchestration.import_knowledge_base."
     "count_knowledge_base_rows",
-    return_value=1,
+    return_value=KnowledgeBaseCounts(knowledge_base_rows=1, corpus_rows=1),
 )
 @patch(
     "pipelines.orchestration.import_knowledge_base."
@@ -360,10 +373,12 @@ def test_local_import_loads_file_and_constructs_model(
         shutil.rmtree(temp_dir)
 
     assert (result.attempted_count, result.affected_count) == (1, 1)
+    assert result.skipped_by_checkpoint is False
     assert (
         cached_result.attempted_count,
         cached_result.affected_count,
     ) == (1, 1)
+    assert cached_result.skipped_by_checkpoint is True
     mock_sentence_transformer.assert_called_once_with(
         "test-model",
         revision="revision-123",
@@ -396,6 +411,10 @@ def _records(count):
     return records
 
 
+def _md5(text):
+    return hashlib.md5(text.encode("utf-8")).hexdigest()
+
+
 def _stub_embedding(mock_sentence_transformer, mock_loader_class):
     model = MagicMock()
     model.encode.side_effect = lambda texts, **_: np.array(
@@ -417,7 +436,7 @@ def _stub_embedding(mock_sentence_transformer, mock_loader_class):
     "PostgresKnowledgeBaseLoader"
 )
 @patch("sentence_transformers.SentenceTransformer")
-def test_local_import_records_corpus_sha256_and_live_row_count(
+def test_local_import_records_corpus_sha256_and_verifies_by_key(
     mock_sentence_transformer,
     mock_loader_class,
     mock_count_rows,
@@ -426,7 +445,7 @@ def test_local_import_records_corpus_sha256_and_live_row_count(
     records = _records(3)
     storage = _write_records(tmp_path, records)
     _stub_embedding(mock_sentence_transformer, mock_loader_class)
-    mock_count_rows.return_value = 3
+    mock_count_rows.return_value = _counts(3)
 
     result = run_local_import(
         storage,
@@ -444,23 +463,36 @@ def test_local_import_records_corpus_sha256_and_live_row_count(
         affected_count=3,
         corpus_sha256=fingerprint_records(records),
         knowledge_base_rows=3,
+        unique_record_count=3,
+        rows_outside_corpus=0,
+        skipped_by_checkpoint=False,
         report_key=report_key,
     )
     assert report["status"] == "completed"
     assert report["corpus_sha256"] == fingerprint_records(records)
     assert report["record_count"] == 3
     assert report["unique_record_count"] == 3
+    assert report["corpus_rows"] == 3
     assert report["knowledge_base_rows"] == 3
+    assert report["rows_outside_corpus"] == 0
+    assert report["skipped_by_checkpoint"] is False
+    assert report["limit"] is None
     assert report["embedding_model"] == "test-model"
     assert report["embedding_revision"] == "revision-123"
+    assert set(report) >= {"started_at", "finished_at", "run_id"}
     # The report is a file people pass around; the password stays out of it.
     assert report["target_id"] == (
         "postgresql://db.internal:5432/rag_vectordb"
     )
     assert "s3cret" not in storage.read(report_key).decode("utf-8")
+    # Every record is looked up by its key and the md5 of its content.
     mock_count_rows.assert_called_once_with(
         "postgresql://importer:s3cret@db.internal:5432/rag_vectordb",
         "knowledge_base",
+        {
+            (record["link"], record["question_text"]): _md5(record["content"])
+            for record in records
+        },
         embedding_model="test-model",
         embedding_revision="revision-123",
     )
@@ -469,7 +501,7 @@ def test_local_import_records_corpus_sha256_and_live_row_count(
 @patch(
     "pipelines.orchestration.import_knowledge_base."
     "count_knowledge_base_rows",
-    return_value=2,
+    return_value=KnowledgeBaseCounts(knowledge_base_rows=2, corpus_rows=2),
 )
 @patch(
     "pipelines.orchestration.import_knowledge_base."
@@ -492,31 +524,34 @@ def test_corpus_sha256_covers_only_the_records_imported(
         input_key="knowledge_base.json",
         model_name="test-model",
         limit=2,
+        run_id="run-1",
     )
 
     # Hashing the whole file would name a corpus the database does not hold.
     assert result.corpus_sha256 == fingerprint_records(records[:2])
     assert result.corpus_sha256 != fingerprint_records(records)
+    assert json.loads(storage.read(result.report_key))["limit"] == 2
 
 
 @patch(
     "pipelines.orchestration.import_knowledge_base."
     "count_knowledge_base_rows",
-    return_value=1,
+    return_value=KnowledgeBaseCounts(knowledge_base_rows=1, corpus_rows=1),
 )
 @patch(
     "pipelines.orchestration.import_knowledge_base."
     "PostgresKnowledgeBaseLoader"
 )
 @patch("sentence_transformers.SentenceTransformer")
-def test_duplicate_keys_expect_one_row_each(
+def test_duplicate_keys_expect_one_row_with_the_last_content(
     mock_sentence_transformer,
     mock_loader_class,
-    _mock_count_rows,
+    mock_count_rows,
     tmp_path,
 ):
     record = _valid_record()
-    storage = _write_records(tmp_path, [record, dict(record)])
+    later = dict(record, content="A later, corrected answer.")
+    storage = _write_records(tmp_path, [record, later])
     _stub_embedding(mock_sentence_transformer, mock_loader_class)
 
     result = run_local_import(
@@ -531,6 +566,11 @@ def test_duplicate_keys_expect_one_row_each(
     assert report["record_count"] == 2
     assert report["unique_record_count"] == 1
     assert report["status"] == "completed"
+    # The loader upserts in order, so the table ends up with the later one.
+    corpus = mock_count_rows.call_args.args[2]
+    assert corpus == {
+        (record["link"], record["question_text"]): _md5(later["content"])
+    }
 
 
 @patch(
@@ -551,7 +591,7 @@ def test_completed_checkpoint_against_an_empty_table_fails_loudly(
     records = _records(3)
     storage = _write_records(tmp_path, records)
     _stub_embedding(mock_sentence_transformer, mock_loader_class)
-    mock_count_rows.return_value = 3
+    mock_count_rows.return_value = _counts(3)
     run_local_import(
         storage,
         DATABASE_URL,
@@ -563,11 +603,8 @@ def test_completed_checkpoint_against_an_empty_table_fails_loudly(
     # Same target id, but the database behind it was rebuilt (or this is a
     # different database reached on the same host:port/name). The checkpoint
     # still says "completed", so nothing is re-imported.
-    mock_count_rows.return_value = 0
-    with pytest.raises(
-        KnowledgeBaseImportIncompleteError,
-        match="--reset-checkpoint",
-    ):
+    mock_count_rows.return_value = _counts(0)
+    with pytest.raises(KnowledgeBaseImportIncompleteError) as error:
         run_local_import(
             storage,
             DATABASE_URL,
@@ -576,16 +613,20 @@ def test_completed_checkpoint_against_an_empty_table_fails_loudly(
             run_id="run-2",
         )
 
+    # Both commands that import name their own flag.
+    assert "--reset-checkpoint" in str(error.value)
+    assert "--reset-import-checkpoint" in str(error.value)
     report = json.loads(
         storage.read("reports/pipelines/import_knowledge_base_run-2.json")
     )
     assert report["status"] == "incomplete"
-    assert report["knowledge_base_rows"] == 0
+    assert report["skipped_by_checkpoint"] is True
+    assert report["corpus_rows"] == 0
     assert report["unique_record_count"] == 3
     mock_sentence_transformer.assert_called_once()
 
     # The remedy the error names actually works: the import runs again.
-    mock_count_rows.return_value = 3
+    mock_count_rows.return_value = _counts(3)
     result = run_local_import(
         storage,
         DATABASE_URL,
@@ -596,4 +637,124 @@ def test_completed_checkpoint_against_an_empty_table_fails_loudly(
     )
 
     assert result.knowledge_base_rows == 3
+    assert result.skipped_by_checkpoint is False
     assert mock_sentence_transformer.call_count == 2
+
+
+@patch(
+    "pipelines.orchestration.import_knowledge_base."
+    "count_knowledge_base_rows"
+)
+@patch(
+    "pipelines.orchestration.import_knowledge_base."
+    "PostgresKnowledgeBaseLoader"
+)
+@patch("sentence_transformers.SentenceTransformer")
+def test_a_different_corpus_of_the_same_size_is_not_mistaken_for_this_one(
+    mock_sentence_transformer,
+    mock_loader_class,
+    mock_count_rows,
+    tmp_path,
+):
+    # The table holds as many active rows as this corpus has records -- but
+    # they are another corpus (or another version of this one). Counting
+    # rows alone would call that complete and hand out this corpus's hash.
+    storage = _write_records(tmp_path, _records(3))
+    _stub_embedding(mock_sentence_transformer, mock_loader_class)
+    mock_count_rows.return_value = _counts(3, corpus_rows=0)
+
+    with pytest.raises(KnowledgeBaseImportIncompleteError):
+        run_local_import(
+            storage,
+            DATABASE_URL,
+            input_key="knowledge_base.json",
+            model_name="test-model",
+            run_id="run-1",
+        )
+
+
+@patch(
+    "pipelines.orchestration.import_knowledge_base."
+    "count_knowledge_base_rows",
+    return_value=KnowledgeBaseCounts(knowledge_base_rows=5, corpus_rows=3),
+)
+@patch(
+    "pipelines.orchestration.import_knowledge_base."
+    "PostgresKnowledgeBaseLoader"
+)
+@patch("sentence_transformers.SentenceTransformer")
+def test_rows_outside_the_corpus_are_reported(
+    mock_sentence_transformer,
+    mock_loader_class,
+    _mock_count_rows,
+    tmp_path,
+):
+    storage = _write_records(tmp_path, _records(3))
+    _stub_embedding(mock_sentence_transformer, mock_loader_class)
+
+    with patch(
+        "pipelines.orchestration.import_knowledge_base.logger"
+    ) as import_logger:
+        result = run_local_import(
+            storage,
+            DATABASE_URL,
+            input_key="knowledge_base.json",
+            model_name="test-model",
+            run_id="run-1",
+        )
+
+    # Complete -- every record is there -- but /ready will count 5, and the
+    # 2 extra rows are served too.
+    assert result.rows_outside_corpus == 2
+    assert result.knowledge_base_rows == 5
+    report = json.loads(storage.read(result.report_key))
+    assert report["status"] == "completed"
+    assert report["rows_outside_corpus"] == 2
+    warning = import_logger.warning.call_args
+    assert warning.kwargs["extra"]["rows_outside_corpus"] == 2
+
+
+@patch(
+    "pipelines.orchestration.import_knowledge_base."
+    "count_knowledge_base_rows",
+    return_value=KnowledgeBaseCounts(knowledge_base_rows=0, corpus_rows=0),
+)
+def test_an_empty_import_names_no_corpus(_mock_count_rows, tmp_path):
+    storage = _write_records(tmp_path, _records(3))
+
+    result = run_local_import(
+        storage,
+        DATABASE_URL,
+        input_key="knowledge_base.json",
+        model_name="test-model",
+        limit=0,
+        run_id="run-1",
+    )
+
+    # A hash of an empty list must never become a deployment's CORPUS_SHA256.
+    assert result.corpus_sha256 is None
+    report = json.loads(storage.read(result.report_key))
+    assert report["status"] == "empty"
+    assert report["corpus_sha256"] is None
+
+
+@patch("pipelines.orchestration.import_knowledge_base.psycopg2.connect")
+def test_a_missing_table_says_to_migrate_first(mock_connect):
+    cursor = mock_connect.return_value.cursor.return_value.__enter__
+    cursor.return_value.execute.side_effect = UndefinedTable(
+        'relation "knowledge_base" does not exist'
+    )
+
+    with pytest.raises(
+        KnowledgeBaseImportIncompleteError,
+        match="alembic upgrade head",
+    ):
+        count_knowledge_base_rows(
+            DATABASE_URL,
+            "knowledge_base",
+            {("https://example.com/apply", "How do I apply?"): "abc"},
+            embedding_model="test-model",
+            embedding_revision=None,
+        )
+
+    mock_connect.return_value.close.assert_called_once()

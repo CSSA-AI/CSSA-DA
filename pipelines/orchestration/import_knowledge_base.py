@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import math
 import time
@@ -8,9 +9,10 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 import psycopg2
+from psycopg2.errors import UndefinedTable
 
 from app.core.config import rag_config
-from app.services.knowledge_base import count_active_rows
+from app.services.knowledge_base import count_active_rows, count_corpus_rows
 from pipelines.embedding.knowledge_base_text import encode_records
 from pipelines.loaders.base import KnowledgeBaseLoader
 from pipelines.loaders.postgres_knowledge_base import (
@@ -66,9 +68,13 @@ class ImportResult:
     affected_count: int
     # Filled in by run_local_import, which is the only caller that knows the
     # target database and writes the import report. import_knowledge_base()
-    # leaves them unset.
+    # leaves them unset. See pipelines/README.md "Import batching" for what
+    # each one means.
     corpus_sha256: str | None = None
     knowledge_base_rows: int | None = None
+    unique_record_count: int | None = None
+    rows_outside_corpus: int | None = None
+    skipped_by_checkpoint: bool | None = None
     report_key: str | None = None
 
 
@@ -307,7 +313,7 @@ def run_local_import(
         checkpoint_identity,
         batch_count=math.ceil(len(records) / batch_size),
     )
-    result = _run_checkpointed_import(
+    result, skipped_by_checkpoint = _run_checkpointed_import(
         records,
         database_url,
         model_name=model_name,
@@ -324,6 +330,8 @@ def run_local_import(
         run_id=run_id,
         started_at=started_at,
         input_key=input_key,
+        limit=limit,
+        skipped_by_checkpoint=skipped_by_checkpoint,
         # The checkpoint already hashed exactly these records, after --limit.
         # Reusing it means "which corpus" has one definition, and it is taken
         # from what was imported rather than recomputed from a file later.
@@ -343,19 +351,23 @@ def _run_checkpointed_import(
     table_name: str,
     batch_size: int,
     checkpoint_manager: ImportCheckpointManager,
-) -> ImportResult:
+) -> tuple[ImportResult, bool]:
+    """Import, or skip because the checkpoint says it is done -- and say which."""
     checkpoint = checkpoint_manager.prepare()
     if checkpoint is not None and checkpoint.status == "completed":
-        return ImportResult(
-            attempted_count=len(records),
-            affected_count=checkpoint.affected_count,
+        return (
+            ImportResult(
+                attempted_count=len(records),
+                affected_count=checkpoint.affected_count,
+            ),
+            True,
         )
     if not records:
         checkpoint_manager.mark_completed(
             checkpoint,
             affected_count=checkpoint.affected_count,
         )
-        return ImportResult(attempted_count=0, affected_count=0)
+        return ImportResult(attempted_count=0, affected_count=0), False
 
     from sentence_transformers import SentenceTransformer
 
@@ -372,7 +384,7 @@ def _run_checkpointed_import(
         embedding_revision=model_revision,
         expected_embedding_dim=rag_config["retriever"]["embedding_dim"],
     ) as loader:
-        return _import_validated_records(
+        result = _import_validated_records(
             records,
             embedder,
             loader,
@@ -380,6 +392,15 @@ def _run_checkpointed_import(
             checkpoint_manager=checkpoint_manager,
             checkpoint=checkpoint,
         )
+    return result, False
+
+
+@dataclass(frozen=True)
+class KnowledgeBaseCounts:
+    # Every row with the active model/revision: exactly what /ready counts.
+    knowledge_base_rows: int
+    # Of those, the rows that are this corpus's records, key and content.
+    corpus_rows: int
 
 
 def _verify_and_report(
@@ -391,6 +412,8 @@ def _verify_and_report(
     run_id: str,
     started_at: datetime,
     input_key: str,
+    limit: int | None,
+    skipped_by_checkpoint: bool,
     corpus_sha256: str,
     model_name: str,
     model_revision: str | None,
@@ -398,24 +421,29 @@ def _verify_and_report(
 ) -> ImportResult:
     # Asked of the database, not taken from the checkpoint. A checkpoint that
     # says "completed" only proves some earlier run finished against a target
-    # with this id -- and a database rebuilt since, or a local one reached
+    # with this id -- and a database rebuilt since, or a different one reached
     # through a tunnel on the same host:port/name, has the same id and none of
-    # the rows. Counted by the query /ready uses, so this is the number /ready
-    # must show once the API points at the same database.
-    knowledge_base_rows = count_knowledge_base_rows(
+    # this corpus (or an older version of it). So every record is looked up by
+    # its key and content, whether this run wrote it or skipped.
+    corpus = _corpus_content_md5(records)
+    counts = count_knowledge_base_rows(
         database_url,
         table_name,
+        corpus,
         embedding_model=model_name,
         embedding_revision=model_revision,
     )
-    # One row per (link, question_text): the table's unique key. After a
-    # complete import every one of those keys carries this model/revision, so
-    # fewer rows than keys means records are missing. More is fine -- the table
-    # may also hold another corpus embedded by the same model.
-    unique_record_count = len(
-        {(record["link"], record["question_text"]) for record in records}
-    )
-    complete = knowledge_base_rows >= unique_record_count
+    unique_record_count = len(corpus)
+    if not records:
+        # Nothing was imported, so there is no corpus to name -- and a hash of
+        # an empty list must never end up as a deployment's CORPUS_SHA256.
+        status = "empty"
+    elif counts.corpus_rows == unique_record_count:
+        status = "completed"
+    else:
+        status = "incomplete"
+    rows_outside_corpus = counts.knowledge_base_rows - counts.corpus_rows
+    recorded_sha256 = None if status == "empty" else corpus_sha256
     report_key = f"{PIPELINE_REPORTS_PREFIX}/import_knowledge_base_{run_id}.json"
     write_json_report(
         storage,
@@ -423,15 +451,19 @@ def _verify_and_report(
         {
             "run_id": run_id,
             "stage": "import_knowledge_base",
-            "status": "completed" if complete else "incomplete",
+            "status": status,
             "started_at": started_at.isoformat(),
             "finished_at": datetime.now(timezone.utc).isoformat(),
             "input_key": input_key,
-            "corpus_sha256": corpus_sha256,
+            "limit": limit,
+            "skipped_by_checkpoint": skipped_by_checkpoint,
+            "corpus_sha256": recorded_sha256,
             "record_count": result.attempted_count,
             "unique_record_count": unique_record_count,
             "affected_count": result.affected_count,
-            "knowledge_base_rows": knowledge_base_rows,
+            "corpus_rows": counts.corpus_rows,
+            "knowledge_base_rows": counts.knowledge_base_rows,
+            "rows_outside_corpus": rows_outside_corpus,
             "embedding_model": model_name,
             "embedding_revision": model_revision,
             "table_name": table_name,
@@ -440,31 +472,66 @@ def _verify_and_report(
             "target_id": database_target_id(database_url),
         },
     )
-    if not complete:
+    if status == "incomplete":
         raise KnowledgeBaseImportIncompleteError(
-            f"{table_name} holds {knowledge_base_rows} rows for "
-            f"{model_name} @ {model_revision}, fewer than the "
-            f"{unique_record_count} unique records this import covers. "
-            "The rows are not where the import checkpoint says they are; "
-            "rerun with --reset-checkpoint. Report: "
-            f"{report_key}"
+            f"{table_name} holds {counts.corpus_rows} of the "
+            f"{unique_record_count} records this import covers (same key, "
+            f"same content, embedded by {model_name} @ {model_revision}). "
+            "The table does not hold what the import checkpoint says it "
+            "does: a database rebuilt since, a different one on the same "
+            "host:port/name, or another version of this corpus. Rerun with "
+            "--reset-checkpoint (--reset-import-checkpoint for "
+            f"run-wechat-pipeline). Report: {report_key}"
+        )
+    if rows_outside_corpus:
+        # Not a failure: the loader upserts and never deletes, so a corpus
+        # refresh that drops articles leaves their rows behind. But /ready
+        # counts them and retrieval can return them, so CORPUS_SHA256 then
+        # names only part of what is being served.
+        logger.warning(
+            "Knowledge base holds rows outside this corpus",
+            extra={
+                "event": "rows_outside_corpus",
+                "stage": "import",
+                "rows_outside_corpus": rows_outside_corpus,
+                "knowledge_base_rows": counts.knowledge_base_rows,
+                "corpus_sha256": recorded_sha256,
+            },
         )
 
     return replace(
         result,
-        corpus_sha256=corpus_sha256,
-        knowledge_base_rows=knowledge_base_rows,
+        corpus_sha256=recorded_sha256,
+        knowledge_base_rows=counts.knowledge_base_rows,
+        unique_record_count=unique_record_count,
+        rows_outside_corpus=rows_outside_corpus,
+        skipped_by_checkpoint=skipped_by_checkpoint,
         report_key=report_key,
     )
+
+
+def _corpus_content_md5(
+    records: list[dict[str, Any]],
+) -> dict[tuple[str, str], str]:
+    # Keyed like the table's unique index. A later record with the same key
+    # wins, as it does in the table: the loader writes in order and upserts.
+    return {
+        (str(record["link"]), str(record["question_text"])): hashlib.md5(
+            str(record["content"]).encode("utf-8"),
+            usedforsecurity=False,
+        ).hexdigest()
+        for record in records
+    }
 
 
 def count_knowledge_base_rows(
     database_url: str,
     table_name: str,
+    corpus: dict[tuple[str, str], str],
     *,
     embedding_model: str,
     embedding_revision: str | None,
-) -> int:
+) -> KnowledgeBaseCounts:
     connection = psycopg2.connect(
         database_url,
         connect_timeout=rag_config["pgvector"].get(
@@ -473,12 +540,29 @@ def count_knowledge_base_rows(
     )
     try:
         with connection.cursor() as cursor:
-            return count_active_rows(
-                cursor,
-                table_name,
-                embedding_model=embedding_model,
-                embedding_revision=embedding_revision,
+            return KnowledgeBaseCounts(
+                knowledge_base_rows=count_active_rows(
+                    cursor,
+                    table_name,
+                    embedding_model=embedding_model,
+                    embedding_revision=embedding_revision,
+                ),
+                corpus_rows=count_corpus_rows(
+                    cursor,
+                    table_name,
+                    corpus,
+                    embedding_model=embedding_model,
+                    embedding_revision=embedding_revision,
+                ),
             )
+    except UndefinedTable as error:
+        # Reached when a completed checkpoint skipped the import against a
+        # database that has not even been migrated.
+        raise KnowledgeBaseImportIncompleteError(
+            f"{table_name} does not exist in this database. Run `alembic "
+            "upgrade head`, then rerun with --reset-checkpoint "
+            "(--reset-import-checkpoint for run-wechat-pipeline)."
+        ) from error
     finally:
         connection.close()
 
