@@ -580,9 +580,15 @@ ALB target health check      -> /ready
 >
 > 这一项拆开看是两半：**能跑**，和**绕不过去**。
 >
-> 能跑的那半已经做好了：`cssa-da-prod-migrate` 是一个跑完就退出的任务，明确报出
-> 退出码；`migrations/env.py` 现在自己会从 `DB_*` 拼出连接串，所以它的命令就是一句
-> 干净的 `alembic upgrade head`。
+> 能跑的那半已经做好**并且验证过了**：`cssa-da-prod-migrate` 是一个跑完就退出的任务，
+> 明确报出退出码；`migrations/env.py` 现在自己会从 `DB_*` 拼出连接串，所以它的命令就是
+> 一句干净的 `alembic upgrade head`。
+>
+> 对生产实跑过一次（2026-09-22，表已在 head，因此是空操作，未执行任何 DDL）：
+> **`exitCode: 0`**。这一次同时验了五件事——982MB 的 ARM64 镜像拉得下来、没有 task role
+> 的容器起得来、Secrets Manager 两个字段注得进去、私有子网连得上 RDS、以及
+> **容器里没有 `DATABASE_URL` 而 alembic 照样连上了**（日志里是 alembic 的输出而不是
+> `RuntimeError`）。最后一条最要紧：不是「迁移能跑」，而是「成败能被程序读到」。
 >
 > **绕不过去的那半做不了，而那半才是「关卡」的意义。** 关卡稳不稳，取决于通向生产
 > 是不是只有一条路——只要手敲 `terraform apply` 还能部署，赶时间的那天人就会用它。
