@@ -86,3 +86,30 @@ def test_validate_records_rejects_missing_null_and_blank_links():
     assert "row 1: missing link" in errors
     assert "row 2: link must be a non-empty string" in errors
     assert "row 3: link must be a non-empty string" in errors
+
+
+def test_validate_records_rejects_non_string_question_and_content():
+    record = {
+        "question_text": "How do I apply?",
+        "content": "Apply through the student portal.",
+        "source": "WeChat: CSSA",
+        "post_date": "2026-04-10",
+        "language": "zh",
+        "created_at": "2026-06-30",
+        "tags": ["wechat", "CSSA"],
+        "link": "https://example.com/article",
+    }
+
+    errors = validate_records(
+        [
+            {**record, "content": True},
+            {**record, "question_text": 1e20},
+            {**record, "content": ["a", "b"]},
+            {**record, "content": ""},
+        ]
+    )
+
+    assert "row 1: content must be a string" in errors
+    assert "row 2: question_text must be a string" in errors
+    assert "row 3: content must be a string" in errors
+    assert "row 4: content is empty" in errors

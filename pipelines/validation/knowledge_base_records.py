@@ -20,11 +20,18 @@ def validate_record(record: dict[str, Any], index: int) -> list[str]:
         if field not in record:
             errors.append(f"row {index}: missing {field}")
 
-    if not record.get("question_text"):
-        errors.append(f"row {index}: question_text is empty")
-
-    if not record.get("content"):
-        errors.append(f"row {index}: content is empty")
+    # Strings, not merely truthy: the loader hands these to Postgres as they
+    # are, and a bool, number or list is stored as its SQL text form ('true',
+    # '1e+20', '{a,b}'), which no longer matches what the embedding was
+    # computed from -- or what the import checks against after loading.
+    for field in ("question_text", "content"):
+        if field not in record:
+            continue
+        value = record[field]
+        if not isinstance(value, str):
+            errors.append(f"row {index}: {field} must be a string")
+        elif not value:
+            errors.append(f"row {index}: {field} is empty")
 
     if "link" in record:
         link = record["link"]

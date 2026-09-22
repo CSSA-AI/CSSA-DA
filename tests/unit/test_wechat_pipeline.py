@@ -67,6 +67,12 @@ def test_local_pipeline_runs_stages_and_returns_report():
                 return_value=ImportResult(
                     attempted_count=9,
                     affected_count=8,
+                    corpus_sha256="ab" * 32,
+                    knowledge_base_rows=9,
+                    skipped_by_checkpoint=False,
+                    report_key=(
+                        "reports/pipelines/import_knowledge_base_run-123.json"
+                    ),
                 ),
             ) as import_records,
             patch(
@@ -107,6 +113,14 @@ def test_local_pipeline_runs_stages_and_returns_report():
     assert report_payload["transformed_count"] == 9
     assert report_payload["affected_count"] == 8
     assert report_payload["raw_output_location"] == raw_output_location
+    # The import stage's corpus coordinate travels into the pipeline's own
+    # report, so a full run is as traceable as a single import.
+    assert report_payload["corpus_sha256"] == "ab" * 32
+    assert report_payload["knowledge_base_rows"] == 9
+    assert report_payload["import_skipped_by_checkpoint"] is False
+    assert report_payload["import_report_key"] == (
+        "reports/pipelines/import_knowledge_base_run-123.json"
+    )
     assert [
         call.args[0].status
         for call in metadata_loader.upsert_run.call_args_list
@@ -133,6 +147,12 @@ def test_local_pipeline_runs_stages_and_returns_report():
         raw_output_location=raw_output_location,
         processed_output_key="current/wechat_articles_processed.json",
         report_key=report_key,
+        corpus_sha256="ab" * 32,
+        knowledge_base_rows=9,
+        import_report_key=(
+            "reports/pipelines/import_knowledge_base_run-123.json"
+        ),
+        import_skipped_by_checkpoint=False,
     )
     assert result.rejected_count == 3
     harvest.assert_called_once_with(

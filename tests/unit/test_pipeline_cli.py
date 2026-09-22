@@ -147,6 +147,10 @@ def test_import_completion_line_carries_the_corpus_coordinates(
         unique_record_count=3,
         rows_outside_corpus=0,
         skipped_by_checkpoint=False,
+        status="completed",
+        corpus_rows=3,
+        embedding_model="test-model",
+        embedding_revision="rev-1",
         report_key="reports/pipelines/import_knowledge_base_x.json",
     )
 
@@ -172,6 +176,11 @@ def test_import_completion_line_carries_the_corpus_coordinates(
     assert completed["unique_record_count"] == 3
     assert completed["rows_outside_corpus"] == 0
     assert completed["skipped_by_checkpoint"] is False
+    assert completed["status"] == "completed"
+    assert completed["corpus_rows"] == 3
+    assert completed["model_name"] == "test-model"
+    assert completed["model_revision"] == "rev-1"
+    assert "limit" not in completed
     assert completed["report_key"] == (
         "reports/pipelines/import_knowledge_base_x.json"
     )
@@ -225,3 +234,54 @@ def test_import_without_any_database_url_is_a_usage_error(
 
     assert error.value.code == 2
     assert "DB_HOST" in capsys.readouterr().err
+
+
+@patch(
+    "pipelines.orchestration.wechat_pipeline.run_local_wechat_pipeline"
+)
+@patch("pipelines.loaders.postgres_pipeline_runs.PostgresPipelineRunLoader")
+def test_run_wechat_pipeline_uses_settings_and_logs_the_corpus(
+    mock_pipeline_run_loader_class,
+    mock_run_pipeline,
+    monkeypatch,
+    capsys,
+):
+    from app.core.config import settings
+
+    monkeypatch.setattr(
+        settings,
+        "DATABASE_URL",
+        "postgresql://migrator:pw@db.internal:5432/rag_vectordb",
+    )
+    mock_run_pipeline.return_value = WechatPipelineRunResult(
+        run_id="run-123",
+        harvested_count=12,
+        transformed_count=9,
+        skipped_count=2,
+        dropped_count=1,
+        attempted_import_count=9,
+        affected_count=8,
+        raw_output_location="raw/wechat/wechat_articles_all.json",
+        processed_output_key="current/wechat_articles_processed.json",
+        corpus_sha256="cd" * 32,
+        knowledge_base_rows=9,
+        import_report_key="reports/pipelines/import_knowledge_base_x.json",
+        import_skipped_by_checkpoint=True,
+    )
+
+    assert main(["run-wechat-pipeline"]) == 0
+
+    assert mock_run_pipeline.call_args.kwargs["database_url"] == (
+        "postgresql://migrator:pw@db.internal:5432/rag_vectordb"
+    )
+    completed = next(
+        json.loads(line)
+        for line in capsys.readouterr().out.splitlines()
+        if '"command_completed"' in line
+    )
+    assert completed["corpus_sha256"] == "cd" * 32
+    assert completed["knowledge_base_rows"] == 9
+    assert completed["skipped_by_checkpoint"] is True
+    assert completed["report_key"] == (
+        "reports/pipelines/import_knowledge_base_x.json"
+    )
