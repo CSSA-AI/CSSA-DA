@@ -17,6 +17,9 @@ extension, as RDS preinstalls it for its master) and simulates drift someone
 might introduce by hand.
 """
 
+import base64
+import hashlib
+import hmac
 import os
 import secrets
 from datetime import date, datetime, timezone
@@ -100,62 +103,59 @@ def rds_like(test_database_url):
     migrator = f"migrator_{suffix}"
     migrator_password = secrets.token_urlsafe(24)
     database = f"runtime_role_{suffix}"
-
-    _execute(
-        test_database_url,
-        sql.SQL(
-            "CREATE ROLE {} LOGIN NOSUPERUSER CREATEROLE CREATEDB "
-            "PASSWORD {};"
-        ).format(sql.Identifier(migrator), sql.Literal(migrator_password)),
-        autocommit=True,
-    )
-    _execute(
-        test_database_url,
-        sql.SQL("CREATE DATABASE {} OWNER {};").format(
-            sql.Identifier(database), sql.Identifier(migrator)
-        ),
-        autocommit=True,
-    )
-    superuser_url = _url_for(
-        test_database_url,
-        urlparse(test_database_url).username,
-        urlparse(test_database_url).password,
-        database,
+    # Same credentials as TEST_DATABASE_URL, pointed at the scratch database.
+    superuser_url = urlunparse(
+        urlparse(test_database_url)._replace(path=f"/{database}")
     )
     migrator_url = _url_for(
         test_database_url, migrator, migrator_password, database
     )
-    # RDS preinstalls pgvector's availability for its master; here the
-    # superuser creates it, so migration 0001's CREATE EXTENSION IF NOT
-    # EXISTS is a no-op run by a non-superuser, as in production.
-    _execute(superuser_url, "CREATE EXTENSION IF NOT EXISTS vector;")
-    with patch.dict(os.environ, {"DATABASE_URL": migrator_url}):
-        command.upgrade(Config(str(PROJECT_ROOT / "alembic.ini")), "head")
 
-    yield {
-        "migrator": migrator,
-        "migrator_url": migrator_url,
-        "superuser_url": superuser_url,
-        "database": database,
-    }
+    # try/finally around the yield: the role and database are cluster-wide,
+    # so they must go even when setup fails half-way -- e.g. a migration that
+    # turns out to need superuser, the very failure this fixture exists for.
+    try:
+        _execute(
+            test_database_url,
+            sql.SQL(
+                "CREATE ROLE {} LOGIN NOSUPERUSER CREATEROLE CREATEDB "
+                "PASSWORD {};"
+            ).format(sql.Identifier(migrator), sql.Literal(migrator_password)),
+            autocommit=True,
+        )
+        _execute(
+            test_database_url,
+            sql.SQL("CREATE DATABASE {} OWNER {};").format(
+                sql.Identifier(database), sql.Identifier(migrator)
+            ),
+            autocommit=True,
+        )
+        # RDS makes pgvector available to its master; here the superuser
+        # creates it, so migration 0001's CREATE EXTENSION IF NOT EXISTS is
+        # a no-op run by a non-superuser, as in production.
+        _execute(superuser_url, "CREATE EXTENSION IF NOT EXISTS vector;")
+        with patch.dict(os.environ, {"DATABASE_URL": migrator_url}):
+            command.upgrade(Config(str(PROJECT_ROOT / "alembic.ini")), "head")
 
-    _execute(
-        test_database_url,
-        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-        "WHERE datname = %s AND pid <> pg_backend_pid();",
-        (database,),
-        autocommit=True,
-    )
-    _execute(
-        test_database_url,
-        sql.SQL("DROP DATABASE {};").format(sql.Identifier(database)),
-        autocommit=True,
-    )
-    _execute(
-        test_database_url,
-        sql.SQL("DROP ROLE {};").format(sql.Identifier(migrator)),
-        autocommit=True,
-    )
+        yield {
+            "migrator": migrator,
+            "migrator_url": migrator_url,
+            "superuser_url": superuser_url,
+            "database": database,
+        }
+    finally:
+        _execute(
+            test_database_url,
+            sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE);").format(
+                sql.Identifier(database)
+            ),
+            autocommit=True,
+        )
+        _execute(
+            test_database_url,
+            sql.SQL("DROP ROLE IF EXISTS {};").format(sql.Identifier(migrator)),
+            autocommit=True,
+        )
 
 
 @pytest.fixture
@@ -231,6 +231,27 @@ def _server_checks_passwords(rds_like, role):
     except psycopg2.OperationalError:
         return True
     return False
+
+
+def _password_matches(verifier, password):
+    """Whether a stored SCRAM-SHA-256 verifier was made from this password.
+
+    Checked against the catalog rather than by logging in, because a login
+    proves nothing where pg_hba trusts the connection.
+    """
+    # SCRAM-SHA-256$<iterations>:<salt>$<StoredKey>:<ServerKey>
+    _, parameters, keys = verifier.split("$")
+    iterations, salt = parameters.split(":")
+    stored_key = keys.split(":")[0]
+    salted = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        base64.b64decode(salt),
+        int(iterations),
+    )
+    client_key = hmac.new(salted, b"Client Key", "sha256").digest()
+    expected = base64.b64encode(hashlib.sha256(client_key).digest()).decode()
+    return hmac.compare_digest(expected, stored_key)
 
 
 def test_runtime_role_serves_every_api_code_path(rds_like, runtime_role, monkeypatch):
@@ -346,11 +367,6 @@ def test_rerun_as_a_non_superuser_converges_and_rotates_the_password(
             sql.Identifier(runtime_role)
         ),
     )
-    verifier_before = _execute(
-        rds_like["superuser_url"],
-        "SELECT rolpassword FROM pg_authid WHERE rolname = %s;",
-        (runtime_role,),
-    )
 
     second_password = secrets.token_urlsafe(24)
     second, second_url = _provision(rds_like, runtime_role, second_password)
@@ -366,14 +382,13 @@ def test_rerun_as_a_non_superuser_converges_and_rotates_the_password(
         "SELECT has_table_privilege(%s, 'knowledge_base', 'INSERT');",
         (runtime_role,),
     ) == [(False,)]
-    assert (
-        _execute(
-            rds_like["superuser_url"],
-            "SELECT rolpassword FROM pg_authid WHERE rolname = %s;",
-            (runtime_role,),
-        )
-        != verifier_before
+    [(verifier,)] = _execute(
+        rds_like["superuser_url"],
+        "SELECT rolpassword FROM pg_authid WHERE rolname = %s;",
+        (runtime_role,),
     )
+    assert _password_matches(verifier, second_password)
+    assert not _password_matches(verifier, first_password)
     psycopg2.connect(second_url).close()
     if _server_checks_passwords(rds_like, runtime_role):
         with pytest.raises(psycopg2.OperationalError):
@@ -387,23 +402,78 @@ def test_rerun_as_a_non_superuser_converges_and_rotates_the_password(
             ).close()
 
 
-def test_a_grant_to_public_is_reported_not_ignored(rds_like, runtime_role):
+@pytest.mark.parametrize(
+    ("drift", "undo", "message"),
+    [
+        # Privileges REVOKE ... FROM the role cannot take back: they come
+        # through PUBLIC. The script reports them instead of passing.
+        (
+            "GRANT SELECT ON chat_interactions TO PUBLIC",
+            "REVOKE SELECT ON chat_interactions FROM PUBLIC",
+            "has SELECT on public.chat_interactions,",
+        ),
+        (
+            "GRANT SELECT (query) ON chat_interactions TO PUBLIC",
+            "REVOKE SELECT (query) ON chat_interactions FROM PUBLIC",
+            "has SELECT on public.chat_interactions.query",
+        ),
+        (
+            "GRANT USAGE ON SEQUENCE knowledge_base_id_seq TO PUBLIC",
+            "REVOKE USAGE ON SEQUENCE knowledge_base_id_seq FROM PUBLIC",
+            "has USAGE on sequence public.knowledge_base_id_seq",
+        ),
+        (
+            "GRANT CREATE ON SCHEMA public TO PUBLIC",
+            "REVOKE CREATE ON SCHEMA public FROM PUBLIC",
+            "can create objects in schema public",
+        ),
+        (
+            "GRANT CREATE ON DATABASE {db} TO PUBLIC",
+            "REVOKE CREATE ON DATABASE {db} FROM PUBLIC",
+            "can create schemas in this database",
+        ),
+        # Not only public: a readable table in any schema the role can reach.
+        (
+            "CREATE SCHEMA runtime_role_other; "
+            "CREATE TABLE runtime_role_other.notes (id integer); "
+            "GRANT USAGE ON SCHEMA runtime_role_other TO PUBLIC; "
+            "GRANT SELECT ON runtime_role_other.notes TO PUBLIC",
+            "DROP SCHEMA runtime_role_other CASCADE",
+            "has SELECT on runtime_role_other.notes",
+        ),
+        (
+            "CREATE SCHEMA runtime_role_owned AUTHORIZATION {role}",
+            "DROP SCHEMA runtime_role_owned CASCADE",
+            "owns schema runtime_role_owned",
+        ),
+    ],
+)
+def test_drift_that_revoking_cannot_fix_is_reported(
+    rds_like,
+    runtime_role,
+    drift,
+    undo,
+    message,
+):
     _provision(rds_like, runtime_role)
-    _execute(
-        rds_like["migrator_url"],
-        "GRANT SELECT ON chat_interactions TO PUBLIC;",
-    )
+
+    def run(statement):
+        _execute(
+            rds_like["superuser_url"],
+            sql.SQL(statement).format(
+                role=sql.Identifier(runtime_role),
+                db=sql.Identifier(rds_like["database"]),
+            ),
+        )
+
+    run(drift)
     try:
-        with pytest.raises(
-            ProvisioningError,
-            match="has SELECT on chat_interactions",
-        ):
+        with pytest.raises(ProvisioningError, match=message):
             _provision(rds_like, runtime_role)
     finally:
-        _execute(
-            rds_like["migrator_url"],
-            "REVOKE SELECT ON chat_interactions FROM PUBLIC;",
-        )
+        run(undo)
+    # Once the drift is gone, the next run passes again.
+    _provision(rds_like, runtime_role)
 
 
 def test_a_relation_owned_by_the_role_is_reported(rds_like, runtime_role):
