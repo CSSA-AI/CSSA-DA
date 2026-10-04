@@ -92,6 +92,16 @@ def clean_text(text: str | None) -> str:
     return text.strip()
 
 
+def dedupe_by_content(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """正文完全相同的记录只保留 post_date 最早的一条。"""
+    kept: dict[str, dict[str, Any]] = {}
+    for record in records:
+        key = record["content"]
+        if key not in kept or record["post_date"] < kept[key]["post_date"]:
+            kept[key] = record
+    return list(kept.values())
+
+
 def transform_articles(
     raw_articles: list[dict[str, Any]],
     *,
@@ -140,6 +150,8 @@ def transform_articles(
         }
 
         processed_articles.append(rag_item)
+
+    processed_articles = dedupe_by_content(processed_articles)
 
     return WechatTransformResult(
         records=processed_articles,
