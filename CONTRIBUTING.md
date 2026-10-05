@@ -43,9 +43,16 @@ stack in Docker (Postgres + migrations + API), see
 
 ## Language
 
-**Everything on GitHub is written in English**: issue titles and bodies, pull
-request titles and descriptions, and review and comment threads. Commit messages
-are English too — see [Commit messages](#commit-messages).
+**Everything on GitHub is written in English**: issue titles, pull request titles
+and descriptions, and review and comment threads. Commit messages are English too
+— see [Commit messages](#commit-messages).
+
+**Issue bodies are the one exception: they are bilingual.** English first, then
+the same content in Chinese below a `---` and a `# 中文` heading. Issues are where
+someone decides whether to pick work up, so the English has to be there; they are
+also where this team argues about design, and that argument is sharper in the
+language the team thinks in. Both halves are written as prose — a mechanical
+restatement of the other half helps nobody.
 
 The reason is who reads them. This repository already receives pull requests from
 contributors outside the club who do not read Chinese. An issue they cannot read
@@ -183,7 +190,10 @@ Clients that persisted the old value must re-fetch.
 - [ ] Integration tests pass if you touched the database or retrieval path
 - [ ] New behaviour is covered by tests
 - [ ] Breaking changes are flagged in the commit **and** the PR description
-- [ ] Roadmap items you completed are marked in [docs/roadmap/](docs/roadmap/)
+- [ ] Roadmap items you completed are ticked in [docs/roadmap/](docs/roadmap/), in
+      this PR — see [Finishing a roadmap item](#finishing-a-roadmap-item)
+- [ ] The design write-up under [docs/design/](docs/design/) is added or updated in
+      the same PR
 
 ### CI
 
@@ -390,8 +400,8 @@ breaking. Therefore:
   migrate on their own schedule instead of coordinating a simultaneous release
 - Announce removal of an old version ahead of time and record it in the changelog
 
-> There are no API consumers yet, which makes this the cheapest possible moment
-> to introduce the `/v1/` prefix. See
+> The `/v1/` prefix landed in #73 (2026-08-20), while there were still no API
+> consumers — the cheapest possible moment. See
 > [ROADMAP_rag.md](docs/roadmap/ROADMAP_rag.md) Phase 0.1.
 
 ### Cutting a release
@@ -423,3 +433,42 @@ hand-maintained changelog tends to rot, so **only tagging is required**.
 
 Roadmaps answer *what and when*; design documents answer *why and how*. Link
 between them rather than duplicating content.
+
+### Finishing a roadmap item
+
+An item is not finished when the code merges. It is finished when the next person
+can tell that it is done, and why it was built that way. Two things are therefore
+part of the same pull request as the code — not a follow-up PR, not a docs-only
+branch afterwards:
+
+**1. Tick the box.** Find the item in [docs/roadmap/](docs/roadmap/) — usually in
+[ROADMAP_versions.md](docs/roadmap/ROADMAP_versions.md) and in the line's own
+roadmap — change `- [ ]` to `- [x]`, and append the date and the PR number:
+
+```markdown
+- [x] 0.8 `/chat` 输入体积上限 —— **已落地(2026-09-13,#98)**:body 上限在路由、
+      解析和鉴权之前就执行,拒绝路径不碰下游
+```
+
+An unticked box that is actually done is worse than no box: it makes the roadmap
+something people stop trusting, and then stop reading.
+
+**2. Write the design document.** Add or update the write-up under
+[docs/design/implemented/](docs/design/implemented/), then add its row to that
+directory's [README.md](docs/design/implemented/README.md) table.
+
+Use the [`design-details-md`](.claude/skills/design-details-md/SKILL.md) skill to
+write it — it is a Claude Code skill kept in this repository, and it defines the
+house shape for these documents: background first, then one big-picture
+walkthrough of the whole flow, then the fundamentals grouped into clusters that
+build on each other, then the implementation steps linking back to them. It also
+draws the line on detail: concepts, architecture, attack scenarios and the *why*
+belong in the document; line-by-line code mechanics do not, so that the document
+survives a refactor. The audience is a teammate who does not already know the
+framework.
+
+Not every commit needs a new document. A change that only fixes a bug inside a
+design that is already written up **updates that document** instead — a document
+that no longer matches the code is worse than no document. But a roadmap item that
+made a decision — an architecture, a contract, a trade-off someone will ask about
+in six months — gets one.

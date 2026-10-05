@@ -1,3 +1,4 @@
+from fastapi import Request
 from limits import parse_many
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -31,13 +32,37 @@ def chat_global_rate_limit() -> str:
     return settings.CHAT_GLOBAL_RATE_LIMIT
 
 
+def chat_rate_limit_key(request: Request) -> str:
+    """Rate-limit /v1/chat by whoever require_caller decided the caller is.
+
+    The parameter MUST be named `request`: slowapi inspects the signature and
+    calls a key_func with no arguments unless it finds that exact name, so
+    renaming it fails at request time rather than at import.
+
+    Falls back to the address when no principal is on the request, which
+    happens if a route is ever given a rate limit but no authentication
+    dependency. Reading request.state.principal directly would raise
+    AttributeError inside slowapi's wrapper instead, surfacing as a 500 with
+    a traceback that says nothing about the real mistake.
+    """
+    principal = getattr(request.state, "principal", None)
+    if principal is None:
+        return f"ip:{get_remote_address(request)}"
+    return principal.rate_limit_key
+
+
 def global_rate_limit_key() -> str:
     """Constant key so every request shares one counter.
 
     The per-IP limit can be dodged by rotating IPs; this layer caps total
     spend regardless of how many addresses the traffic comes from
-    (ROADMAP_platform.md 19.4). slowapi calls a route-level key_func with no
-    arguments (unlike the limiter-level default, which receives the request).
+    (ROADMAP_platform.md 19.4).
+
+    Takes no arguments because it needs none — not because route-level key
+    funcs are argument-free. slowapi inspects the signature and passes the
+    request only when it finds a parameter named `request`
+    (slowapi/extension.py); chat_rate_limit_key, on this same route, has one
+    and does receive it.
     """
     return "global"
 

@@ -1,6 +1,9 @@
 import sys
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
+
 from app.api import deps
 
 
@@ -79,3 +82,19 @@ def test_close_rag_orchestrator_does_not_initialize_pipeline():
     deps.close_rag_orchestrator()
 
     assert deps._build_rag_orchestrator.cache_info().currsize == 0
+
+
+def test_get_rag_orchestrator_does_not_leak_the_exception_text(monkeypatch):
+    deps._build_rag_orchestrator.cache_clear()
+
+    def _raise():
+        raise RuntimeError("postgresql://user:secret@internal-db:5432/rag")
+
+    monkeypatch.setattr(deps, "_build_rag_orchestrator", _raise)
+
+    with pytest.raises(HTTPException) as exc_info:
+        deps.get_rag_orchestrator()
+
+    assert exc_info.value.status_code == 503
+    assert "secret" not in exc_info.value.detail
+    assert "internal-db" not in exc_info.value.detail

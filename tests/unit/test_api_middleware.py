@@ -2,9 +2,10 @@ import json
 import logging
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_rag_orchestrator, require_internal_api_key
+from app.api.deps import Principal, get_rag_orchestrator, require_caller
 from app.core.config import settings
 from app.core.logging import AppJsonLogFormatter
 from app.core.middleware import SECURITY_HEADERS
@@ -56,7 +57,7 @@ def client() -> TestClient:
     app.dependency_overrides[get_rag_orchestrator] = lambda: (
         LoggingOrchestrator()
     )
-    app.dependency_overrides[require_internal_api_key] = lambda: None
+    app.dependency_overrides[require_caller] = lambda: None
     return TestClient(app)
 
 
@@ -177,7 +178,7 @@ def test_security_headers_present_on_error():
     app.dependency_overrides[get_rag_orchestrator] = lambda: (
         FailingOrchestrator()
     )
-    app.dependency_overrides[require_internal_api_key] = lambda: None
+    app.dependency_overrides[require_caller] = lambda: None
     response = TestClient(app).post(
         "/v1/chat",
         json={"message": "How do I enrol?"},
@@ -276,6 +277,44 @@ def test_chat_global_rate_limit_is_shared_across_ips(monkeypatch):
     assert third.status_code == 429
 
 
+def test_chat_rate_limit_keys_on_the_principal_not_the_address(monkeypatch):
+    # Wiring sentinel between require_caller and the limiter. For all of v1
+    # both paths produce "ip:<address>", so no HTTP-level behaviour tells
+    # "the limiter read the principal" apart from "the limiter fell back to
+    # the address" — replacing chat_rate_limit_key's body with the fallback
+    # would leave every other test green.
+    #
+    # So plant a principal whose key is deliberately not an address, and send
+    # from two different ones. Landing in a single bucket is only possible if
+    # the principal was read.
+    monkeypatch.setattr(settings, "CHAT_RATE_LIMIT", "1/minute")
+
+    def one_shared_caller(request: Request) -> Principal:
+        principal = Principal(
+            kind="internal",
+            user_id=None,
+            rate_limit_key="user:shared",
+        )
+        request.state.principal = principal
+        return principal
+
+    app.dependency_overrides[get_rag_orchestrator] = lambda: (
+        LoggingOrchestrator()
+    )
+    app.dependency_overrides[require_caller] = one_shared_caller
+
+    first = TestClient(app, client=("10.0.0.1", 50000)).post(
+        "/v1/chat", json={"message": "hi"}
+    )
+    second = TestClient(app, client=("10.0.0.2", 50000)).post(
+        "/v1/chat", json={"message": "hi"}
+    )
+
+    assert first.status_code == 200
+    # Keyed on the address, this second one would be a fresh bucket and 200.
+    assert second.status_code == 429
+
+
 def test_per_ip_429s_do_not_burn_the_global_budget(monkeypatch):
     # Decorator-order regression sentinel: slowapi charges counters before
     # judging them and evaluates the bottom decorator first, so the per-IP
@@ -324,7 +363,7 @@ def test_catch_all_handler_returns_safe_500():
     app.dependency_overrides[get_rag_orchestrator] = lambda: (
         UnexpectedlyFailingOrchestrator()
     )
-    app.dependency_overrides[require_internal_api_key] = lambda: None
+    app.dependency_overrides[require_caller] = lambda: None
     # raise_server_exceptions=False lets the registered handler produce the
     # response instead of the TestClient re-raising the exception.
     response = TestClient(app, raise_server_exceptions=False).post(

@@ -31,9 +31,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # The API needs both models: the embedding model to embed the query and the
 # reranker to re-score retrieved candidates.
+#
+# These three COPY lines are the cache key for a ~600MB layer, so they name
+# individual files rather than directories. Copying app/core/config wholesale
+# meant every edit to settings.py invalidated the models and made a push that
+# should move 5MB move 600MB instead. Now the download re-runs when the model
+# choice changes, which is the only time it should.
 COPY ops/__init__.py ops/download_models.py ./ops/
-COPY app/core/__init__.py ./app/core/
-COPY app/core/config ./app/core/config
+COPY app/core/__init__.py app/core/rag_config.py ./app/core/
+COPY app/core/config/rag-config.yaml ./app/core/config/
 RUN --mount=type=cache,target=/root/.cache/huggingface \
     /app/.venv/bin/python ops/download_models.py --target-dir /models
 

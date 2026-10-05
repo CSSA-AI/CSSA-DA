@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock
 
-from app.api.deps import get_rag_orchestrator, require_internal_api_key
+from app.api.deps import get_rag_orchestrator, require_caller
 from app.core.config import settings
 from app.main import app
 from app.schemas.article import Article
@@ -52,7 +52,7 @@ class FailingOrchestrator:
 
 def client() -> TestClient:
     app.dependency_overrides[get_rag_orchestrator] = lambda: StubOrchestrator()
-    app.dependency_overrides[require_internal_api_key] = lambda: None
+    app.dependency_overrides[require_caller] = lambda: None
     return TestClient(app)
 
 
@@ -258,6 +258,25 @@ def test_chat_rejects_an_empty_message():
     assert response.status_code == 422
 
 
+def test_chat_validation_error_uses_the_shared_error_shape_and_drops_input():
+    response = client().post(
+        "/v1/chat",
+        json={
+            "message": "How do I enrol?",
+            "chat_history": [{"role": "user", "content": "x" * 4_001}],
+        },
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error"]["code"] == "validation_error"
+    assert "detail" not in body
+    # The oversized field value must never be echoed back to the client.
+    assert "x" * 4_001 not in response.text
+    detail = body["error"]["details"][0]
+    assert set(detail) == {"loc", "msg", "type"}
+
+
 def test_chat_rejects_a_chat_history_message_over_the_length_cap():
     response = client().post(
         "/v1/chat",
@@ -330,7 +349,34 @@ def test_chat_rejects_invalid_or_missing_api_key(
     )
 
     assert response.status_code == 401
-    assert response.json() == {"detail": "Invalid or missing API key"}
+    assert response.json() == {
+        "error": {
+            "code": "unauthorized",
+            "message": "Invalid or missing API key",
+        }
+    }
+
+
+def test_an_unmatched_route_uses_the_shared_error_shape():
+    # Starlette raises its own HTTPException base class for these, not
+    # FastAPI's subclass. Registering the handler on the subclass leaves them
+    # on {"detail": ...} while every other failure uses the shared shape, and
+    # nothing else in this suite would notice.
+    response = TestClient(app).get("/no-such-route")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": {"code": "not_found", "message": "Not Found"}
+    }
+
+
+def test_a_wrong_method_uses_the_shared_error_shape():
+    response = TestClient(app).delete("/v1/chat")
+
+    assert response.status_code == 405
+    assert response.json() == {
+        "error": {"code": "method_not_allowed", "message": "Method Not Allowed"}
+    }
 
 
 def test_chat_returns_503_when_api_key_is_not_configured(monkeypatch):
@@ -345,7 +391,10 @@ def test_chat_returns_503_when_api_key_is_not_configured(monkeypatch):
 
     assert response.status_code == 503
     assert response.json() == {
-        "detail": "API authentication is not configured"
+        "error": {
+            "code": "service_unavailable",
+            "message": "API authentication is not configured",
+        }
     }
 
 
@@ -398,7 +447,7 @@ def test_chat_returns_safe_service_errors(
     app.dependency_overrides[get_rag_orchestrator] = lambda: (
         FailingOrchestrator(error)
     )
-    app.dependency_overrides[require_internal_api_key] = lambda: None
+    app.dependency_overrides[require_caller] = lambda: None
 
     response = TestClient(app).post(
         "/v1/chat",
@@ -473,7 +522,7 @@ def test_chat_does_not_record_when_the_pipeline_failed(monkeypatch):
     app.dependency_overrides[get_rag_orchestrator] = lambda: (
         FailingOrchestrator(RetrievalUnavailableError("boom"))
     )
-    app.dependency_overrides[require_internal_api_key] = lambda: None
+    app.dependency_overrides[require_caller] = lambda: None
 
     response = TestClient(app).post(
         "/v1/chat",

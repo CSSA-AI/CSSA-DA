@@ -109,6 +109,7 @@ CSSA-DA/
 ├── CONTRIBUTING.md                           # Branching, commits, PRs, versioning, releases
 └── docs/
     ├── local-development.md                  # Local Docker workflows and command reference
+    ├── deployment.md                         # Shipping a commit to production — follow it in order
     ├── roadmap/                              # What to build and when
     │   ├── ROADMAP_versions.md               #   Milestone boundaries v1–v4 — start here
     │   ├── BACKLOG.md                        #   Flattened issue list for GitHub import
@@ -173,6 +174,7 @@ Copy `.env.example` to `.env` and fill in:
 | `ALLOWED_ORIGINS` | optional | Comma-separated CORS origins |
 | `CHAT_RATE_LIMIT` | optional | Per-IP `/v1/chat` limit, `10/minute` by default |
 | `CHAT_GLOBAL_RATE_LIMIT` | optional | Site-wide `/v1/chat` limit shared by all clients, `500/day` by default |
+| `MAX_REQUEST_BODY_BYTES` | optional | Request body size cap enforced before parsing/auth, `524288` (512KB) by default |
 
 Check runtime configuration without printing secret values:
 
@@ -235,9 +237,20 @@ The API is available at `http://localhost:8000`, with interactive documentation 
 `/v1/chat` is rate limited on two layers: per client IP (`CHAT_RATE_LIMIT`, default
 `10/minute`) and site-wide across all clients (`CHAT_GLOBAL_RATE_LIMIT`, default
 `500/day`) — rotating IPs cannot get past the shared counter, which caps total OpenAI
-spend. Failures return a stable error shape — `{"error": {"code": ..., "message": ...}}`
-— with internal details kept in the logs only: `503` when retrieval or generation is
-unavailable, `504` on generation timeout, `429` when rate limited.
+spend. Every failure — including `401`/`503` auth errors and `422` validation errors,
+not just the RAG-specific ones — returns the same stable shape,
+`{"error": {"code": ..., "message": ...}}`, with internal details (exception text,
+stack traces) kept in the logs only: `503` when retrieval, generation, or the RAG
+pipeline itself is unavailable, `504` on generation timeout, `429` when rate limited,
+`422` when the request body fails validation (the response includes a `details` array
+with each field's `loc`/`msg`/`type`, but never echoes the offending value back).
+
+Every request body is capped at `MAX_REQUEST_BODY_BYTES` (default 512KB), enforced by
+an ASGI middleware that runs before routing, JSON parsing, or the `X-API-Key` check —
+an unauthenticated caller cannot make the server buffer or parse an oversized body
+before being rejected. A declared `Content-Length` over the limit is rejected
+immediately with `413`; a chunked request with no `Content-Length` is rejected once its
+streamed byte count crosses the limit, before the body is ever fully buffered.
 
 ```bash
 curl -X POST http://localhost:8000/v1/chat \
@@ -379,6 +392,7 @@ the ids in the retrieval logs.
 | [docs/design/storage-abstraction.md](docs/design/implemented/storage-abstraction.md) | Pipeline storage abstraction (中文) |
 | [docs/design/deployment-packaging.md](docs/design/implemented/deployment-packaging.md) | Dependency locking and container images (中文) |
 | [pipelines/README.md](pipelines/README.md) | Pipeline layout, local workflows, checkpoints |
+| [docs/deployment.md](docs/deployment.md) | **部署清单：把一个 commit 发到生产。顺序不能反——先改库,再上代码** |
 | [docs/local-development.md](docs/local-development.md) | Local Docker workflows and command reference |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Branching, commits, PRs, versioning and releases |
 

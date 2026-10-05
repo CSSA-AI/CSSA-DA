@@ -508,7 +508,17 @@ FROM continuumio/miniconda3:latest
 
 原始条目（第 5/6/7 项）保留在下方以备回顾。
 
-### 8. 在 ECS 中明确配置 health check
+### 8. 在 ECS 中明确配置 health check ✅ 已完成
+
+> **状态：已完成（2026-09-17，#111）。** 推荐语义原样落地：容器自查 `/health`，
+> ALB 目标组查 `/ready`。start period 120 秒、服务宽限期 180 秒，覆盖实测 57 秒的
+> 冷启动（其中 14 秒在加载并预热两个模型）。
+>
+> 「在使用 `/ready` 作为 ALB health check 前，需要先完成模型 readiness」这条说得
+> 对，但真正卡住的是**数据**：空库上 `/ready` 永远 503，先指过去会导致一滴流量都
+> 进不来。所以 ALB 先指 `/health`，等第 20 项的语料到位后才切回 `/ready`，切换是
+> 就地修改、目标组不重建。详见 [aws-foundation.md](../design/implemented/aws-foundation.md)。
+> 下面保留原始条目。
 
 Dockerfile 已经包含 health check，但 ECS task definition 仍需要明确配置 container
 health check。ALB target group health check 需要单独配置。
@@ -564,7 +574,33 @@ ALB target health check      -> /ready
 - 在内部日志中保存原始 exception。
 - 不向客户端返回数据库 URL、内部路径或 provider 细节。
 
-### 11. 定义 migration 部署关卡
+### 11. 定义 migration 部署关卡 🔗 与 Phase 4 合并
+
+> **状态：能力已具备，强制力等 CI（2026-09-22，#111）。**
+>
+> 这一项拆开看是两半：**能跑**，和**绕不过去**。
+>
+> 能跑的那半已经做好**并且验证过了**：`cssa-da-prod-migrate` 是一个跑完就退出的任务，
+> 明确报出退出码；`migrations/env.py` 现在自己会从 `DB_*` 拼出连接串，所以它的命令就是
+> 一句干净的 `alembic upgrade head`。
+>
+> 对生产实跑过一次（2026-09-22，表已在 head，因此是空操作，未执行任何 DDL）：
+> **`exitCode: 0`**。这一次同时验了五件事——982MB 的 ARM64 镜像拉得下来、没有 task role
+> 的容器起得来、Secrets Manager 两个字段注得进去、私有子网连得上 RDS、以及
+> **容器里没有 `DATABASE_URL` 而 alembic 照样连上了**（日志里是 alembic 的输出而不是
+> `RuntimeError`）。最后一条最要紧：不是「迁移能跑」，而是「成败能被程序读到」。
+>
+> **绕不过去的那半做不了，而那半才是「关卡」的意义。** 关卡稳不稳，取决于通向生产
+> 是不是只有一条路——只要手敲 `terraform apply` 还能部署，赶时间的那天人就会用它。
+> 本地脚本只能做到「默认这么干」，做不到「只能这么干」。
+>
+> 而且现在写脚本，到了 CI 时代还得重写：版本号怎么传、凭据从哪来、在哪台机器上跑，
+> 全都不一样。所以这一项并入 Phase 4，做成流水线里的一格。
+>
+> 在那之前，[docs/deployment.md](../deployment.md) 是人照着敲的那份清单，它**就是
+> 现在唯一的关卡**。11.1 那条向后兼容的硬规则也抄在里面——那条规则关卡本来就保证
+> 不了，见下。
+> 下面保留原始条目。
 
 Docker Compose 会在 migration 完成后启动 API，但 ECS 不会继承 Compose 的依赖关系。
 
@@ -998,7 +1034,8 @@ OpenAI 往返）。myCSSA 的 worker 数是按登录这类毫秒级请求配的�
 - [x] **OpenAI 后台设硬性支出上限** —— 见 19.4。**整个方案的地基**：不走 BFF 的全部
       论证都架在「损失封顶」上。✅ **已完成（2026-09-06）**，本节的前提于此成立
 - [ ] **key 从 Django 服务端注入模板，不进 commit** —— 要交代给前端团队的就这一句
-- [ ] **CSSA-DA 侧把鉴权的形状摆对** —— v1 唯一的代码活，**纯重构、行为零变化**，见 19.9
+- [x] **CSSA-DA 侧把鉴权的形状摆对** —— **已落地（2026-09-13，#96/#99）**，纯重构、
+      行为零变化，见 19.9 与 [caller-identity.md](../design/implemented/caller-identity.md)
 - [ ] **`ALLOWED_ORIGINS` 配生产域名 + smoke test 加正反两条 CORS 断言** —— 部署那天做
 
 **明确不做**：BFF、`X-User-Id` header、`chat_interactions` 的 `user_id` 列。
@@ -1176,6 +1213,93 @@ FastAPI 解析依赖（含 require_caller）
 
 ---
 
+### 20. 首次语料导入生产 RDS（2026-09-13 新增，v1 阻塞项）✅ 已完成
+
+> **状态：已完成（2026-09-17，#111）。** 2312 行入库，`/ready` 转 200，`/v1/chat`
+> 端到端能答。
+>
+> 下面写的那个卡点（语料不在镜像里）的解法：加一个 S3 数据桶，本地上传后生成预签名
+> URL，容器用 `urllib` 拉下来。容器**不需要任何新的 IAM 权限**——镜像里既没有 boto3
+> 也没有 AWS CLI，给了角色也用不上。导入跑在 API 容器里而非另建 pipeline 镜像：这条
+> 代码路径的第三方依赖只有 `psycopg2` 和 `sentence_transformers`，都在 core 里。
+>
+> ⚠️ **留了一个已知缺陷**：语料里约 9% 是重复内容（205 条 / 164 组，最多的一组同一
+> 篇出现 7 次）。`(link, question_text)` 唯一索引拦不住——同样的内容重发一次就是一个
+> 新 URL。后果不是分数难看，而是 **top-5 可能返回同一篇的五个副本**，模型拿到的上下文
+> 塌缩成一份，且在最热门的话题上最严重。属应用层，另开 issue。
+> 下面保留原始条目。
+
+**Phase 2 部署的是一个没有数据的服务，而这个服务在没有数据时按设计拒绝服务。**
+这一项补的是 Phase 2 与 Phase 3 之间的那条缝。
+
+#### 门是怎么关上的
+
+`app/services/readiness.py` 的判定是有顺序的：`DATABASE_URL` → 连不连得上 →
+表在不在 → **当前模型的行数** → 模型 ready 没有。第四步不是「表里有没有行」：
+
+```sql
+SELECT COUNT(*) FROM knowledge_base
+WHERE embedding_model = %s
+  AND embedding_revision IS NOT DISTINCT FROM %s;
+```
+
+所以有两种「空」，给同一个 503：真空库；以及库里有行、但那是**别的 embedding
+model / revision** 嵌的（将来换嵌入模型时，旧行一行都不算数 —— 这是对的，维度不
+匹配的向量比没有更糟）。
+
+#### 在 ECS 上的表现
+
+```text
+ALB target group 打 /ready → 一直 503 → target 永远 unhealthy
+  → ALB 不导流 → ECS 判定健康检查未通过 → 回收重启 → 循环
+```
+
+看到的是 **task 反复起停**，与「SG 没放行」「subnet 路由不对」「RDS 连不上」的表象
+完全一致。**根因不在网络，而排查方向会先去网络** —— 写下这一项主要就是为了省掉
+那一天。
+
+#### 卡点：语料不在镜像里
+
+导入命令是现成的（`python -m pipelines import-knowledge-base`：读处理后的记录 →
+现场算 embedding → 分批写 Postgres），但 `.dockerignore` 里 `data/*` 是排除的（只留
+`demo_data.json`）。**pipeline 镜像有模型、有代码、没有数据** —— 语料只在开发者的机器上。
+
+#### 三条路
+
+| 路 | 需要什么 | 代价 |
+|---|---|---|
+| **A. 本地直连 RDS** | RDS 公网可达（公有子网 + SG 放行），或 bastion / SSM 端口转发 | 快；但为一次性导入放宽 RDS 的网络形状，「临时开了忘了关」是经典事故 |
+| **B. 一次性 ECS task，数据从 S3 拉** | 需要 `S3Storage` —— 那是 Phase 3 | 架构上最对，但把 Phase 3 提前，Phase 2 因此拖长 |
+| **C. 语料烤进 pipeline 镜像** | 改 `.dockerignore` | 最快；84MB 进镜像层，且每次更新语料都要重建镜像 |
+
+**选 A，且走 SSM 端口转发，不开公网 RDS。** RDS 留在私有子网、不给公网地址、SG 不加
+白名单，用 SSM Session Manager 转发到本地跑导入。代价是要带上 SSM 的 IAM 权限和一个
+跳板（或用 ECS exec 从已有 task 进）。
+
+若判断跳板太重，退到 **C 的一次性版本**：只为首次导入构建一个带语料的镜像，导完
+丢弃 —— 但必须在 PR 里写明它是一次性的。**不要让它变成常规路径**，否则半年后没人
+记得语料是怎么进去的。
+
+**不选 B**：为首次导入提前做 `S3Storage`，等于把 Phase 3 塞进 Phase 2。
+
+#### 两个连带的坑
+
+1. **`CREATE EXTENSION vector` 需要高权限。** migration 0001 里有
+   `CREATE EXTENSION IF NOT EXISTS vector`，RDS 上普通应用用户建不了扩展 —— 要么用
+   master user 跑 migration，要么先手工建好扩展。这直接决定第 11 项那个部署关卡**用
+   哪个凭据跑**：跑 migration 的身份和跑应用的身份本来就不该是同一个，这是顺手把它们
+   分开的时机。
+2. **`CORPUS_SHA256` 要在导入那一刻记下来。** 首次导入那份语料的 hash 就是之后所有
+   `chat_interactions` 行的「哪份语料」坐标。事后补算容易对不上（文件被动过、重跑过），
+   而这一列的价值恰恰在于半年后拿它做对照。
+
+#### 验收
+
+`/ready` 返回 200 且 `knowledge_base_rows` > 0，且这个数与本地导入报告的条数**对得上**。
+对不上说明导了一半 —— 导入有 checkpoint，`--reset-checkpoint` 可以重来。
+
+---
+
 ## 当前已经具备的部署基础
 
 以下部分已经适合继续向 AWS 推进：
@@ -1280,7 +1404,9 @@ adapter 只在 `predict` 时暴露），此时 `/ready` 若仍报 200，会把�
 2. 配置 ECS 和 ALB health check。
 3. 配置访问 OpenAI 所需的 outbound network。
 4. 将 migration 作为部署关卡。
-5. 部署 API 并运行 smoke test。
+5. **首次语料导入生产 RDS（第 20 项）** —— 必须在 smoke test 之前，否则 `/ready`
+   永远不会转绿，而表象看起来像网络配错了。
+6. 部署 API 并运行 smoke test。
 
 ### Phase 3：生产 Pipeline
 

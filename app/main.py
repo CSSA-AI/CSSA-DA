@@ -1,5 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
+from http import HTTPStatus
 import logging
 from typing import Annotated, Literal
 
@@ -10,26 +11,32 @@ from fastapi import (
     Request,
     status as http_status,
 )
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel, Field
 from slowapi.errors import RateLimitExceeded
 
 from app.api.deps import (
+    Principal,
     close_rag_orchestrator,
     get_rag_orchestrator,
     preload_rag_orchestrator,
-    require_internal_api_key,
+    require_caller,
 )
 from app.core.config import settings
 from app.core.logging import configure_app_logging
 from app.core.middleware import (
+    MaxBodySizeMiddleware,
+    RequestBodyTooLargeError,
     RequestContextMiddleware,
     SecurityHeadersMiddleware,
 )
 from app.core.rate_limit import (
     chat_global_rate_limit,
     chat_rate_limit,
+    chat_rate_limit_key,
     global_rate_limit_key,
     limiter,
     validate_rate_limit_config,
@@ -90,9 +97,19 @@ app.state.limiter = limiter
 
 # Starlette wraps middleware in reverse: the LAST add_middleware call becomes
 # the OUTERMOST layer (runs first on requests, last on responses).
-# Order (outermost -> innermost): CORS > SecurityHeaders > RequestContext.
-# CORS is outermost so preflight OPTIONS requests are answered before entering
-# the stack and CORS headers land on every response, including error responses.
+# Order (outermost -> innermost): CORS > SecurityHeaders > RequestContext >
+# MaxBodySize. CORS stays outermost so preflight OPTIONS requests are answered
+# before entering the rest of the stack and CORS headers land on every
+# response, including error responses.
+#
+# MaxBodySize is innermost of the four. Its Content-Length fast path answers
+# without invoking anything further in, so every layer whose headers must
+# appear on that 413 has to sit OUTSIDE it — put it outermost and the fast
+# path ships a response with no security headers and no X-Request-ID, unlike
+# every other response the app produces. Being innermost costs it nothing:
+# middleware all run ahead of routing, so an oversized body still never
+# reaches routing, parsing, or auth, and the body is still never read.
+app.add_middleware(MaxBodySizeMiddleware)
 app.add_middleware(RequestContextMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
@@ -120,6 +137,92 @@ def _service_error_response(
             "error": {
                 "code": error.code,
                 "message": error.public_message,
+            }
+        },
+    )
+
+
+# FastAPI/Starlette's built-in handlers for these two return {"detail": ...},
+# which breaks the {"error": {code, message}} contract every other handler in
+# this file follows. Registering our own replaces those defaults.
+#
+# The HTTPException one is registered on Starlette's class, not FastAPI's
+# subclass of it. Handler lookup walks the MRO of the exception that was
+# actually raised, so registering on the subclass would miss everything
+# Starlette itself raises from its own base class — 404 from an unmatched
+# route and 405 from a wrong method — and those would keep returning
+# {"detail": ...}. Registering on the base covers both, and a more specific
+# registration still wins: RateLimitExceeded also inherits from this class
+# but comes first in its own MRO, so it keeps its "rate_limited" code.
+def _http_status_error_code(status_code: int) -> str:
+    try:
+        phrase = HTTPStatus(status_code).phrase
+    except ValueError:
+        phrase = "error"
+    return phrase.lower().replace(" ", "_").replace("-", "_")
+
+
+@app.exception_handler(RequestValidationError)
+def handle_validation_error(
+    _: Request,
+    exc: RequestValidationError,
+) -> JSONResponse:
+    # Field errors carry an "input" entry that echoes the request body back
+    # verbatim; for a 20-item chat_history that's the entire oversized
+    # payload. Keep loc/msg/type (useful for debugging, derived only from
+    # field constraints) and drop input.
+    details = [
+        {key: value for key, value in error.items() if key in ("loc", "msg", "type")}
+        for error in exc.errors()
+    ]
+    logger.warning("Request validation failed: %s", details)
+    return JSONResponse(
+        status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content={
+            "error": {
+                "code": "validation_error",
+                "message": "Request failed validation.",
+                "details": details,
+            }
+        },
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+def handle_http_exception(
+    _: Request,
+    exc: StarletteHTTPException,
+) -> JSONResponse:
+    logger.warning("HTTP exception: %s %s", exc.status_code, exc.detail)
+    return JSONResponse(
+        status_code=exc.status_code,
+        headers=exc.headers,
+        content={
+            "error": {
+                "code": _http_status_error_code(exc.status_code),
+                "message": exc.detail,
+            }
+        },
+    )
+
+
+@app.exception_handler(RequestBodyTooLargeError)
+def handle_request_body_too_large(
+    _: Request,
+    exc: RequestBodyTooLargeError,
+) -> JSONResponse:
+    # A chunked request has no Content-Length for the middleware to reject
+    # upfront, so this fires once its streamed byte count crosses the limit.
+    logger.warning(
+        "Rejecting oversized chunked request body: %s bytes",
+        exc.received_bytes,
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": {
+                "code": "payload_too_large",
+                "message": exc.detail,
             }
         },
     )
@@ -239,7 +342,7 @@ def ready() -> JSONResponse:
 
 @app.get("/status", tags=["system"])
 def status(
-    _: Annotated[None, Depends(require_internal_api_key)],
+    caller: Annotated[Principal, Depends(require_caller)],
 ) -> dict:
     return get_system_status().to_dict()
 
@@ -253,12 +356,12 @@ def status(
 # docs/design/implemented/global-rate-limit.md and
 # test_per_ip_429s_do_not_burn_the_global_budget).
 @limiter.limit(chat_global_rate_limit, key_func=global_rate_limit_key)
-@limiter.limit(chat_rate_limit)
+@limiter.limit(chat_rate_limit, key_func=chat_rate_limit_key)
 def chat(
     request: Request,  # required by slowapi (looked up by this exact name)
     payload: ChatRequest,
     background_tasks: BackgroundTasks,
-    _: Annotated[None, Depends(require_internal_api_key)],
+    caller: Annotated[Principal, Depends(require_caller)],
     orchestrator: Annotated[RAGOrchestrator, Depends(get_rag_orchestrator)],
 ) -> ChatResponse:
     answer, sources = orchestrator.run(

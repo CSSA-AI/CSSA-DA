@@ -24,7 +24,7 @@ import logging
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_rag_orchestrator, require_internal_api_key
+from app.api.deps import get_rag_orchestrator, require_caller
 from app.core.logging import AppJsonLogFormatter
 from app.core.middleware import REQUEST_ID_HEADER
 from app.main import app
@@ -90,7 +90,7 @@ def chat_request(log_buffer):
         generator=StubGenerator(),
     )
     app.dependency_overrides[get_rag_orchestrator] = lambda: orchestrator
-    app.dependency_overrides[require_internal_api_key] = lambda: None
+    app.dependency_overrides[require_caller] = lambda: None
     try:
         # No `with` on the client: the lifespan would preload the real
         # cross-encoder, which this test has no use for.

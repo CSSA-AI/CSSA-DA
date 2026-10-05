@@ -27,6 +27,7 @@
     - [6. ContextVar 与 token](#6-contextvar-与-token)
   - [四、没接住的异常怎么变成安全响应](#四没接住的异常怎么变成安全响应)
     - [7. 框架按继承链(MRO)挑异常处理器](#7-框架按继承链mro挑异常处理器)
+    - [7b. 注册在子类上,接不住父类](#7b-同一条机制的反面注册在子类上接不住父类)
 - [Step 1:结构化 JSON 日志基础](#step-1结构化-json-日志基础)
 - [Step 2:RequestContextMiddleware](#step-2requestcontextmiddleware请求-id--access-log)
 - [Step 3:SecurityHeadersMiddleware](#step-3securityheadersmiddleware安全响应头)
@@ -34,6 +35,8 @@
 - [Step 5:/chat 限流(rate limiting)](#step-5chat-限流rate-limiting)
 - [Step 6:兜底异常处理器](#step-6兜底异常处理器)
 - [Step 7:让容器 stdout 只剩结构化日志](#step-7让容器-stdout-只剩结构化日志)
+- [Step 8:统一错误响应契约](#step-8统一错误响应契约)
+- [Step 9:请求体大小上限](#step-9请求体大小上限)
 - [中间件注册顺序](#中间件注册顺序总览)
 - [测试策略](#测试策略)
 - [完成情况与后续](#完成情况与后续)
@@ -80,11 +83,14 @@ uvicorn（网络服务器）           把网络字节翻译成 Python 能用的
 │  │ SecurityHeadersMiddleware      ← Step 3：给响应加安全头       │
 │  │  ┌──────────────────────────────────┐  │  │
 │  │  │ RequestContextMiddleware  ← Step 2：发请求 ID、记访问日志 │
-│  │  │  ┌────────────────────────────┐  │  │  │
-│  │  │  │ FastAPI 路由（/chat 等）    │  │  │  │
-│  │  │  │   → orchestrator            │  │  │  │
-│  │  │  │   → retriever → generator   │  │  │  │
-│  │  │  └────────────────────────────┘  │  │  │
+│  │  │  ┌────────────────────────────────┐    │
+│  │  │  │ MaxBodySizeMiddleware          │    │  ← Step 9：body 太大就地拒绝
+│  │  │  │  ┌──────────────────────────┐  │    │
+│  │  │  │  │ FastAPI 路由（/chat 等）  │  │    │
+│  │  │  │  │   → orchestrator          │  │    │
+│  │  │  │  │   → retriever → generator │  │    │
+│  │  │  │  └──────────────────────────┘  │    │
+│  │  │  └────────────────────────────────┘    │
 │  │  └──────────────────────────────────┘  │  │
 │  └────────────────────────────────────────┘  │
 └──────────────────────────────────────────────┘
@@ -96,8 +102,11 @@ uvicorn（网络服务器）           把网络字节翻译成 Python 能用的
   路由 → RAG 管道);响应再从里往外一层层穿回去。
 - **中间件是"必经的关卡"**,不是业务本身。每一层在请求进、出时顺手做一件横切的
   事(加个头、记条日志、检查一下),做完把请求递给下一层。
-- **Step 2/3/4 做的三个中间件,就是往这张洋葱图里加的三层关卡**。本文后面每个
-  Step,其实就是在讲"这一层关卡具体做什么、怎么做"。
+- **Step 2/3/4/9 做的四个中间件,就是往这张洋葱图里加的四层关卡**。本文后面每个
+  Step,其实就是在讲“这一层关卡具体做什么、怎么做”。
+- **一层关卡在洋葱的哪一圈,决定了它自己产生的响应会被谁加工。** 最里面那层挡下
+  的请求,出去时还要穿过外面所有层;最外面那层挡下的请求,里面的层谁都碰不到它。
+  [Step 9](#step-9请求体大小上限) 一开始就是栽在这一点上。
 
 基础知识就按这张图的两个方向来讲:先讲**请求怎么在这些层里流动**(Web 管道),
 再讲**流动过程中怎么把事情记下来**(日志),最后讲**怎么让同一次请求的每条日志
@@ -422,7 +431,51 @@ RetrievalUnavailableError → RAGServiceError → RuntimeError → Exception →
 - **"注册顺序无关"**:处理器谁先注册、谁后注册都不影响结果,因为框架比的是"在 MRO
   链上离异常多近",而不是"谁先登记"。距离由**类继承关系**决定,与代码顺序无关。
 
-这条机制是 Step 6 能"加一个 `Exception` 兜底网、又不误伤已有具体处理器"的保证。
+这条机制是 Step 6 能“加一个 `Exception` 兜底网、又不误伤已有具体处理器”的保证。
+
+#### 7b. 同一条机制的反面:注册在子类上,接不住父类
+
+上面那棵树只画了 `RAGServiceError` 这一枝。框架自己抛的异常在**另一枝**上,而那一枝
+有一个陷阱:
+
+```
+Exception
+├── RuntimeError
+│   └── RAGServiceError …                    （上面那棵树）
+│
+└── starlette.exceptions.HTTPException        ← 路由没匹配上时，Starlette 抛的是它
+    ├── fastapi.HTTPException                 ← 业务代码 raise 的是它
+    │   └── RequestBodyTooLargeError          （Step 9）
+    └── RateLimitExceeded                     （slowapi，Step 5）
+```
+
+**两个 `HTTPException` 是不同的类**,FastAPI 那个是 Starlette 那个的子类。日常写
+`raise HTTPException(...)` 用的是 FastAPI 版;但**路由找不到(404)和方法不对(405)
+时,Starlette 抛的是它自己的基类版**。
+
+把处理器注册在 FastAPI 那个子类上,会发生什么?回到基础 7 的规则:**框架查的是"被
+抛出的那个异常"的 MRO**。
+
+```
+抛 fastapi.HTTPException   → MRO: [fastapi.HTTPException, starlette.HTTPException, …]
+                              注册在子类上 → 第一站就命中 ✅
+
+抛 starlette.HTTPException → MRO: [starlette.HTTPException, Exception, …]
+                              注册在子类上 → 子类根本不在这条链上 ❌
+```
+
+**父类的 MRO 里不会出现子类。** 所以 404 / 405 会一路退到 Starlette 的默认处理器,
+继续返回 `{"detail": ...}` —— 而且不报错,只是悄悄不统一。
+
+正确做法是**注册在基类上**:子类继承基类,一次注册两边都覆盖。
+
+**那 429 会不会被抢走?** `RateLimitExceeded` 也继承自这个基类。不会 —— 还是基础 7
+那条规则:它自己的类在自己的 MRO 里排第一,所以它专属的处理器先命中,`429` 保持
+`rate_limited` 而不会变成从状态描述派生的 `too_many_requests`。
+
+> **这一节是事后补的。** [Step 8](#step-8统一错误响应契约) 第一版就注册在了子类上,
+> 404 / 405 因此漏网 —— 基础 7 的原理完全预言了这件事,只是上面那棵树没画到出事的
+> 那一枝。
 
 ---
 
@@ -811,24 +864,177 @@ log 正常、启动日志保留 —— 已实测通过(见[完成情况](#完成
 
 ---
 
+## Step 8:统一错误响应契约
+
+**文件**:[app/main.py](../../../app/main.py) 加两个处理器;
+[app/api/deps.py](../../../app/api/deps.py) 去掉响应里的异常原文。
+
+> 前置基础:[7. 框架按继承链(MRO)挑异常处理器](#7-框架按继承链mro挑异常处理器)、
+> [7b. 注册在子类上，接不住父类](#7b-同一条机制的反面注册在子类上接不住父类)。
+
+### 要解决什么
+
+[Step 6](#step-6兜底异常处理器) 给“没人认领的异常”加了兜底，但它只管 `Exception`
+那一枝。还有一整枝走的是**框架自带的处理器**，格式完全不同：
+
+| 触发 | 加固前的响应体 |
+|---|---|
+| 字段校验失败 `422` | `{"detail":[{…, "input": <把你发来的内容原样吐回去>}]}` |
+| API key 缺失/错误 `401` | `{"detail": "…"}` |
+| orchestrator 构建失败 `503` | `{"detail": "RAG service is unavailable: <异常原文>"}` |
+
+两类问题：
+
+1. **格式不统一。** README 承诺的是 `{"error": {code, message}}`，但只有自定义处理器
+   守约。前端得写两套解析。
+2. **两处泄漏。** 422 把请求体 **1:1** 回显（实测 2MB 进、2MB 出）；503 把异常原文
+   吐出去，而那段文本可能包含数据库连接串、主机名、驱动栈信息 —— 正好违反同一句
+   README 里“internal details kept in the logs only”的承诺。
+
+### 设计
+
+三件事：注册一个 `RequestValidationError` 处理器接管 422、注册一个 `HTTPException`
+处理器接管 401/503/404/405、`deps.py` 的 503 改成只记日志。
+
+**422 用白名单过滤，不用黑名单。** 要丢掉的是 `input`，但写法是**只保留
+`loc`/`msg`/`type`**，而不是“删掉 `input`”。差别在将来：pydantic 若往错误对象里
+加一个同样携带输入片段的新字段，黑名单会漏，白名单不会。
+
+**错误码从 HTTP 状态描述派生，不维护映射表。** `401 Unauthorized` → `unauthorized`，
+`503 Service Unavailable` → `service_unavailable`。加新状态码不用改代码。
+
+**`deps.py` 的 503 只留固定文案**，异常走 `logger.exception`。这与 Step 6 是同一条
+原则：**内部记全，对外说少**。
+
+### 那个不显然的坑
+
+处理器一开始注册在了 `fastapi.HTTPException` 上，于是 404 / 405 漏网 —— 完整解释见
+[基础 7b](#7b-同一条机制的反面注册在子类上接不住父类)。结论是注册在 **Starlette 的
+基类**上。
+
+### 测试怎么测才有意义
+
+422 那条测试不只断言响应体的形状，而是直接断言**那 4001 个字符没有出现在响应文本
+里**；`deps.py` 那条专门造一个 `RuntimeError("postgresql://user:secret@…")`，断言
+`secret` 和主机名都不在响应里。
+
+**形状对不代表没泄漏 —— 断言要对着真正在意的那件事写。**
+
+404 / 405 各有一条测试。它们是哨兵：把注册改回子类，**正好这两条红、其余全绿**。
+
+---
+
+## Step 9:请求体大小上限
+
+**文件**:[app/core/middleware.py](../../../app/core/middleware.py) 加
+`MaxBodySizeMiddleware`；[app/main.py](../../../app/main.py) 注册它和对应的处理器。
+
+> 前置基础:[1. ASGI 三件套:scope / receive / send](#1-asgi-三件套scope--receive--send)、
+> [2. 中间件的位置与洋葱结构](#2-中间件的位置与洋葱结构)。
+
+### 要解决什么
+
+FastAPI 处理一个请求的实际顺序是：
+
+```
+读 body → 解析 JSON → 跑依赖（鉴权） → 校验字段 → 进端点函数（限流装饰器在这一层）
+```
+
+**鉴权排在读 body 和解析 JSON 的后面。** 后果是：一个**不带任何凭证**的请求方，可以
+让服务端把任意大的 body 完整读进内存、JSON 解析完，**然后才收到 401**。
+
+`ChatRequest` 上那些 `Field(max_length=…)` 管不到这里 —— 它们在解析之后才跑，
+**在设计上就够不着**。uvicorn 默认也不限请求体大小。
+
+### 设计
+
+加一层 ASGI 中间件，在 body 被读取之前就判断。两条路径：
+
+| 情况 | 做法 |
+|---|---|
+| 有 `Content-Length` 且超限 | **就地返回 413，下游一个都不调用** |
+| 没有 `Content-Length`（chunked） | 包住 `receive`，一边收一边累加字节数，超了立刻中断 |
+
+第二条是关键：chunked 请求事先不知道总大小，但**也不能为了拒绝它而先把 body 收完**
+—— 那正是要防的开销。所以边收边数，越线即停。
+
+阈值 `MAX_REQUEST_BODY_BYTES` 默认 512KB：字段上限合计约 90,000 字符，中文按 UTF-8
+3 字节/字符估，合法请求最大约 270KB，留一倍余量。它**每个请求实时从 settings 读**，
+不是构造时定死 —— 和 `chat_rate_limit()` 同一个套路，为的是测试能逐条改。
+
+### 为什么这个异常必须继承 `HTTPException`
+
+chunked 那条路是在 `receive` 里抛异常，而**那个 `receive` 是被 FastAPI 的 body 解析
+代码调用的**。那段代码把 `await request.body()` 包在一个 try/except 里，会把**任何
+其它异常**吞成一个笼统的 400 “There was an error parsing the body”，只给
+`HTTPException` 开了 `except HTTPException: raise` 的口子。
+
+继承普通 `Exception` 的话，413 会变成 400，而且没有任何报错说明为什么。
+
+### 一个排错了层的教训
+
+这一层最初放在洋葱的**最外圈**（`CORS` 之内）。理由是对的：放在 CORS 里面，413 才能
+带上 CORS 头。但只顾到了 CORS 那一层。
+
+问题出在 `Content-Length` 快路径 —— 它**就地返回、不调用下游**，于是响应从来没进过
+内层，出去时自然也不会穿过内层。而**安全头和请求 ID 都是在响应往外穿的时候贴上的**：
+
+```
+Content-Length 快路径 413：  4 个安全头全无，X-Request-ID 也没有
+chunked 流式 413：           都有
+普通 401：                   都有
+```
+
+同一个条件、两条路径，响应头不一样。而且这个 413 恰恰是**最容易被外部扫到**的响应
+之一 —— 发个大包就能触发，不需要任何凭证 —— 结果它成了全站唯一一个没穿安全外衣的
+响应。既有的“安全头出现在每个响应上”那条测试没覆盖 413，所以一直没发现。
+
+**修法是顺序，不是代码**：把它挪到四层的**最内圈**，外面还有安全头和请求 ID 等着
+它穿出去。
+
+**挪到最内圈不削弱保护**：所有中间件都排在路由之前，所以它仍然在「找路由 → 解析
+JSON → 跑鉴权」之前拦截，body 照样一个字节都不读。多穿过的那两层只贴响应头。
+
+> 这条教训可以一般化：**一层关卡能不能“就地返回”，决定了它必须放在哪一圈。**
+> 会就地返回的层，所有需要加工它响应的层都必须在它**外面**。
+
+### 两条路径必须给出同一个错误码
+
+`Content-Length` 快路径在中间件里直接构造响应，写死 `payload_too_large`；chunked
+那条走的是专属处理器。**这个专属处理器是承重的**：没有它，[Step 8](#step-8统一错误响应契约)
+的通用处理器会接管，从状态描述派生出 `request_entity_too_large` —— 同一个条件的两条
+路径会返回不同的码。两条测试都断言完整响应体，把这件事钉住了。
+
+---
+
 ## 中间件注册顺序(总览)
 
 **Starlette 规则:最后 `add_middleware()` 的调用变成最外层**(请求最先经过,响应
 最后经过)。当前:
 
 ```python
-app.add_middleware(RequestContextMiddleware)    # 先加 → 内层
+app.add_middleware(MaxBodySizeMiddleware)       # 先加 → 最内层
+app.add_middleware(RequestContextMiddleware)    # 内层
 app.add_middleware(SecurityHeadersMiddleware)   # 中层
 app.add_middleware(CORSMiddleware, ...)         # 最后加 → 最外层
 ```
 
-最终层次(外 → 内):**CORS > SecurityHeaders > RequestContext**,正是
+最终层次(外 → 内):**CORS > SecurityHeaders > RequestContext > MaxBodySize**,正是
 [开头那张洋葱图](#先看全局一次请求的旅程)的层次。
 
 - **CORS 最外层**:预检 `OPTIONS` 应被尽早拦下直接回复,不该穿进内层走业务;且
   CORS 头要加在所有响应上(含错误响应)。
-- **SecurityHeaders 靠外**:安全头应尽量靠外,连"请求还没进内层就出错"的错误
+- **SecurityHeaders 靠外**:安全头应尽量靠外,连“请求还没进内层就出错”的错误
   响应也能带上安全头。
+- **MaxBodySize 最内层**:它是四层里唯一会**就地返回**的(`Content-Length` 超限时
+  直接回 413,下游一个都不调用),所以**所有需要加工它响应的层都必须在它外面** ——
+  放最外层的话,那个 413 会没有安全头、也没有 `X-Request-ID`。放最内层不削弱它:
+  中间件全都排在路由之前,body 照样一个字节都不读。详见
+  [Step 9](#step-9请求体大小上限)。
+
+> **一条可以一般化的判据:一层关卡会不会“就地返回”,决定了它必须放在哪一圈。**
+> 只做“加工响应”的层(安全头、CORS、请求 ID)应该靠外;会短路返回的层应该靠内,
+> 好让外面的加工层还能作用到它身上。
 
 `main.py` 里对这条反直觉的规则写了注释,防止后续新增 middleware 时被悄悄打乱。
 
@@ -902,14 +1108,17 @@ Postgres + pgvector,本地用容器里的独立 `testdb` 跑,CI 用其专用 `te
 
 ## 完成情况与后续
 
-「保护 `/chat`」这项工作(ROADMAP_platform 第 1 项)的 8 步**全部完成并验证**:
+「保护 `/chat`」这项工作(ROADMAP_platform 第 1 项):
 
 - Step 1–6:结构化日志、request_id 中间件、安全头、CORS、限流、兜底异常处理。
 - Step 7:两个 Dockerfile 的 uvicorn 加 `--no-access-log`,stdout 只保留结构化
   JSON —— 已在真实容器里验证(纯文本访问行 0 条,JSON access log 正常)。
-- Step 8:手动端到端验证 —— 对真实 `docker compose` 容器过了一遍 `/health`、
+- 验收:手动端到端验证 —— 对真实 `docker compose` 容器过了一遍 `/health`、
   `/ready`、安全头、`X-Request-ID`、CORS、`/chat` 鉴权;限流 429 由单元 + 集成
   测试覆盖。
+- Step 8–9:统一错误响应契约、请求体大小上限 —— 这两步来自 issue #79,是把“请求被
+  拒绝时到底发生了什么”这条路径补完:Step 1–7 管的是请求**被接受**之后的可观测性
+  与安全,Step 8–9 管的是**被拒绝**时的格式一致性和拒绝成本。
 
 后续步骤见 [ROADMAP_platform.md](../../roadmap/ROADMAP_platform.md):模型交付可预测化(第 2 项)、
 持久化存储(第 3 项)、容器加固(non-root、固定基础镜像、锁依赖、瘦身)、以及

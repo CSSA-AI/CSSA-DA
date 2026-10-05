@@ -58,7 +58,7 @@ v1「能跑」这个里程碑
 |---|---|---|
 | 代码版本 | git tag | ❌ **仓库里零个 tag** |
 | 制品版本 | 镜像 tag = git sha(immutable) | 📋 已计划 |
-| API 契约版本 | `/v1/chat` | ❌ 没有 —— **v1 窗口期** |
+| API 契约版本 | `/v1/chat` | ✅ 已有(2026-08-20,#73) |
 | 数据版本 | 语料 `sha256` | ✅ 已设计 |
 
 第四种你们**已经做对了**(`corpus_sha256`、`data/eval/v1/` 递增保留、报告必须带
@@ -101,8 +101,15 @@ v1,**应该现在就派人去做**。但它已经不是 v2 的唯一入口 —�
 ### Platform
 
 - [ ] Phase 2 全部:IaC(VPC/SG/ECR/ECS/ALB/RDS/Secrets/CloudWatch/IAM)、部署、smoke test
-- [ ] 第 8 项 ECS/ALB health check 配置
-- [ ] 第 11 项 migration 部署关卡
+      —— **括号里那些已落地(2026-09-17,#111)**,公网 URL 上 `/v1/chat` 能答。
+      整条**不勾**:Phase 2 第 4 步(migration 部署关卡,即第 11 项)还没做
+- [x] 第 8 项 ECS/ALB health check 配置 —— **已落地(2026-09-17,#111)**:两层分开——
+      容器自查 `/health`(进程活着),ALB 目标组查 `/ready`(答得了)。导语料前 ALB 先
+      指 `/health`,否则空库上 `/ready` 永远 503、流量一滴进不来;语料到位后切回
+- [ ] 第 11 项 migration 部署关卡 —— **并入 Phase 4(2026-09-22,#111)**:能跑的那半
+      已具备(`cssa-da-prod-migrate` 任务 + 退出码),但「绕不过去」要等 CI——只要还能
+      手敲 `terraform apply` 部署,本地脚本就只是默认做法、不是唯一做法。在那之前
+      [docs/deployment.md](../deployment.md) 是唯一的关卡
 - [ ] 第 12 项 outbound networking
 - [ ] 第 17 项 生产 RDS 配置
 - [ ] 第 14 项 资源基线(粗版,够填 task 规格即可)
@@ -112,7 +119,14 @@ v1,**应该现在就派人去做**。但它已经不是 v2 的唯一入口 —�
 - [x] 19.4 三道成本封顶 —— **三道齐了(2026-09-06)**:OpenAI 支出上限 ✅ /
       全局限流 ✅ / `/chat` 输入体积 ✅。19.8「v1 直连」的前提于此成立
 - [ ] **key 不进 commit** —— 交代给前端团队的一句话(仓库是 public,「不公开」这条路不存在)
-- [ ] **鉴权形状重构**(`Principal`)—— v1 唯一的代码活,纯重构、行为零变化,见 19.9
+- [x] **鉴权形状重构**(`Principal`)—— **已落地(2026-09-13,#96/#99)**:鉴权一次
+      解析出调用者,限流读这个结论而不再自己重读请求;行为零变化。设计见
+      [caller-identity.md](../design/implemented/caller-identity.md)
+- [x] **第 20 项 首次语料导入生产 RDS** —— **已落地(2026-09-17,#111)**:2312 行,
+      `/ready` 转 200。卡点(语料不在镜像里)用 S3 数据桶 + 预签名 URL 解决,容器
+      不需要任何新的 IAM 权限。**留一个已知缺陷**:语料里约 9% 是重复内容
+      (205 条 / 164 组),`(link, question_text)` 索引拦不住同内容不同 URL,
+      正在挤占检索名额 —— 属应用层,另开
 - [ ] **CORS 认真配** —— 直连之后它从摆设变成承重墙;部署那天配生产域名 + smoke test
       加正反两条断言
 
@@ -127,14 +141,20 @@ v1,**应该现在就派人去做**。但它已经不是 v2 的唯一入口 —�
 
 ### RAG
 
-- [ ] 0.1 doc_id 链路 ⏰ **唯一有硬截止的契约变更**
-- [ ] `/chat` → `/v1/chat`(与 doc_id 同一窗口 —— 现在没有消费者,成本最低)
+- [x] 0.1 doc_id 链路 —— **已落地(2026-08-25,#74)**:retriever 返回按源加前缀的
+      稳定 id,不再是每请求随机 UUID。这是 v1 唯一有硬截止的契约变更,已在窗口期内完成
+- [x] `/chat` → `/v1/chat` —— **已落地(2026-08-20,#73)**:趁没有消费者时改完,
+      API 契约版本这个坐标从此存在
 - [x] 0.3 `top_k` 调大 —— **已落地(2026-08-25):retriever 5 → 30、reranker 3 → 5**。终值仍待 Phase 5.6 的 Recall@k 曲线
 - [ ] 0.4 换 reranker(✅ 已定)
 - [x] 0.6 first-request 冷惩罚
-- [ ] 0.8 `/chat` 输入体积上限(两行)
+- [x] 0.8 `/chat` 输入体积上限 —— **已落地(2026-09-13,#98)**:body 上限在路由、
+      解析和鉴权之前就执行,拒绝路径不碰下游。见
+      [chat-api-hardening.md](../design/implemented/chat-api-hardening.md)
 - [ ] 3.1 拒答测试
-- [ ] 4.1 检索结果落结构化日志
+- [x] 4.1 检索结果落结构化日志 —— **已落地(2026-08-25,#83)**:每段记
+      doc_id / score / rank,query 原文不出仓。见
+      [retrieval-logging.md](../design/implemented/retrieval-logging.md)
 - [x] 4.5 `chat_interactions` 六列 + `BackgroundTasks` 写入
 
 ### 退出标准
@@ -397,6 +417,7 @@ Platform Phase 2。RAG 那几项加起来不到一周,**塞进 IaC 的等待窗�
 |---|---|
 | 1–7、9、10 | ✅ 已完成 |
 | 8 health check / 11 migration 关卡 / 12 outbound / 17 RDS | **v1** |
+| 20 首次语料导入生产 RDS | **v1** |
 | 14 资源基线 / 19 前端安全边界 | **v1** |
 | 16 精细化限流 | **v2** —— 与临时 token 同批(v1 直连,per-IP 仍有区分度) |
 | Phase 3 S3 pipeline | **v2** |

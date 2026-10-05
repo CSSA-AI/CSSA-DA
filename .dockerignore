@@ -32,3 +32,7 @@ data/*
 
 .DS_Store
 Microsoft
+
+# Terraform provider binaries (hundreds of MB) and state: infrastructure
+# description, never part of the application image.
+infra
