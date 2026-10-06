@@ -144,7 +144,7 @@ def transform_one(title: str, content: str) -> wechat_articles.WechatTransformRe
     [
         ("【CSSA活动】沙滩排球活动预告", "【CSSA活动】沙滩排球活动预告"),
         # title 里有零宽字符和连续空格,清洗后的正文里没有
-        ("【CSSA转发】​​ 两只国宝的梦幻联动！", "【CSSA转发】 两只国宝的梦幻联动！"),
+        ("【CSSA转发】\u200b\u200b 两只国宝的梦幻联动！", "【CSSA转发】 两只国宝的梦幻联动！"),
         ("【CSSA推荐】最高奖金五万元  全球短视频大赛", "【CSSA推荐】最高奖金五万元 全球短视频大赛"),
         # 正文里的方括号和下划线被 Markdown 转义
         ("[CSSA活动反馈] 电竞大赛：还想约电竞局？", "\\[CSSA活动反馈\\] 电竞大赛：还想约电竞局？"),
