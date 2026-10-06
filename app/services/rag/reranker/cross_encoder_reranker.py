@@ -3,9 +3,30 @@ from sentence_transformers import CrossEncoder
 from peft import PeftModel
 
 from app.core.config import rag_config
+from app.schemas.article import Article
 from app.schemas.search_result import SearchResult
 from app.services.rag.model_registry import model_registry
 from .base import BaseReranker
+
+
+def _document_text(article: Article) -> str:
+    """The text the cross-encoder scores: the title, then the body.
+
+    The transform stage stores the body without its title, and this string is
+    all the model reads, so the title is put back here. It is joined on with
+    nothing in between, because that is how every row read before that change
+    (cleaning removes the line breaks) and it is the input the rerankers were
+    chosen on. A separator is not neutral: see
+    docs/design/implemented/embedding-input-text.md before adding one.
+
+    Rows imported before the change still open with their title, bare or as
+    the "# title" heading the old transform added. Those pass through
+    unchanged, so deploying this ahead of a re-import alters nothing.
+    """
+    title = article.questions[0] if article.questions else ""
+    if not title or article.text.startswith((title, f"# {title}")):
+        return article.text
+    return f"{title}{article.text}"
 
 
 class CrossEncoderReranker(BaseReranker):
@@ -55,7 +76,10 @@ class CrossEncoderReranker(BaseReranker):
 
         top_k = top_k or rag_config["reranker"]["top_k"]
 
-        pairs = [(query, result.article.text) for result in search_results]
+        pairs = [
+            (query, _document_text(result.article))
+            for result in search_results
+        ]
         scores = self.model.predict(pairs)
 
         # ⚠️ 不直接改原对象（推荐）

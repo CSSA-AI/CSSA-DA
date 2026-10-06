@@ -151,10 +151,12 @@ class TestCrossEncoderRerankerUnit(unittest.TestCase):
             top_k=2,
         )
 
+        # Each title is joined straight onto its text. The second article's
+        # text already opens with its title, so that one is not repeated.
         mock_model.predict.assert_called_once_with([
-            ("visa requirement", "Student visa application info"),
+            ("visa requirement", "student visaStudent visa application info"),
             ("visa requirement", "485 visa requirements info"),
-            ("visa requirement", "Working holiday visa guide"),
+            ("visa requirement", "working holidayWorking holiday visa guide"),
         ])
 
         self.assertEqual(len(results), 2)
@@ -217,6 +219,56 @@ class TestCrossEncoderRerankerUnit(unittest.TestCase):
             [result.rank for result in self.search_results],
             original_ranks,
         )
+
+    def scored_texts(self, *articles):
+        """The document text the cross-encoder was handed for each article."""
+        mock_model = self.shared_reranker_model
+        mock_model.predict.return_value = [0.0] * len(articles)
+
+        CrossEncoderReranker().rerank(
+            query="沙滩排球什么时候",
+            search_results=[
+                SearchResult(article=article, score=0.0, rank=rank)
+                for rank, article in enumerate(articles, start=1)
+            ],
+        )
+
+        return [text for _, text in mock_model.predict.call_args.args[0]]
+
+    def test_rerank_reads_the_title_ahead_of_the_body(self):
+        # The transform stage stores the body without its title, and the
+        # cross-encoder sees nothing but this string. Nothing separates the
+        # two: that is the text every row had before the transform changed.
+        texts = self.scored_texts(
+            Article(
+                text="就在 3月28日，CSSA 将带来一场沙滩排球友谊赛",
+                questions=["【CSSA活动】沙滩排球活动预告"],
+            ),
+        )
+
+        self.assertEqual(
+            texts,
+            ["【CSSA活动】沙滩排球活动预告就在 3月28日，CSSA 将带来一场沙滩排球友谊赛"],
+        )
+
+    def test_rerank_does_not_repeat_a_title_the_body_opens_with(self):
+        # Rows imported before the transform change still carry their title,
+        # either bare or as the "# title" heading the old transform added.
+        title = "【CSSA活动】沙滩排球活动预告"
+        bare = f"{title}就在 3月28日"
+        heading = f"# {title}\n\n就在 3月28日"
+
+        texts = self.scored_texts(
+            Article(text=bare, questions=[title]),
+            Article(text=heading, questions=[title]),
+        )
+
+        self.assertEqual(texts, [bare, heading])
+
+    def test_rerank_reads_the_body_alone_when_there_is_no_title(self):
+        texts = self.scored_texts(Article(text="就在 3月28日", questions=[]))
+
+        self.assertEqual(texts, ["就在 3月28日"])
 
 
 if __name__ == "__main__":
