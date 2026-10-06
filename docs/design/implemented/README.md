@@ -14,6 +14,7 @@ code, it is worse than no document.
 | [retrieval-logging.md](retrieval-logging.md) | What the RAG pipeline logs per stage, and why no user content goes to CloudWatch |
 | [startup-and-readiness.md](startup-and-readiness.md) | What the app does before it accepts traffic: preload, model warm-up, liveness vs readiness, connection timeouts |
 | [database-migrations.md](database-migrations.md) | Why a rollback cannot undo a migration, the two-deploy expand/contract sequences, and the locking axis this rule does not cover |
+| [embedding-input-text.md](embedding-input-text.md) | What text the embedding model, the reranker and the generator each read for one row; why the article title was encoded twice, where it is removed, and why a re-import then refreshes every vector |
 | [caller-identity.md](caller-identity.md) | How authentication decides who the caller is once, and how rate limiting reads that decision instead of re-reading the request |
 | [aws-foundation.md](aws-foundation.md) | Everything standing on AWS, from `terraform init` to a public URL: the VPC and its routing, NAT, remote state, ECR and image architecture, RDS, how secrets and config reach a container, the Fargate service, the load balancer, the data bucket, and how the schema and the corpus got into a database that has no public address — with the beginner-level networking, IAM and container-runtime background |
 | [deployment-packaging.md](deployment-packaging.md) | Dependency locking, slim multi-stage images |

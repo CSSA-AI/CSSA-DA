@@ -91,6 +91,47 @@ def clean_text(text: str | None) -> str:
     return text.strip()
 
 
+# 比较标题时忽略的字符。抓取到的正文以标题开头，但那一份标题和 title 字段不是
+# 逐字相同的：clean_text 会删掉零宽字符和星号、压缩空格，而抓取时的 Markdown
+# 转换会给方括号和下划线加上反斜杠。
+_IGNORED_IN_TITLE = frozenset('\\*\u200b\u200c\u200d\u200e\u200f\ufeff')
+
+
+def _is_significant(char: str) -> bool:
+    return not char.isspace() and char not in _IGNORED_IN_TITLE
+
+
+def _strip_title_once(title: str, text: str) -> str | None:
+    """text 以 title 开头时返回标题之后的部分，否则返回 None。"""
+    expected = [char for char in title if _is_significant(char)]
+    if not expected:
+        return None
+
+    matched = 0
+    for index, char in enumerate(text):
+        if not _is_significant(char):
+            continue
+        if char != expected[matched]:
+            return None
+        matched += 1
+        if matched == len(expected):
+            return text[index + 1:].lstrip()
+    return None
+
+
+def strip_leading_title(title: str, text: str) -> str:
+    """
+    去掉正文开头的标题，写了几遍去几遍。
+
+    标题存在 question_text 里，嵌入时会拼在正文前面。正文如果自己也以标题开头，
+    标题就被编码了两次，而嵌入模型只读开头 128 个 token。
+    见 docs/design/implemented/embedding-input-text.md。
+    """
+    while (rest := _strip_title_once(title, text)) is not None:
+        text = rest
+    return text
+
+
 def transform_articles(
     raw_articles: list[dict[str, Any]],
     *,
@@ -115,19 +156,17 @@ def transform_articles(
         cleaned_content = clean_text(raw_content)
         cleaned_char_count += len(cleaned_content)
         
-        # 二次质量检验: 如果砍掉模板和乱码后，正文所剩无几，直接抛弃
-        if len(re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', cleaned_content)) < 30:
+        body = strip_leading_title(title, cleaned_content)
+
+        # 二次质量检验: 如果砍掉模板和乱码后，正文所剩无几，直接抛弃。
+        # 只数正文: 连标题一起数的话，一篇只有标题的图片转发也能过关
+        if len(re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', body)) < 30:
             dropped_count += 1
             continue
 
-        if not cleaned_content.startswith(title) and not cleaned_content.startswith(f"# {title}"):
-            full_text = f"# {title}\n\n{cleaned_content}"
-        else:
-            full_text = cleaned_content
-
         rag_item = {
             "question_text": title,
-            "content": full_text,
+            "content": body,
             "source": "WeChat: 墨大中国学生会",
             "author": None,
             "post_date": item.get("date", "1970-01-01"),
